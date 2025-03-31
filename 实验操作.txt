@@ -1,0 +1,35 @@
+git 端cmake编译
+cmake -S . -B build -G"Visual Studio 17 2022"
+
+$ cmake --build build --config Debug
+
+
+HLSL编译 命令行使用python
+python .\compileshaders.py
+
+
+radiance
+
+
+constent buffer  对应于opengl中的uniform buffer
+创建流程，更新流程，map流程，map更新流程，对齐，绑定流程，绑定drawcall
+
+drawcall中是好多球，画成一个平面
+spot light 最好换成平面光
+
+
+	float radiance=0;
+    float3 lightVec = uboParams.lights[i].position.xyz - input.WorldPos;
+    float distance = length(lightVec);
+    float radius = uboParams.lights[i].colorAndRadius.w;
+    // 半径范围裁剪
+    if (distance > radius) {
+       radiance=0;
+    }
+    // 计算衰减
+    float attenuation = pow((1.0 - (distance / radius)), 2.0);
+     radiance =  attenuation;
+    // 后续PBR计算...
+    Lo*=radiance;
+
+
