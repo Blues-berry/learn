@@ -2,10 +2,9 @@
 
 struct VSOutput
 {
-[[vk::location(0)]] float3 WorldPos : POSITION0;
-[[vk::location(1)]] float3 Normal : NORMAL0;
+[[vk::location(0)]] float3 WorldPos : POSITION0;  // 世界空间位置
+[[vk::location(1)]] float3 Normal : NORMAL0;      // 法线
 };
-
 struct UBO
 {
 	float4x4 projection;
@@ -14,13 +13,13 @@ struct UBO
 	float3 camPos;
 };
 
-cbuffer ubo : register(b0) { UBO ubo; }
+cbuffer ubo : register(b0) { UBO ubo; }  // 绑定到寄存器 b0
 
 struct Light {
 	float4 position;
 	float4 colorAndRadius;
-	float4 padding1;
-	float4 padding2;
+	float4 direction;
+	float4 cutOff;
 };
 
 struct UBOShared {
@@ -30,14 +29,13 @@ struct UBOShared {
 cbuffer uboParams : register(b1) { UBOShared uboParams; };
 
 struct PushConsts {
-[[vk::offset(12)]] float roughness;
-[[vk::offset(16)]] float metallic;
-[[vk::offset(20)]] float r;
-[[vk::offset(24)]] float g;
-[[vk::offset(28)]] float b;
+[[vk::offset(12)]] float roughness;  // 粗糙度
+[[vk::offset(16)]] float metallic;   // 金属度
+[[vk::offset(20)]] float r;          // 红色分量
+[[vk::offset(24)]] float g;          // 绿色分量
+[[vk::offset(28)]] float b;          // 蓝色分量
 };
-
-[[vk::push_constant]] PushConsts material;
+[[vk::push_constant]] PushConsts material;  // 定义推送常量
 
 static const float PI = 3.14159265359;
 
@@ -113,20 +111,52 @@ float3 BRDF(float3 L, float3 V, float3 N, float metallic, float roughness)
 
 	return color;
 }
-
-
+/*
+// calculates the color when using a spot light.
+float3 CalcSpotLight(SpotLight light, vec3 normal, vec3 fragPos, vec3 viewDir)
+{
+    vec3 lightDir = normalize(light.position - fragPos);
+    // diffuse shading
+    float diff = max(dot(normal, lightDir), 0.0);
+    // specular shading
+    vec3 reflectDir = reflect(-lightDir, normal);
+    float spec = pow(max(dot(viewDir, reflectDir), 0.0), material.shininess);
+    // attenuation
+    float distance = length(light.position - fragPos);
+    float attenuation = 1.0 / (light.constant + light.linear * distance + light.quadratic * (distance * distance));    
+    // combine results
+    vec3 ambient = light.ambient * vec3(texture(material.diffuse, TexCoords));
+    vec3 diffuse = light.diffuse * diff * vec3(texture(material.diffuse, TexCoords));
+    vec3 specular = light.specular * spec * vec3(texture(material.specular, TexCoords));
+    ambient *= attenuation;
+    diffuse *= attenuation;
+    specular *= attenuation;
+    return (ambient + diffuse + specular);
+}
+*/
 float radiance(float radius, float3 lightVec, float3 N,float3 L )
 {
 	float distance=length(lightVec);
 // 半径范围裁剪
 	if(distance>radius) return 0.0;
 //计算衰减
-		float attenuation = pow(clamp(1.0-distance / radius,0.0,1.0), 5.0);
-		L=normalize(lightVec);
+		float attenuation = pow(clamp(1.0-distance / radius,0.0,1.0), 2.0);
 		float dotNL=max(dot(N,L),0.0);
 	return attenuation*dotNL;
 
 
+}
+float spotlight(int i,float3 L)//i=lightindex
+
+{
+        float3 lightDir = normalize(-uboParams.lights[i].direction.xyz);  // 光源方向
+        float theta = dot(L, lightDir);  // 光向量与光源方向的夹角余弦
+        // 定义内锥角和外锥角（以弧度为单位）
+        float cutOff = uboParams.lights[i].cutOff.x;      // 内锥角，例如 12.5°
+        float outerCutOff =uboParams.lights[i].cutOff.y; // 外锥角，例如 17.5°
+        float epsilon = cutOff - outerCutOff;   // 内、外锥角差值
+        float spotlight_intensity = pow(clamp((theta - outerCutOff) / epsilon, uboParams.lights[i].cutOff.z, 1.0),int(uboParams.lights[i].cutOff.w));  // 计算强度
+return spotlight_intensity;
 }
 
 
@@ -146,18 +176,49 @@ float4 main(VSOutput input) : SV_TARGET
 	// Specular contribution
 	float3 Lo = float3(0.0, 0.0, 0.0);
 
-for (int i = 0; i < 4; i++) {
+for (int i = 0; i < 3; i++) {
     float3 lightVec = uboParams.lights[i].position.xyz - input.WorldPos;
     float3 L = normalize(lightVec);
     float radianceFactor = radiance(
         uboParams.lights[i].colorAndRadius.w, lightVec, N, L
     );
     
-    // 传递光源颜色到BRDF是
-    float3 lightColor = uboParams.lights[i].colorAndRadius.xyz;
-    Lo += BRDF(L, V, N, material.metallic, roughness) * lightColor * radianceFactor;
-}
+/*	//spot light
+// Spot light for the 4th light (index 3)
+    if (i == 3) {
+        float3 lightDir = normalize(-uboParams.lights[i].direction.xyz);  // 光源方向
+        float theta = dot(L, lightDir);  // 光向量与光源方向的夹角余弦
+        
+        // 定义内锥角和外锥角（以弧度为单位）
+        float cutOff = uboParams.lights[i].cutOff.x;      // 内锥角，例如 12.5°
+        float outerCutOff =uboParams.lights[i].cutOff.y; // 外锥角，例如 17.5°
+        float epsilon = cutOff - outerCutOff;   // 内、外锥角差值
+        float intensity = pow(clamp((theta - outerCutOff) / epsilon, uboParams.lights[i].cutOff.z, 1.0),int(uboParams.lights[i].cutOff.w));  // 计算强度
+	    // 传递光源颜色到BRDF是
+		float3 lightColor = uboParams.lights[i].colorAndRadius.xyz;
+    Lo += BRDF(L, V, N, material.metallic, roughness) * lightColor * radianceFactor*intensity;
+	//Lo += lightColor *intensity;
+	}
 
+    // 传递光源颜色到BRDF是
+	else{
+	float3 lightColor = uboParams.lights[i].colorAndRadius.xyz;
+    Lo += BRDF(L, V, N, material.metallic, roughness) * lightColor * radianceFactor;
+	}
+*/
+
+	float3 lightColor = uboParams.lights[i].colorAndRadius.xyz;
+    Lo += BRDF(L, V, N, material.metallic, roughness) * lightColor * radianceFactor;
+
+}
+// spot light
+    float3 lightVec = uboParams.lights[3].position.xyz - input.WorldPos;
+    float3 L = normalize(lightVec);
+    float radianceFactor = radiance(
+        uboParams.lights[3].colorAndRadius.w, lightVec, N, L
+    );
+	float3 lightColor = uboParams.lights[3].colorAndRadius.xyz;
+    Lo +=  lightColor * radianceFactor*spotlight(3,L);
 	// Combine with ambient
 	float3 color = materialcolor() * 0.02;
 	color += Lo;
