@@ -17,6 +17,7 @@ struct Material {
 		float roughness;
 		float metallic;
 		float r, g, b;
+
 	} params{};
 	std::string name;
 	Material() {};
@@ -178,8 +179,8 @@ public:
 					glm::vec3 pos = glm::vec3(float(x - (gridSize / 2.0f)) * 2.5f, 0.0f, float(y - (gridSize / 2.0f)) * 2.5f);  // 计算物体位置
 					vkCmdPushConstants(drawCmdBuffers[i], pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::vec3), &pos);  // 推送位置常量到顶点着色器
 					// Vary metallic and roughness, two important PBR parameters
-					//mat.params.metallic = glm::clamp((float)x / (float)(gridSize - 1), 0.1f, 1.0f);  // 根据 X 坐标调整金属度
-					//mat.params.roughness = glm::clamp((float)y / (float)(gridSize - 1), 0.05f, 1.0f);  // 根据 Y 坐标调整粗糙度
+					mat.params.metallic = glm::clamp((float)x / (float)(gridSize - 1), 0.1f, 1.0f);  // 根据 X 坐标调整金属度
+					mat.params.roughness = glm::clamp((float)y / (float)(gridSize - 1), 0.05f, 1.0f);  // 根据 Y 坐标调整粗糙度
 					vkCmdPushConstants(drawCmdBuffers[i], pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(glm::vec3), sizeof(Material::PushBlock), &mat);  // 推送材质参数到片段着色器
 					models.objects[models.objectIndex].draw(drawCmdBuffers[i]);  // 绘制当前模型
 				}
@@ -401,8 +402,6 @@ VK_CHECK_RESULT：宏，用于检查Vulkan函数调用是否成功，若失败则抛出异常。
 		uboParams.lights[1].position = glm::vec4(-p * 2.5f, -p*0.5f,  p, 1.0f);  // 设置光源 1 位置
 		uboParams.lights[2].position = glm::vec4( p*0.5f, -p*0.5f,  p*0.5f, 1.0f);  // 设置光源 2 位置
 		uboParams.lights[3].position = glm::vec4(0.f, -p*0.5f, 0.f, 1.0f);  // 设置光源 3 位置
-
-
 
 		uboParams.lights[0].colorAndRadius = glm::vec4(1.f, 0.f, 0.f, 15.1f);  // 光源 0：红色，半径 30.1
 		uboParams.lights[1].colorAndRadius = glm::vec4(0.f, 1.f, 0.f, 15.1f);  // 光源 1：绿色
