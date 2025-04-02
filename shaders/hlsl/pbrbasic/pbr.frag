@@ -55,6 +55,8 @@ float D_GGX(float dotNH, float roughness)
 	return (alpha2)/(PI * denom*denom);
 }
 
+
+
 // Geometric Shadowing function --------------------------------------
 float G_SchlicksmithGGX(float dotNL, float dotNV, float roughness)
 {
