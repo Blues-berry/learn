@@ -182,6 +182,8 @@ void VulkanExampleBase::createCommandBuffers()
 	drawCmdBuffers.resize(swapChain.images.size());
 	VkCommandBufferAllocateInfo cmdBufAllocateInfo = vks::initializers::commandBufferAllocateInfo(cmdPool, VK_COMMAND_BUFFER_LEVEL_PRIMARY, static_cast<uint32_t>(drawCmdBuffers.size()));
 	VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, drawCmdBuffers.data()));
+
+	//可以创建多个并行 cpu和 gpu同步的
 }
 
 void VulkanExampleBase::destroyCommandBuffers()

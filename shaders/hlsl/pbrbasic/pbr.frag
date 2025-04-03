@@ -184,31 +184,6 @@ for (int i = 0; i < 3; i++) {
     float radianceFactor = radiance(
         uboParams.lights[i].colorAndRadius.w, lightVec, N, L
     );
-    
-/*	//spot light
-// Spot light for the 4th light (index 3)
-    if (i == 3) {
-        float3 lightDir = normalize(-uboParams.lights[i].direction.xyz);  // 光源方向
-        float theta = dot(L, lightDir);  // 光向量与光源方向的夹角余弦
-        
-        // 定义内锥角和外锥角（以弧度为单位）
-        float cutOff = uboParams.lights[i].cutOff.x;      // 内锥角，例如 12.5°
-        float outerCutOff =uboParams.lights[i].cutOff.y; // 外锥角，例如 17.5°
-        float epsilon = cutOff - outerCutOff;   // 内、外锥角差值
-        float intensity = pow(clamp((theta - outerCutOff) / epsilon, uboParams.lights[i].cutOff.z, 1.0),int(uboParams.lights[i].cutOff.w));  // 计算强度
-	    // 传递光源颜色到BRDF是
-		float3 lightColor = uboParams.lights[i].colorAndRadius.xyz;
-    Lo += BRDF(L, V, N, material.metallic, roughness) * lightColor * radianceFactor*intensity;
-	//Lo += lightColor *intensity;
-	}
-
-    // 传递光源颜色到BRDF是
-	else{
-	float3 lightColor = uboParams.lights[i].colorAndRadius.xyz;
-    Lo += BRDF(L, V, N, material.metallic, roughness) * lightColor * radianceFactor;
-	}
-*/
-
 	float3 lightColor = uboParams.lights[i].colorAndRadius.xyz;
     Lo += BRDF(L, V, N, material.metallic, roughness) * lightColor * radianceFactor;
 

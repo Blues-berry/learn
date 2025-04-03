@@ -17,6 +17,15 @@ constent buffer  对应于opengl中的uniform buffer
 drawcall中是好多球，画成一个平面
 spot light 最好换成平面光
 
+50 个 光源 均匀分布小区域
+
+uniform buffer
+数据的索引关系，索引链表，数据结构
+写个博客
+整理成一个流程文档
+
+
+
 
 	float radiance=0;
     float3 lightVec = uboParams.lights[i].position.xyz - input.WorldPos;

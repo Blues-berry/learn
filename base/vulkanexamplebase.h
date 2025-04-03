@@ -104,6 +104,7 @@ protected:
 	std::vector<std::string> supportedInstanceExtensions;
 	// Physical device (GPU) that Vulkan will use
 	VkPhysicalDevice physicalDevice{ VK_NULL_HANDLE };
+	//物理GPU 自动获得
 	// Stores physical device properties (for e.g. checking device limits)
 	VkPhysicalDeviceProperties deviceProperties{};
 	// Stores the features available on the selected physical device (for e.g. checking if a feature is available)
@@ -119,6 +120,7 @@ protected:
 	void* deviceCreatepNextChain = nullptr;
 	/** @brief Logical device, application's view of the physical device (GPU) */
 	VkDevice device{ VK_NULL_HANDLE };
+	// 几乎可以等同于physicalDevice
 	// Handle to the device graphics queue that command buffers are submitted to
 	VkQueue queue{ VK_NULL_HANDLE };
 	// Depth buffer format (selected during Vulkan initialization)

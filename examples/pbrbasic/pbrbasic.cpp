@@ -243,7 +243,7 @@ public:
 		// 3 Set // 分配描述符集
 		VkDescriptorSetAllocateInfo allocInfo = vks::initializers::descriptorSetAllocateInfo(descriptorPool, &descriptorSetLayout, 1);
 		VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSet));
-
+		//device 是gpu
 		/*
 		VkDescriptorSetAllocateInfo：描述符集分配信息。
 		descriptorPool：描述符池。
