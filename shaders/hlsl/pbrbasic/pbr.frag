@@ -1,4 +1,15 @@
 // Copyright 2020 Google LLC
+//const int numLights = 64; // 目标光源数量
+#define NUM_LIGHTS 64 // 定义光源数量为常量 
+#define CLUSTER_SIZE_X 16
+#define CLUSTER_SIZE_Y 16
+#define CLUSTER_SIZE_Z 16
+// C++ 端：集群的维度
+const uint32_t CLUSTER_SIZE_X = 16;  // 屏幕宽度方向的集群数
+const uint32_t CLUSTER_SIZE_Y = 16;  // 屏幕高度方向的集群数
+const uint32_t CLUSTER_SIZE_Z = 16;  // 深度方向的集群数
+const uint32_t TOTAL_CLUSTERS = CLUSTER_SIZE_X * CLUSTER_SIZE_Y * CLUSTER_SIZE_Z;
+
 
 struct VSOutput
 {
@@ -23,7 +34,11 @@ struct Light {
 };
 
 struct UBOShared {
-	Light lights[4];
+		Light lights[NUM_LIGHTS];         // 光源数组
+		uint32_t clusterLightCounts[TOTAL_CLUSTERS]; // 每个集群的光源数量
+		uint32_t clusterLightOffsets[TOTAL_CLUSTERS]; // 每个集群的偏移量
+		uint32_t lightIndexList[maxnumLights * TOTAL_CLUSTERS]; // 全局光源索引列表（假设每个集群最多影响所有光源）
+
 };
 
 cbuffer uboParams : register(b1) { UBOShared uboParams; };
@@ -178,7 +193,7 @@ float4 main(VSOutput input) : SV_TARGET
 	// Specular contribution
 	float3 Lo = float3(0.0, 0.0, 0.0);
 
-for (int i = 0; i < 3; i++) {
+for (int i = 0; i < NUM_LIGHTS; i++) {
     float3 lightVec = uboParams.lights[i].position.xyz - input.WorldPos;
     float3 L = normalize(lightVec);
     float radianceFactor = radiance(
@@ -189,6 +204,7 @@ for (int i = 0; i < 3; i++) {
 
 }
 // spot light
+/*
     float3 lightVec = uboParams.lights[3].position.xyz - input.WorldPos;
     float3 L = normalize(lightVec);
     float radianceFactor = radiance(
@@ -196,10 +212,11 @@ for (int i = 0; i < 3; i++) {
     );
 	float3 lightColor = uboParams.lights[3].colorAndRadius.xyz;
     Lo +=  lightColor * radianceFactor*spotlight(3,L);
+	*/
 	// Combine with ambient
 	float3 color = materialcolor() * 0.02;
 	color += Lo;
-
+	
 	// Gamma correct
 	color = pow(color, float3(0.4545, 0.4545, 0.4545));
 
