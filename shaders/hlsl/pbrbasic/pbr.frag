@@ -30,18 +30,18 @@ struct Light {
 
 cbuffer uboParams : register(b1) { // 光源数据缓冲区
     Light lights[NUM_LIGHTS];
-    float padding[1536]; // 填充对齐
+
 };
 
-// 删除原来的单独缓冲区定义
-// cbuffer clusterLightCounts : register(b2) { uint clusterLightCounts[TOTAL_CLUSTERS]; };
-// cbuffer clusterLightOffsets : register(b3) { uint clusterLightOffsets[TOTAL_CLUSTERS]; };
-
-cbuffer lightIndexList : register(b2) { // 调整绑定点，由于删除了 b2 和 b3，这里占用 b2
-    uint lightIndexList[LIGHT_INDEX_LIST_SIZE];
+struct Indices {
+    uint clusterIndexList;
+    float3 padding; // 填充以确保 16 字节对齐
 };
 
-// 合并后的集群数据缓冲区
+cbuffer clusterIndexList : register(b2) {
+    Indices clusterIndexList[LIGHT_INDEX_LIST_SIZE];
+};
+
 struct Cluster {
     uint counts;      // 光源数量
     uint offsets;     // 光源偏移
@@ -156,10 +156,10 @@ float4 main(VSOutput input) : SV_TARGET {
     float3 Lo = float3(0.0, 0.0, 0.0);
     if (lightCount > 0) {
         for (int i = lightOffset; i < lightOffset + lightCount; i++) {
-            float3 lightVec = lights[lightIndexList[i]].position.xyz - input.WorldPos;
+            float3 lightVec = lights[clusterIndexList[i].clusterIndexList].position.xyz - input.WorldPos; // 更新访问方式
             float3 L = normalize(lightVec);
-            float radianceFactor = radiance(lights[lightIndexList[i]].colorAndRadius.w, lightVec, N, L);
-            float3 lightColor = lights[lightIndexList[i]].colorAndRadius.xyz;
+            float radianceFactor = radiance(lights[clusterIndexList[i].clusterIndexList].colorAndRadius.w, lightVec, N, L);
+            float3 lightColor = lights[clusterIndexList[i].clusterIndexList].colorAndRadius.xyz;
             Lo += BRDF(L, V, N, material.metallic, roughness) * lightColor * radianceFactor;
         }
     }
