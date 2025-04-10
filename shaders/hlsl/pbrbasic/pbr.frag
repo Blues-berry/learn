@@ -1,218 +1,145 @@
-// Copyright 2020 Google LLC
-//const int numLights = 64; // 目标光源数量
-#define NUM_LIGHTS 64 // 定义光源数量为常量 
-#define CLUSTER_SIZE_X 8
-#define CLUSTER_SIZE_Y 8
-#define CLUSTER_SIZE_Z 4
-#define TOTAL_CLUSTERS 64*4 //(CLUSTER_SIZE_X * CLUSTER_SIZE_Y * CLUSTER_SIZE_Z)
+// 版权所有 2020 Google LLC
+#define NUM_LIGHTS 64            // 光源数量
+#define CLUSTER_SIZE_X 8         // X 轴集群数
+#define CLUSTER_SIZE_Y 8         // Y 轴集群数
+#define CLUSTER_SIZE_Z 4         // Z 轴集群数
+#define TOTAL_CLUSTERS CLUSTER_SIZE_X * CLUSTER_SIZE_Y * CLUSTER_SIZE_Z
+#define LIGHT_INDEX_LIST_SIZE (NUM_LIGHTS * TOTAL_CLUSTERS) // 全局光源索引列表大小
 
-
-/*
-在 HLSL 中，const uint32_t 这样的 C++ 风格常量定义不合法。HLSL 使用 #define 或 static const 来定义常量，但你的代码中同时混用了 C++ 风格的 const uint32_t 和 #define，导致冲突。
-日志中提到 #define CLUSTER_SIZE_X 16 已定义，但后续又试图用 const uint32_t CLUSTER_SIZE_X = 16; 重新定义，引发语法错误。
-*/
-struct VSOutput
-{
-[[vk::location(0)]] float3 WorldPos : POSITION0;  // 世界空间位置
-[[vk::location(1)]] float3 Normal : NORMAL0;      // 法线
-};
-struct UBO
-{
-	float4x4 projection;
-	float4x4 model;
-	float4x4 view;
-	float3 camPos;
-	uint32_t maxlightindexnum;
+struct VSOutput {
+    [[vk::location(0)]] float3 WorldPos : POSITION0; // 世界空间位置
+    [[vk::location(1)]] float3 Normal : NORMAL0;     // 法线
 };
 
-cbuffer ubo : register(b0) { UBO ubo; }  // 绑定到寄存器 b0
+struct UBO {
+    float4x4 projection; // 投影矩阵
+    float4x4 model;      // 模型矩阵
+    float4x4 view;       // 视图矩阵
+    float3 camPos;       // 相机位置
+    uint maxlightindexnum; // 最大光源索引数
+};
+
+cbuffer ubo : register(b0) { UBO ubo; } // 绑定到寄存器 b0
 
 struct Light {
-	float4 position;
-	float4 colorAndRadius;
-	float4 direction;
-	float4 cutOff;
+    float4 position;       // 光源位置
+    float4 colorAndRadius; // 颜色和半径
+    float4 direction;      // 方向
+    float4 cutOff;         // 截止参数
 };
 
-struct UBOShared {
-		Light lights[NUM_LIGHTS];         // 光源数组
-		uint clusterLightCounts[TOTAL_CLUSTERS]; // 每个集群的光源数量
-		uint clusterLightOffsets[TOTAL_CLUSTERS]; // 每个集群的偏移量
-		uint lightIndexList[64*64*4]; // 全局光源索引列表（假设每个集群最多影响所有光源）NUM_LIGHTS * TOTAL_CLUSTERS
-		//uint padding[1536];
-
+cbuffer uboParams : register(b1) { // 光源数据缓冲区
+    Light lights[NUM_LIGHTS];
+    float padding[1536]; // 填充对齐
 };
 
-cbuffer uboParams : register(b1) { UBOShared uboParams; };
+// 删除原来的单独缓冲区定义
+// cbuffer clusterLightCounts : register(b2) { uint clusterLightCounts[TOTAL_CLUSTERS]; };
+// cbuffer clusterLightOffsets : register(b3) { uint clusterLightOffsets[TOTAL_CLUSTERS]; };
+
+cbuffer lightIndexList : register(b2) { // 调整绑定点，由于删除了 b2 和 b3，这里占用 b2
+    uint lightIndexList[LIGHT_INDEX_LIST_SIZE];
+};
+
+// 合并后的集群数据缓冲区
+struct Cluster {
+    uint counts;      // 光源数量
+    uint offsets;     // 光源偏移
+    float2 padding;   // 填充以确保 16 字节对齐
+};
+
+cbuffer clusterCountsandOffsets : register(b3) { // 占用原来的 b3 绑定点
+    Cluster clusterCountsandOffsets[TOTAL_CLUSTERS];
+};
 
 struct PushConsts {
-[[vk::offset(12)]] float roughness;  // 粗糙度
-[[vk::offset(16)]] float metallic;   // 金属度
-[[vk::offset(20)]] float r;          // 红色分量
-[[vk::offset(24)]] float g;          // 绿色分量
-[[vk::offset(28)]] float b;          // 蓝色分量
+    [[vk::offset(12)]] float roughness; // 粗糙度
+    [[vk::offset(16)]] float metallic;  // 金属度
+    [[vk::offset(20)]] float r;         // 红色分量
+    [[vk::offset(24)]] float g;         // 绿色分量
+    [[vk::offset(28)]] float b;         // 蓝色分量
 };
-[[vk::push_constant]] PushConsts material;  // 定义推送常量
+[[vk::push_constant]] PushConsts material; // 推送常量
 
 static const float PI = 3.14159265359;
 
-//#define ROUGHNESS_PATTERN 1
-
-float3 materialcolor()
-{
-	return float3(material.r, material.g, material.b);
+float3 materialcolor() {
+    return float3(material.r, material.g, material.b);
 }
 
-// Normal Distribution function --------------------------------------
-float D_GGX(float dotNH, float roughness)
-{
-	float alpha = roughness * roughness;
-	float alpha2 = alpha * alpha;
-	float denom = dotNH * dotNH * (alpha2 - 1.0) + 1.0;
-	return (alpha2)/(PI * denom*denom);
+// 法线分布函数 (GGX)
+float D_GGX(float dotNH, float roughness) {
+    float alpha = roughness * roughness;
+    float alpha2 = alpha * alpha;
+    float denom = dotNH * dotNH * (alpha2 - 1.0) + 1.0;
+    return (alpha2) / (PI * denom * denom);
 }
 
-
-
-// Geometric Shadowing function --------------------------------------
-float G_SchlicksmithGGX(float dotNL, float dotNV, float roughness)
-{
-	float r = (roughness + 1.0);
-	float k = (r*r) / 8.0;
-	float GL = dotNL / (dotNL * (1.0 - k) + k);
-	float GV = dotNV / (dotNV * (1.0 - k) + k);
-	return GL * GV;
+// 几何遮挡函数 (Schlick-Smith GGX)
+float G_SchlicksmithGGX(float dotNL, float dotNV, float roughness) {
+    float r = (roughness + 1.0);
+    float k = (r * r) / 8.0;
+    float GL = dotNL / (dotNL * (1.0 - k) + k);
+    float GV = dotNV / (dotNV * (1.0 - k) + k);
+    return GL * GV;
 }
 
-// Fresnel function ----------------------------------------------------
-float3 F_Schlick(float cosTheta, float metallic)
-{
-	float3 F0 = lerp(float3(0.04, 0.04, 0.04), materialcolor(), metallic); // * material.specular
-	float3 F = F0 + (1.0 - F0) * pow(1.0 - cosTheta, 5.0);
-	return F;
+// 菲涅尔函数 (Schlick)
+float3 F_Schlick(float cosTheta, float metallic) {
+    float3 F0 = lerp(float3(0.04, 0.04, 0.04), materialcolor(), metallic);
+    float3 F = F0 + (1.0 - F0) * pow(1.0 - cosTheta, 5.0);
+    return F;
 }
 
-// Specular BRDF composition --------------------------------------------
+// 镜面 BRDF 计算
+float3 BRDF(float3 L, float3 V, float3 N, float metallic, float roughness) {
+    float3 H = normalize(V + L);
+    float dotNV = clamp(dot(N, V), 0.0, 1.0);
+    float dotNL = clamp(dot(N, L), 0.0, 1.0);
+    float dotLH = clamp(dot(L, H), 0.0, 1.0);
+    float dotNH = clamp(dot(N, H), 0.0, 1.0);
 
+    float3 lightColor = float3(1.0, 1.0, 1.0);
+    float3 color = float3(0.0, 0.0, 0.0);
 
-
-
-
-
-float3 BRDF(float3 L, float3 V, float3 N, float metallic, float roughness)
-{
-	// Precalculate vectors and dot products
-	float3 H = normalize (V + L);
-	float dotNV = clamp(dot(N, V), 0.0, 1.0);
-	float dotNL = clamp(dot(N, L), 0.0, 1.0);
-	float dotLH = clamp(dot(L, H), 0.0, 1.0);
-	float dotNH = clamp(dot(N, H), 0.0, 1.0);
-
-	// Light color fixed
-	float3 lightColor = float3(1.0, 1.0, 1.0);
-
-	float3 color = float3(0.0, 0.0, 0.0);
-
-	if (dotNL > 0.0)
-	{
-		float rroughness = max(0.05, roughness);
-		// D = Normal distribution (Distribution of the microfacets)
-		float D = D_GGX(dotNH, roughness);
-		// G = Geometric shadowing term (Microfacets shadowing)
-		float G = G_SchlicksmithGGX(dotNL, dotNV, rroughness);
-		// F = Fresnel factor (Reflectance depending on angle of incidence)
-		float3 F = F_Schlick(dotNV, metallic);
-
-		float3 spec = D * F * G / (4.0 * dotNL * dotNV);
-
-		color += spec * dotNL * lightColor;
-	}
-
-	return color;
-}
-/*
-// calculates the color when using a spot light.
-float3 CalcSpotLight(SpotLight light, vec3 normal, vec3 fragPos, vec3 viewDir)
-{
-    vec3 lightDir = normalize(light.position - fragPos);
-    // diffuse shading
-    float diff = max(dot(normal, lightDir), 0.0);
-    // specular shading
-    vec3 reflectDir = reflect(-lightDir, normal);
-    float spec = pow(max(dot(viewDir, reflectDir), 0.0), material.shininess);
-    // attenuation
-    float distance = length(light.position - fragPos);
-    float attenuation = 1.0 / (light.constant + light.linear * distance + light.quadratic * (distance * distance));    
-    // combine results
-    vec3 ambient = light.ambient * vec3(texture(material.diffuse, TexCoords));
-    vec3 diffuse = light.diffuse * diff * vec3(texture(material.diffuse, TexCoords));
-    vec3 specular = light.specular * spec * vec3(texture(material.specular, TexCoords));
-    ambient *= attenuation;
-    diffuse *= attenuation;
-    specular *= attenuation;
-    return (ambient + diffuse + specular);
-}
-*/
-float radiance(float radius, float3 lightVec, float3 N,float3 L )
-{
-	float distance=length(lightVec);
-// 半径范围裁剪
-	if(distance>radius) return 0.0;
-//计算衰减
-		float attenuation = pow(clamp(1.0-distance / radius,0.0,1.0), 2.0);
-		float dotNL=max(dot(N,L),0.0);
-	return attenuation*dotNL;
-
-
-}
-float spotlight(int i,float3 L)//i=lightindex
-
-{
-        float3 lightDir = normalize(-uboParams.lights[i].direction.xyz);  // 光源方向
-        float theta = dot(L, lightDir);  // 光向量与光源方向的夹角余弦
-        // 定义内锥角和外锥角（以弧度为单位）
-        float cutOff = uboParams.lights[i].cutOff.x;      // 内锥角，例如 12.5°
-        float outerCutOff =uboParams.lights[i].cutOff.y; // 外锥角，例如 17.5°
-        float epsilon = cutOff - outerCutOff;   // 内、外锥角差值
-        float spotlight_intensity = pow(clamp((theta - outerCutOff) / epsilon, uboParams.lights[i].cutOff.z, 1.0),int(uboParams.lights[i].cutOff.w));  // 计算强度
-return spotlight_intensity;
+    if (dotNL > 0.0) {
+        float rroughness = max(0.05, roughness);
+        float D = D_GGX(dotNH, roughness);
+        float G = G_SchlicksmithGGX(dotNL, dotNV, rroughness);
+        float3 F = F_Schlick(dotNV, metallic);
+        float3 spec = D * F * G / (4.0 * dotNL * dotNV);
+        color += spec * dotNL * lightColor;
+    }
+    return color;
 }
 
+// 光照辐射计算
+float radiance(float radius, float3 lightVec, float3 N, float3 L) {
+    float distance = length(lightVec);
+    if (distance > radius) return 0.0;
+    float attenuation = pow(clamp(1.0 - distance / radius, 0.0, 1.0), 2.0);
+    float dotNL = max(dot(N, L), 0.0);
+    return attenuation * dotNL;
+}
 
-// ----------------------------------------------------------------------------
-float4 main(VSOutput input) : SV_TARGET
-{
-	float3 N = normalize(input.Normal);
-	float3 V = normalize(ubo.camPos - input.WorldPos);
+float4 main(VSOutput input) : SV_TARGET {
+    float3 N = normalize(input.Normal);
+    float3 V = normalize(ubo.camPos - input.WorldPos);
+    float roughness = material.roughness;
 
-	float roughness = material.roughness;
-
-	// Add striped pattern to roughness based on vertex position
-#ifdef ROUGHNESS_PATTERN
-	roughness = max(roughness, step(frac(input.WorldPos.y * 2.02), 0.5));
-#endif
-
-
-// 计算屏幕空间位置
-
+    // 计算屏幕空间位置
     float4 worldPos = float4(input.WorldPos, 1.0);
     float4 viewPos = mul(ubo.view, worldPos);
     float4 clipPos = mul(ubo.projection, viewPos);
     clipPos /= clipPos.w;
     float2 screenPos = clipPos.xy * 0.5 + 0.5;
 
-
-
-
-
-    // 计算深度（假设对数深度分割）
-
-float viewZ = -viewPos.z; // 转换为视图空间的正 Z 值
-float zNear = 0.1;
-float zFar = 256.0;
-// 计算对数深度
-uint clusterZ = uint(log(viewZ / zNear) / log(zFar / zNear) * CLUSTER_SIZE_Z);
-clusterZ = clamp(clusterZ, 0u, CLUSTER_SIZE_Z - 1);
+    // 计算对数深度
+    float viewZ = -viewPos.z;
+    float zNear = 0.1;
+    float zFar = 256.0;
+    uint clusterZ = uint(log(viewZ / zNear) / log(zFar / zNear) * CLUSTER_SIZE_Z);
+    clusterZ = clamp(clusterZ, 0u, CLUSTER_SIZE_Z - 1);
 
     // 计算集群索引
     uint clusterX = uint(screenPos.x * CLUSTER_SIZE_X);
@@ -222,61 +149,26 @@ clusterZ = clamp(clusterZ, 0u, CLUSTER_SIZE_Z - 1);
     clusterZ = clamp(clusterZ, 0u, CLUSTER_SIZE_Z - 1);
     uint clusterIdx = clusterZ * CLUSTER_SIZE_X * CLUSTER_SIZE_Y + clusterY * CLUSTER_SIZE_X + clusterX;
 
-    // 获取光源列表
-    //uint lightCount = uboParams.clusterLightCounts[clusterIdx];
-    //uint lightOffset = clusterIdx * NUM_LIGHTS; // 假设每个集群有固定偏移（简化实现）
+    // 获取光源列表（使用合并后的缓冲区）
+    uint lightCount = clusterCountsandOffsets[clusterIdx].counts;
+    uint lightOffset = clusterCountsandOffsets[clusterIdx].offsets;
 
-	uint lightCount = uboParams.clusterLightCounts[clusterIdx];
-    uint lightOffset = uboParams.clusterLightOffsets[clusterIdx];
+    float3 Lo = float3(0.0, 0.0, 0.0);
+    if (lightCount > 0) {
+        for (int i = lightOffset; i < lightOffset + lightCount; i++) {
+            float3 lightVec = lights[lightIndexList[i]].position.xyz - input.WorldPos;
+            float3 L = normalize(lightVec);
+            float radianceFactor = radiance(lights[lightIndexList[i]].colorAndRadius.w, lightVec, N, L);
+            float3 lightColor = lights[lightIndexList[i]].colorAndRadius.xyz;
+            Lo += BRDF(L, V, N, material.metallic, roughness) * lightColor * radianceFactor;
+        }
+    }
 
-		float3 Lo = float3(0.0, 0.0, 0.0);
-	if(lightCount>0){
-		for (int i = lightOffset; i <lightOffset+lightCount; i++) {
-	 float3 lightVec = uboParams.lights[uboParams.lightIndexList[i]].position.xyz - input.WorldPos;
-	 float3 L = normalize(lightVec);
-	 float radianceFactor = radiance(
-	     uboParams.lights[uboParams.lightIndexList[i]].colorAndRadius.w, lightVec, N, L
-	 );
-		float3 lightColor = uboParams.lights[uboParams.lightIndexList[i]].colorAndRadius.xyz;
-	 Lo += BRDF(L, V, N, material.metallic, roughness) * lightColor * radianceFactor;
+    // 组合环境光和镜面光
+    float3 color = materialcolor() * 0.02;
+    color += Lo;
 
-	}
-
-	}
-
-	// Specular contribution
-
-
-/*
-
-	for (uint i = 0; i < 64; i++) {
-    float3 lightVec = uboParams.lights[i].position.xyz - input.WorldPos;
-    float3 L = normalize(lightVec);
-    float radianceFactor = radiance(uboParams.lights[i].colorAndRadius.w, lightVec, N, L);
-    float3 lightColor = uboParams.lights[i].colorAndRadius.xyz;
-    Lo += BRDF(L, V, N, material.metallic, material.roughness) * lightColor * radianceFactor;
-}
-
-
-
-
-*/
-// spot light
-/*
-    float3 lightVec = uboParams.lights[3].position.xyz - input.WorldPos;
-    float3 L = normalize(lightVec);
-    float radianceFactor = radiance(
-        uboParams.lights[3].colorAndRadius.w, lightVec, N, L
-    );
-	float3 lightColor = uboParams.lights[3].colorAndRadius.xyz;
-    Lo +=  lightColor * radianceFactor*spotlight(3,L);
-	*/
-	// Combine with ambient
-	float3 color = materialcolor() * 0.02;
-	color += Lo;
-	
-	// Gamma correct
-	color = pow(color, float3(0.4545, 0.4545, 0.4545));
-
-	return float4(color, 1.0);
+    // Gamma 校正
+    color = pow(color, float3(0.4545, 0.4545, 0.4545));
+    return float4(color, 1.0);
 }
