@@ -1,16 +1,16 @@
 // Copyright 2020 Google LLC
 //const int numLights = 64; // 目标光源数量
 #define NUM_LIGHTS 64 // 定义光源数量为常量 
-#define CLUSTER_SIZE_X 16
-#define CLUSTER_SIZE_Y 16
-#define CLUSTER_SIZE_Z 16
-// C++ 端：集群的维度
-const uint32_t CLUSTER_SIZE_X = 16;  // 屏幕宽度方向的集群数
-const uint32_t CLUSTER_SIZE_Y = 16;  // 屏幕高度方向的集群数
-const uint32_t CLUSTER_SIZE_Z = 16;  // 深度方向的集群数
-const uint32_t TOTAL_CLUSTERS = CLUSTER_SIZE_X * CLUSTER_SIZE_Y * CLUSTER_SIZE_Z;
+#define CLUSTER_SIZE_X 8
+#define CLUSTER_SIZE_Y 8
+#define CLUSTER_SIZE_Z 4
+#define TOTAL_CLUSTERS 64*4 //(CLUSTER_SIZE_X * CLUSTER_SIZE_Y * CLUSTER_SIZE_Z)
 
 
+/*
+在 HLSL 中，const uint32_t 这样的 C++ 风格常量定义不合法。HLSL 使用 #define 或 static const 来定义常量，但你的代码中同时混用了 C++ 风格的 const uint32_t 和 #define，导致冲突。
+日志中提到 #define CLUSTER_SIZE_X 16 已定义，但后续又试图用 const uint32_t CLUSTER_SIZE_X = 16; 重新定义，引发语法错误。
+*/
 struct VSOutput
 {
 [[vk::location(0)]] float3 WorldPos : POSITION0;  // 世界空间位置
@@ -22,6 +22,7 @@ struct UBO
 	float4x4 model;
 	float4x4 view;
 	float3 camPos;
+	uint32_t maxlightindexnum;
 };
 
 cbuffer ubo : register(b0) { UBO ubo; }  // 绑定到寄存器 b0
@@ -35,9 +36,10 @@ struct Light {
 
 struct UBOShared {
 		Light lights[NUM_LIGHTS];         // 光源数组
-		uint32_t clusterLightCounts[TOTAL_CLUSTERS]; // 每个集群的光源数量
-		uint32_t clusterLightOffsets[TOTAL_CLUSTERS]; // 每个集群的偏移量
-		uint32_t lightIndexList[maxnumLights * TOTAL_CLUSTERS]; // 全局光源索引列表（假设每个集群最多影响所有光源）
+		uint clusterLightCounts[TOTAL_CLUSTERS]; // 每个集群的光源数量
+		uint clusterLightOffsets[TOTAL_CLUSTERS]; // 每个集群的偏移量
+		uint lightIndexList[64*64*4]; // 全局光源索引列表（假设每个集群最多影响所有光源）NUM_LIGHTS * TOTAL_CLUSTERS
+		//uint padding[1536];
 
 };
 
@@ -190,19 +192,75 @@ float4 main(VSOutput input) : SV_TARGET
 	roughness = max(roughness, step(frac(input.WorldPos.y * 2.02), 0.5));
 #endif
 
-	// Specular contribution
-	float3 Lo = float3(0.0, 0.0, 0.0);
 
-for (int i = 0; i < NUM_LIGHTS; i++) {
+// 计算屏幕空间位置
+
+    float4 worldPos = float4(input.WorldPos, 1.0);
+    float4 viewPos = mul(ubo.view, worldPos);
+    float4 clipPos = mul(ubo.projection, viewPos);
+    clipPos /= clipPos.w;
+    float2 screenPos = clipPos.xy * 0.5 + 0.5;
+
+
+
+
+
+    // 计算深度（假设对数深度分割）
+
+float viewZ = -viewPos.z; // 转换为视图空间的正 Z 值
+float zNear = 0.1;
+float zFar = 256.0;
+// 计算对数深度
+uint clusterZ = uint(log(viewZ / zNear) / log(zFar / zNear) * CLUSTER_SIZE_Z);
+clusterZ = clamp(clusterZ, 0u, CLUSTER_SIZE_Z - 1);
+
+    // 计算集群索引
+    uint clusterX = uint(screenPos.x * CLUSTER_SIZE_X);
+    uint clusterY = uint(screenPos.y * CLUSTER_SIZE_Y);
+    clusterX = clamp(clusterX, 0u, CLUSTER_SIZE_X - 1);
+    clusterY = clamp(clusterY, 0u, CLUSTER_SIZE_Y - 1);
+    clusterZ = clamp(clusterZ, 0u, CLUSTER_SIZE_Z - 1);
+    uint clusterIdx = clusterZ * CLUSTER_SIZE_X * CLUSTER_SIZE_Y + clusterY * CLUSTER_SIZE_X + clusterX;
+
+    // 获取光源列表
+    //uint lightCount = uboParams.clusterLightCounts[clusterIdx];
+    //uint lightOffset = clusterIdx * NUM_LIGHTS; // 假设每个集群有固定偏移（简化实现）
+
+	uint lightCount = uboParams.clusterLightCounts[clusterIdx];
+    uint lightOffset = uboParams.clusterLightOffsets[clusterIdx];
+
+		float3 Lo = float3(0.0, 0.0, 0.0);
+	if(lightCount>0){
+		for (int i = lightOffset; i <lightOffset+lightCount; i++) {
+	 float3 lightVec = uboParams.lights[uboParams.lightIndexList[i]].position.xyz - input.WorldPos;
+	 float3 L = normalize(lightVec);
+	 float radianceFactor = radiance(
+	     uboParams.lights[uboParams.lightIndexList[i]].colorAndRadius.w, lightVec, N, L
+	 );
+		float3 lightColor = uboParams.lights[uboParams.lightIndexList[i]].colorAndRadius.xyz;
+	 Lo += BRDF(L, V, N, material.metallic, roughness) * lightColor * radianceFactor;
+
+	}
+
+	}
+
+	// Specular contribution
+
+
+/*
+
+	for (uint i = 0; i < 64; i++) {
     float3 lightVec = uboParams.lights[i].position.xyz - input.WorldPos;
     float3 L = normalize(lightVec);
-    float radianceFactor = radiance(
-        uboParams.lights[i].colorAndRadius.w, lightVec, N, L
-    );
-	float3 lightColor = uboParams.lights[i].colorAndRadius.xyz;
-    Lo += BRDF(L, V, N, material.metallic, roughness) * lightColor * radianceFactor;
-
+    float radianceFactor = radiance(uboParams.lights[i].colorAndRadius.w, lightVec, N, L);
+    float3 lightColor = uboParams.lights[i].colorAndRadius.xyz;
+    Lo += BRDF(L, V, N, material.metallic, material.roughness) * lightColor * radianceFactor;
 }
+
+
+
+
+*/
 // spot light
 /*
     float3 lightVec = uboParams.lights[3].position.xyz - input.WorldPos;
