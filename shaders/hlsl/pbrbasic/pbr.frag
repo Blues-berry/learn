@@ -1,8 +1,8 @@
 // 版权所有 2020 Google LLC
 #define NUM_LIGHTS 64            // 光源数量
-#define CLUSTER_SIZE_X 4         // X 轴集群数
-#define CLUSTER_SIZE_Y 4         // Y 轴集群数
-#define CLUSTER_SIZE_Z 2         // Z 轴集群数
+#define CLUSTER_SIZE_X 8        // X 轴集群数
+#define CLUSTER_SIZE_Y 8        // Y 轴集群数
+#define CLUSTER_SIZE_Z 1        // Z 轴集群数
 #define TOTAL_CLUSTERS CLUSTER_SIZE_X * CLUSTER_SIZE_Y * CLUSTER_SIZE_Z
 #define LIGHT_INDEX_LIST_SIZE (NUM_LIGHTS * TOTAL_CLUSTERS) // 全局光源索引列表大小
 
@@ -30,7 +30,6 @@ struct Light {
 
 cbuffer uboParams : register(b1) { // 光源数据缓冲区
     Light lights[NUM_LIGHTS];
-
 };
 
 struct Indices {
@@ -53,11 +52,14 @@ cbuffer clusterCountsandOffsets : register(b3) { // 占用原来的 b3 绑定点
 };
 
 struct PushConsts {
-    [[vk::offset(12)]] float roughness; // 粗糙度
-    [[vk::offset(16)]] float metallic;  // 金属度
-    [[vk::offset(20)]] float r;         // 红色分量
-    [[vk::offset(24)]] float g;         // 绿色分量
-    [[vk::offset(28)]] float b;         // 蓝色分量
+    float4x4 model;      // 模型矩阵（新增）
+    float4 color;        // 光源颜色（新增）
+    float isLightSphere; // 是否为光源球体（新增）
+    float roughness;     // 粗糙度
+    float metallic;      // 金属度
+    float r;             // 红色分量
+    float g;             // 绿色分量
+    float b;             // 蓝色分量
 };
 [[vk::push_constant]] PushConsts material; // 推送常量
 
@@ -112,6 +114,7 @@ float3 BRDF(float3 L, float3 V, float3 N, float metallic, float roughness) {
     }
     return color;
 }
+
 // 光照辐射计算
 float radiance(float radius, float3 lightVec, float3 N, float3 L) {
     float distance = length(lightVec);
@@ -122,6 +125,16 @@ float radiance(float radius, float3 lightVec, float3 N, float3 L) {
 }
 
 float4 main(VSOutput input) : SV_TARGET {
+    // 如果是光源球体，绘制颜色并添加简单光照
+    if (material.isLightSphere > 0.5) {
+        float3 N = normalize(input.Normal);
+        float3 L = normalize(ubo.camPos - input.WorldPos); // 光从相机方向入射
+        float diffuse = max(dot(N, L), 0.0);
+        float3 color = material.color.xyz * (0.3 + 0.7 * diffuse); // 基础亮度 + 漫反射
+        return float4(color, 1.0);
+    }
+
+    // 原有光照计算逻辑
     float3 N = normalize(input.Normal);
     float3 V = normalize(ubo.camPos - input.WorldPos);
     float roughness = material.roughness;
@@ -153,9 +166,9 @@ float4 main(VSOutput input) : SV_TARGET {
     uint lightOffset = clusterCountsandOffsets[clusterIdx].offsets;
 
     float3 Lo = float3(0.0, 0.0, 0.0);
-        if (lightCount > 0) {
+    if (lightCount > 0) {
         for (int i = lightOffset; i < lightOffset + lightCount; i++) {
-            float3 lightVec = lights[indices[i].clusterIndexList].position.xyz - input.WorldPos; // 更新访问方式
+            float3 lightVec = lights[indices[i].clusterIndexList].position.xyz - input.WorldPos;
             float3 L = normalize(lightVec);
             float radianceFactor = radiance(lights[indices[i].clusterIndexList].colorAndRadius.w, lightVec, N, L);
             float3 lightColor = lights[indices[i].clusterIndexList].colorAndRadius.xyz;
@@ -176,7 +189,6 @@ float4 main(VSOutput input) : SV_TARGET {
 }
     
     */
-
 
     // 组合环境光和镜面光
     float3 color = materialcolor() * 0.02;
