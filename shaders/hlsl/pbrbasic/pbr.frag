@@ -1,8 +1,8 @@
 // 版权所有 2020 Google LLC
 #define NUM_LIGHTS 64            // 光源数量
-#define CLUSTER_SIZE_X 8         // X 轴集群数
-#define CLUSTER_SIZE_Y 8         // Y 轴集群数
-#define CLUSTER_SIZE_Z 4         // Z 轴集群数
+#define CLUSTER_SIZE_X 4         // X 轴集群数
+#define CLUSTER_SIZE_Y 4         // Y 轴集群数
+#define CLUSTER_SIZE_Z 2         // Z 轴集群数
 #define TOTAL_CLUSTERS CLUSTER_SIZE_X * CLUSTER_SIZE_Y * CLUSTER_SIZE_Z
 #define LIGHT_INDEX_LIST_SIZE (NUM_LIGHTS * TOTAL_CLUSTERS) // 全局光源索引列表大小
 
@@ -39,7 +39,7 @@ struct Indices {
 };
 
 cbuffer clusterIndexList : register(b2) {
-    Indices clusterIndexList[LIGHT_INDEX_LIST_SIZE];
+    Indices indices[LIGHT_INDEX_LIST_SIZE];
 };
 
 struct Cluster {
@@ -112,7 +112,6 @@ float3 BRDF(float3 L, float3 V, float3 N, float metallic, float roughness) {
     }
     return color;
 }
-
 // 光照辐射计算
 float radiance(float radius, float3 lightVec, float3 N, float3 L) {
     float distance = length(lightVec);
@@ -154,15 +153,30 @@ float4 main(VSOutput input) : SV_TARGET {
     uint lightOffset = clusterCountsandOffsets[clusterIdx].offsets;
 
     float3 Lo = float3(0.0, 0.0, 0.0);
-    if (lightCount > 0) {
+        if (lightCount > 0) {
         for (int i = lightOffset; i < lightOffset + lightCount; i++) {
-            float3 lightVec = lights[clusterIndexList[i].clusterIndexList].position.xyz - input.WorldPos; // 更新访问方式
+            float3 lightVec = lights[indices[i].clusterIndexList].position.xyz - input.WorldPos; // 更新访问方式
             float3 L = normalize(lightVec);
-            float radianceFactor = radiance(lights[clusterIndexList[i].clusterIndexList].colorAndRadius.w, lightVec, N, L);
-            float3 lightColor = lights[clusterIndexList[i].clusterIndexList].colorAndRadius.xyz;
+            float radianceFactor = radiance(lights[indices[i].clusterIndexList].colorAndRadius.w, lightVec, N, L);
+            float3 lightColor = lights[indices[i].clusterIndexList].colorAndRadius.xyz;
             Lo += BRDF(L, V, N, material.metallic, roughness) * lightColor * radianceFactor;
         }
     }
+
+    /*
+
+
+            for (uint i = 0; i < 64; i++) {
+
+    float3 lightVec = lights[i].position.xyz - input.WorldPos;
+    float3 L = normalize(lightVec);
+    float radianceFactor = radiance(lights[i].colorAndRadius.w, lightVec, N, L);
+    float3 lightColor = lights[i].colorAndRadius.xyz;
+    Lo += BRDF(L, V, N, material.metallic, material.roughness) * lightColor * radianceFactor;
+}
+    
+    */
+
 
     // 组合环境光和镜面光
     float3 color = materialcolor() * 0.02;
