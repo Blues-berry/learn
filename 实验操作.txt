@@ -25,6 +25,8 @@ uniform buffer
 整理成一个流程文档
 
 
+renderdoc目录
+C:\Users\Bluesky\Desktop\SKY\Learn\Vulkan\build\bin\Debug
 
 
 	float radiance=0;
