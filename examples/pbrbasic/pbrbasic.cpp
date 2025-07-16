@@ -1,39 +1,39 @@
-/*
-* Vulkan Ê¾Àı - »ùÓÚÎïÀíµÄ×ÅÉ«»ù´¡
-* ²Î¿¼£ºhttp://graphicrants.blogspot.de/2013/08/specular-brdf-reference.html
-* °æÈ¨ËùÓĞ (C) 2017-2024 Sascha Willems - www.saschawillems.de
-* MIT Ğí¿ÉÖ¤
+ï»¿/*
+* Vulkan ç¤ºä¾‹ - åŸºäºç‰©ç†çš„ç€è‰²åŸºç¡€
+* å‚è€ƒï¼šhttp://graphicrants.blogspot.de/2013/08/specular-brdf-reference.html
+* ç‰ˆæƒæ‰€æœ‰ (C) 2017-2024 Sascha Willems - www.saschawillems.de
+* MIT è®¸å¯è¯
 */
-// ÎÄ¼şÍ·²¿ÉùÃ÷ÕâÊÇÒ»¸ö Vulkan Ê¾Àı³ÌĞò£¬×¨×¢ÓÚ»ùÓÚÎïÀíµÄ×ÅÉ«£¨PBR£©¡£
-// ÒıÓÃÁËÒ»¸öÍâ²¿²Î¿¼²©¿Í£¬Ìá¹©ÁË PBR ¾µÃæ BRDF µÄÀíÂÛ»ù´¡¡£
-// ×÷Õß Sascha Willems£¬´úÂë×ñÑ­ MIT Ğí¿ÉÖ¤¡£
+// æ–‡ä»¶å¤´éƒ¨å£°æ˜è¿™æ˜¯ä¸€ä¸ª Vulkan ç¤ºä¾‹ç¨‹åºï¼Œä¸“æ³¨äºåŸºäºç‰©ç†çš„ç€è‰²ï¼ˆPBRï¼‰ã€‚
+// å¼•ç”¨äº†ä¸€ä¸ªå¤–éƒ¨å‚è€ƒåšå®¢ï¼Œæä¾›äº† PBR é•œé¢ BRDF çš„ç†è®ºåŸºç¡€ã€‚
+// ä½œè€… Sascha Willemsï¼Œä»£ç éµå¾ª MIT è®¸å¯è¯ã€‚
 
 #include "vulkanexamplebase.h"
-// °üº¬ Vulkan Ê¾Àı»ùÀà£¬Ìá¹© Vulkan ³õÊ¼»¯¡¢´°¿Ú¹ÜÀíµÈÍ¨ÓÃ¹¦ÄÜ¡£
+// åŒ…å« Vulkan ç¤ºä¾‹åŸºç±»ï¼Œæä¾› Vulkan åˆå§‹åŒ–ã€çª—å£ç®¡ç†ç­‰é€šç”¨åŠŸèƒ½ã€‚
 
 #include "VulkanglTFModel.h"
-// °üº¬ glTF Ä£ĞÍ¼ÓÔØ¹¤¾ß£¬ÓÃÓÚ¼ÓÔØ 3D Ä£ĞÍ£¨ÈçÇòÌå¡¢²èºøµÈ£©¡£
+// åŒ…å« glTF æ¨¡å‹åŠ è½½å·¥å…·ï¼Œç”¨äºåŠ è½½ 3D æ¨¡å‹ï¼ˆå¦‚çƒä½“ã€èŒ¶å£¶ç­‰ï¼‰ã€‚
 
-const int maxnumLights = 64; // ×î´ó¹âÔ´ÊıÁ¿
-// ¶¨Òå³¡¾°ÖĞÖ§³ÖµÄ×î´ó¹âÔ´ÊıÁ¿Îª 64£¬ÓÃÓÚµã¹âÔ´Ä£Äâ¡£
+const int maxnumLights = 64; // æœ€å¤§å…‰æºæ•°é‡
+// å®šä¹‰åœºæ™¯ä¸­æ”¯æŒçš„æœ€å¤§å…‰æºæ•°é‡ä¸º 64ï¼Œç”¨äºç‚¹å…‰æºæ¨¡æ‹Ÿã€‚
 
-// ¼¯ÈºÎ¬¶È¶¨Òå
-const uint32_t CLUSTER_SIZE_X = 8;  // ÆÁÄ»¿í¶È·½Ïò¼¯ÈºÊı
-const uint32_t CLUSTER_SIZE_Y = 8;  // ÆÁÄ»¸ß¶È·½Ïò¼¯ÈºÊı
-const uint32_t CLUSTER_SIZE_Z = 8;  // Éî¶È·½Ïò¼¯ÈºÊı
+// é›†ç¾¤ç»´åº¦å®šä¹‰
+const uint32_t CLUSTER_SIZE_X = 8;  // å±å¹•å®½åº¦æ–¹å‘é›†ç¾¤æ•°
+const uint32_t CLUSTER_SIZE_Y = 8;  // å±å¹•é«˜åº¦æ–¹å‘é›†ç¾¤æ•°
+const uint32_t CLUSTER_SIZE_Z = 8;  // æ·±åº¦æ–¹å‘é›†ç¾¤æ•°
 const uint32_t TOTAL_CLUSTERS = CLUSTER_SIZE_X * CLUSTER_SIZE_Y * CLUSTER_SIZE_Z;
 const uint32_t lightIndexListnum = maxnumLights * TOTAL_CLUSTERS;
-// ¶¨Òå¼¯Èº¹âÕÕ£¨Clustered Shading£©µÄÍø¸ñ»®·Ö²ÎÊı£º
-// - CLUSTER_SIZE_X/Y/Z£ºÆÁÄ»¿Õ¼ä»®·ÖÎª 8x8x1 µÄ¼¯ÈºÍø¸ñ¡£
-// - TOTAL_CLUSTERS£º×Ü¼¯ÈºÊı = 8 * 8 * 1 = 64¡£
-// - lightIndexListnum£º¹âÔ´Ë÷ÒıÁĞ±í´óĞ¡ = 64 ¹âÔ´ * 64 ¼¯Èº = 4096£¬ÓÃÓÚ´æ´¢Ã¿¸ö¼¯ÈºÓ°ÏìµÄ¹âÔ´Ë÷Òı¡£
+// å®šä¹‰é›†ç¾¤å…‰ç…§ï¼ˆClustered Shadingï¼‰çš„ç½‘æ ¼åˆ’åˆ†å‚æ•°ï¼š
+// - CLUSTER_SIZE_X/Y/Zï¼šå±å¹•ç©ºé—´åˆ’åˆ†ä¸º 8x8x1 çš„é›†ç¾¤ç½‘æ ¼ã€‚
+// - TOTAL_CLUSTERSï¼šæ€»é›†ç¾¤æ•° = 8 * 8 * 1 = 64ã€‚
+// - lightIndexListnumï¼šå…‰æºç´¢å¼•åˆ—è¡¨å¤§å° = 64 å…‰æº * 64 é›†ç¾¤ = 4096ï¼Œç”¨äºå­˜å‚¨æ¯ä¸ªé›†ç¾¤å½±å“çš„å…‰æºç´¢å¼•ã€‚
 
-// ²ÄÖÊ¶¨Òå
+// æè´¨å®šä¹‰
 struct Material {
     struct PushBlock {
-        float roughness; // ´Ö²Ú¶È
-        float metallic;  // ½ğÊô¶È
-        float r, g, b;   // RGB ÑÕÉ«
+        float roughness; // ç²—ç³™åº¦
+        float metallic;  // é‡‘å±åº¦
+        float r, g, b;   // RGB é¢œè‰²
     } params{};
     std::string name;
     Material() {}
@@ -45,170 +45,170 @@ struct Material {
         params.b = c.b;
     }
 };
-// ¶¨Òå²ÄÖÊ½á¹¹Ìå Material£¬ÓÃÓÚ´æ´¢ PBR ²ÄÖÊÊôĞÔ£º
-// - PushBlock£º°üº¬´Ö²Ú¶È¡¢½ğÊô¶ÈºÍ RGB ÑÕÉ«£¬´«µİ¸ø×ÅÉ«Æ÷¡£
-// - name£º²ÄÖÊÃû³Æ£¨Èç "Gold"£©¡£
-// - Ä¬ÈÏ¹¹Ôìº¯Êı£º³õÊ¼»¯¿Õ²ÄÖÊ¡£
-// - ²ÎÊı¹¹Ôìº¯Êı£º¸ù¾İÃû³Æ¡¢ÑÕÉ«¡¢´Ö²Ú¶È¡¢½ğÊô¶È³õÊ¼»¯²ÄÖÊ¡£
-// - params{} Ê¹ÓÃÄ¬ÈÏ³õÊ¼»¯£¬È·±£Î´ÏÔÊ½³õÊ¼»¯µÄ³ÉÔ±Îª 0¡£
+// å®šä¹‰æè´¨ç»“æ„ä½“ Materialï¼Œç”¨äºå­˜å‚¨ PBR æè´¨å±æ€§ï¼š
+// - PushBlockï¼šåŒ…å«ç²—ç³™åº¦ã€é‡‘å±åº¦å’Œ RGB é¢œè‰²ï¼Œä¼ é€’ç»™ç€è‰²å™¨ã€‚
+// - nameï¼šæè´¨åç§°ï¼ˆå¦‚ "Gold"ï¼‰ã€‚
+// - é»˜è®¤æ„é€ å‡½æ•°ï¼šåˆå§‹åŒ–ç©ºæè´¨ã€‚
+// - å‚æ•°æ„é€ å‡½æ•°ï¼šæ ¹æ®åç§°ã€é¢œè‰²ã€ç²—ç³™åº¦ã€é‡‘å±åº¦åˆå§‹åŒ–æè´¨ã€‚
+// - params{} ä½¿ç”¨é»˜è®¤åˆå§‹åŒ–ï¼Œç¡®ä¿æœªæ˜¾å¼åˆå§‹åŒ–çš„æˆå‘˜ä¸º 0ã€‚
 
-// ¹âÔ´½á¹¹Ìå
+// å…‰æºç»“æ„ä½“
 struct Light {
-    glm::vec4 position;       // Î»ÖÃ
-    glm::vec4 colorAndRadius; // ÑÕÉ«ºÍ°ë¾¶
-    glm::vec4 direction;      // ·½Ïò
-    glm::vec4 cutOff;         // ½ØÖ¹½Ç¶ÈµÈ²ÎÊı
+    glm::vec4 position;       // ä½ç½®
+    glm::vec4 colorAndRadius; // é¢œè‰²å’ŒåŠå¾„
+    glm::vec4 direction;      // æ–¹å‘
+    glm::vec4 cutOff;         // æˆªæ­¢è§’åº¦ç­‰å‚æ•°
 };
-// ¶¨Òå¹âÔ´½á¹¹Ìå Light£¬´æ´¢µã¹âÔ´»ò¾Û¹âµÆµÄ²ÎÊı£º
-// - position£º¹âÔ´µÄÊÀ½ç¿Õ¼äÎ»ÖÃ (x, y, z, w)£¬w Í¨³£Îª 1.0¡£
-// - colorAndRadius£ºRGB ÑÕÉ«ºÍ¹âÔ´Ó°Ïì°ë¾¶ (r, g, b, radius)¡£
-// - direction£º¹âÔ´·½Ïò (x, y, z, w)£¬ÓÃÓÚ¾Û¹âµÆ¡£
-// - cutOff£º½ØÖ¹½Ç¶ÈµÈ²ÎÊı (innerAngle, outerAngle, 0, 0)£¬ÓÃÓÚ¾Û¹âµÆµÄË¥¼õ¡£
+// å®šä¹‰å…‰æºç»“æ„ä½“ Lightï¼Œå­˜å‚¨ç‚¹å…‰æºæˆ–èšå…‰ç¯çš„å‚æ•°ï¼š
+// - positionï¼šå…‰æºçš„ä¸–ç•Œç©ºé—´ä½ç½® (x, y, z, w)ï¼Œw é€šå¸¸ä¸º 1.0ã€‚
+// - colorAndRadiusï¼šRGB é¢œè‰²å’Œå…‰æºå½±å“åŠå¾„ (r, g, b, radius)ã€‚
+// - directionï¼šå…‰æºæ–¹å‘ (x, y, z, w)ï¼Œç”¨äºèšå…‰ç¯ã€‚
+// - cutOffï¼šæˆªæ­¢è§’åº¦ç­‰å‚æ•° (innerAngle, outerAngle, 0, 0)ï¼Œç”¨äºèšå…‰ç¯çš„è¡°å‡ã€‚
 
-// ĞŞÕıºóµÄ¼¯ÈºÊı¾İ½á¹¹
+// ä¿®æ­£åçš„é›†ç¾¤æ•°æ®ç»“æ„
 struct ClusterCountsandOffsets {
     struct Cluster {
-        uint32_t count;    // 4 ×Ö½Ú
-        uint32_t offset;   // 4 ×Ö½Ú
-        float padding[2];  // 8 ×Ö½Ú£¬È·±£ 16 ×Ö½Ú¶ÔÆë
+        uint32_t count;    // 4 å­—èŠ‚
+        uint32_t offset;   // 4 å­—èŠ‚
+        float padding[2];  // 8 å­—èŠ‚ï¼Œç¡®ä¿ 16 å­—èŠ‚å¯¹é½
     };
     Cluster cluster[TOTAL_CLUSTERS];
 };
-// ¶¨Òå¼¯Èº¼ÆÊıºÍÆ«ÒÆ½á¹¹Ìå£¬ÓÃÓÚ¼¯Èº¹âÕÕ£º
-// - Cluster ×Ó½á¹¹Ìå£º
-//   - count£º¸Ã¼¯ÈºÓ°ÏìµÄ¹âÔ´ÊıÁ¿¡£
-//   - offset£º¸Ã¼¯ÈºÔÚÈ«¾Ö¹âÔ´Ë÷ÒıÁĞ±íÖĞµÄÆğÊ¼Æ«ÒÆ¡£
-//   - padding[2]£ºÌî³ä 8 ×Ö½Ú£¬È·±£½á¹¹Ìå´óĞ¡Îª 16 ×Ö½Ú£¬Âú×ã Vulkan µÄÄÚ´æ¶ÔÆëÒªÇó£¨std140 ²¼¾Ö£©¡£
-// - cluster Êı×é£º´æ´¢ TOTAL_CLUSTERS£¨64£©¸ö¼¯ÈºµÄ¼ÆÊıºÍÆ«ÒÆ¡£
+// å®šä¹‰é›†ç¾¤è®¡æ•°å’Œåç§»ç»“æ„ä½“ï¼Œç”¨äºé›†ç¾¤å…‰ç…§ï¼š
+// - Cluster å­ç»“æ„ä½“ï¼š
+//   - countï¼šè¯¥é›†ç¾¤å½±å“çš„å…‰æºæ•°é‡ã€‚
+//   - offsetï¼šè¯¥é›†ç¾¤åœ¨å…¨å±€å…‰æºç´¢å¼•åˆ—è¡¨ä¸­çš„èµ·å§‹åç§»ã€‚
+//   - padding[2]ï¼šå¡«å…… 8 å­—èŠ‚ï¼Œç¡®ä¿ç»“æ„ä½“å¤§å°ä¸º 16 å­—èŠ‚ï¼Œæ»¡è¶³ Vulkan çš„å†…å­˜å¯¹é½è¦æ±‚ï¼ˆstd140 å¸ƒå±€ï¼‰ã€‚
+// - cluster æ•°ç»„ï¼šå­˜å‚¨ TOTAL_CLUSTERSï¼ˆ64ï¼‰ä¸ªé›†ç¾¤çš„è®¡æ•°å’Œåç§»ã€‚
 
-// ·ÖÀëºóµÄ uniform buffer Êı¾İ½á¹¹
+// åˆ†ç¦»åçš„ uniform buffer æ•°æ®ç»“æ„
 struct UBOParams {
-    Light lights[maxnumLights]; // ¹âÔ´Êı×é
+    Light lights[maxnumLights]; // å…‰æºæ•°ç»„
 };
-// ¶¨Òå Uniform Buffer ¶ÔÏó UBOParams£¬ÓÃÓÚ´æ´¢ËùÓĞ¹âÔ´Êı¾İ£º
-// - lights£º°üº¬ maxnumLights£¨64£©¸ö Light ½á¹¹Ìå£¬´«µİ¸ø×ÅÉ«Æ÷¡£
+// å®šä¹‰ Uniform Buffer å¯¹è±¡ UBOParamsï¼Œç”¨äºå­˜å‚¨æ‰€æœ‰å…‰æºæ•°æ®ï¼š
+// - lightsï¼šåŒ…å« maxnumLightsï¼ˆ64ï¼‰ä¸ª Light ç»“æ„ä½“ï¼Œä¼ é€’ç»™ç€è‰²å™¨ã€‚
 
 struct ClusterIndexList {
     struct Indices {
-        uint32_t clusterIndexList; // 4 ×Ö½Ú
-        float padding[3];          // 12 ×Ö½Ú£¬È·±£ 16 ×Ö½Ú¶ÔÆë
+        uint32_t clusterIndexList; // 4 å­—èŠ‚
+        float padding[3];          // 12 å­—èŠ‚ï¼Œç¡®ä¿ 16 å­—èŠ‚å¯¹é½
     };
-    Indices indices[maxnumLights * TOTAL_CLUSTERS]; // È«¾Ö¹âÔ´Ë÷ÒıÁĞ±í
+    Indices indices[maxnumLights * TOTAL_CLUSTERS]; // å…¨å±€å…‰æºç´¢å¼•åˆ—è¡¨
 };
-// ¶¨Òå¼¯Èº¹âÔ´Ë÷ÒıÁĞ±í½á¹¹Ìå£º
-// - Indices ×Ó½á¹¹Ìå£º
-//   - clusterIndexList£º´æ´¢µ¥¸ö¹âÔ´Ë÷Òı£¨Ö¸Ïò lights Êı×é£©¡£
-//   - padding[3]£ºÌî³ä 12 ×Ö½Ú£¬È·±£ 16 ×Ö½Ú¶ÔÆë£¨std140 ²¼¾Ö£©¡£
-// - indices Êı×é£º´óĞ¡Îª maxnumLights * TOTAL_CLUSTERS£¨4096£©£¬´æ´¢Ã¿¸ö¼¯ÈºµÄ¹âÔ´Ë÷Òı¡£
+// å®šä¹‰é›†ç¾¤å…‰æºç´¢å¼•åˆ—è¡¨ç»“æ„ä½“ï¼š
+// - Indices å­ç»“æ„ä½“ï¼š
+//   - clusterIndexListï¼šå­˜å‚¨å•ä¸ªå…‰æºç´¢å¼•ï¼ˆæŒ‡å‘ lights æ•°ç»„ï¼‰ã€‚
+//   - padding[3]ï¼šå¡«å…… 12 å­—èŠ‚ï¼Œç¡®ä¿ 16 å­—èŠ‚å¯¹é½ï¼ˆstd140 å¸ƒå±€ï¼‰ã€‚
+// - indices æ•°ç»„ï¼šå¤§å°ä¸º maxnumLights * TOTAL_CLUSTERSï¼ˆ4096ï¼‰ï¼Œå­˜å‚¨æ¯ä¸ªé›†ç¾¤çš„å…‰æºç´¢å¼•ã€‚
 
 class VulkanExample : public VulkanExampleBase {
 public:
-    // ¼Ì³Ğ VulkanExampleBase£¬Ìá¹© Vulkan äÖÈ¾¹ÜÏß¡¢´°¿Ú¹ÜÀíµÈ»ù´¡¹¦ÄÜ¡£
+    // ç»§æ‰¿ VulkanExampleBaseï¼Œæä¾› Vulkan æ¸²æŸ“ç®¡çº¿ã€çª—å£ç®¡ç†ç­‰åŸºç¡€åŠŸèƒ½ã€‚
 
-    // Ä£ĞÍ½á¹¹Ìå
+    // æ¨¡å‹ç»“æ„ä½“
     struct Meshes {
         std::vector<vkglTF::Model> objects;
         int32_t objectIndex = 0;
     };
-    // ¶¨Òå Meshes ½á¹¹Ìå£¬¹ÜÀí¼ÓÔØµÄ glTF Ä£ĞÍ£º
-    // - objects£º´æ´¢¶à¸ö glTF Ä£ĞÍ£¨ÈçÇòÌå¡¢²èºøµÈ£©¡£
-    // - objectIndex£ºµ±Ç°Ñ¡ÖĞµÄÄ£ĞÍË÷Òı£¬Ä¬ÈÏÎª 0£¨ÇòÌå£©¡£
+    // å®šä¹‰ Meshes ç»“æ„ä½“ï¼Œç®¡ç†åŠ è½½çš„ glTF æ¨¡å‹ï¼š
+    // - objectsï¼šå­˜å‚¨å¤šä¸ª glTF æ¨¡å‹ï¼ˆå¦‚çƒä½“ã€èŒ¶å£¶ç­‰ï¼‰ã€‚
+    // - objectIndexï¼šå½“å‰é€‰ä¸­çš„æ¨¡å‹ç´¢å¼•ï¼Œé»˜è®¤ä¸º 0ï¼ˆçƒä½“ï¼‰ã€‚
 
-    Meshes models; // Ä£ĞÍÊµÀı
-    // ÉùÃ÷ models ³ÉÔ±±äÁ¿£¬´æ´¢³¡¾°ÖĞÊ¹ÓÃµÄÄ£ĞÍ¡£
+    Meshes models; // æ¨¡å‹å®ä¾‹
+    // å£°æ˜ models æˆå‘˜å˜é‡ï¼Œå­˜å‚¨åœºæ™¯ä¸­ä½¿ç”¨çš„æ¨¡å‹ã€‚
 
     struct {
-        vks::Buffer object;         // ±ä»»¾ØÕóºÍÏà»úÎ»ÖÃ
-        vks::Buffer params;         // ¹âÔ´Êı¾İ
-        vks::Buffer clusterData;    // ¼¯Èº¼ÆÊıºÍÆ«ÒÆÊı¾İ
-        vks::Buffer clusterIndexList; // È«¾Ö¹âÔ´Ë÷ÒıÁĞ±í
-        vks::Buffer sphereVertex;   // ¹âÔ´ÇòÌå¶¥µã»º³åÇø
-        vks::Buffer sphereIndex;    // ¹âÔ´ÇòÌåË÷Òı»º³åÇø
-        vks::Buffer sphereNormal;   // ¹âÔ´ÇòÌå·¨Ïß»º³åÇø
+        vks::Buffer object;         // å˜æ¢çŸ©é˜µå’Œç›¸æœºä½ç½®
+        vks::Buffer params;         // å…‰æºæ•°æ®
+        vks::Buffer clusterData;    // é›†ç¾¤è®¡æ•°å’Œåç§»æ•°æ®
+        vks::Buffer clusterIndexList; // å…¨å±€å…‰æºç´¢å¼•åˆ—è¡¨
+        vks::Buffer sphereVertex;   // å…‰æºçƒä½“é¡¶ç‚¹ç¼“å†²åŒº
+        vks::Buffer sphereIndex;    // å…‰æºçƒä½“ç´¢å¼•ç¼“å†²åŒº
+        vks::Buffer sphereNormal;   // å…‰æºçƒä½“æ³•çº¿ç¼“å†²åŒº
     } uniformBuffers;
-    // ¶¨Òå uniformBuffers ½á¹¹Ìå£¬´æ´¢ Vulkan »º³åÇø¶ÔÏó£º
-    // - object£º´æ´¢Í¶Ó°¡¢Ä£ĞÍ¡¢ÊÓÍ¼¾ØÕóºÍÏà»úÎ»ÖÃ¡£
-    // - params£º´æ´¢¹âÔ´Êı¾İ£¨UBOParams£©¡£
-    // - clusterData£º´æ´¢¼¯Èº¼ÆÊıºÍÆ«ÒÆ£¨ClusterCountsandOffsets£©¡£
-    // - clusterIndexList£º´æ´¢¹âÔ´Ë÷ÒıÁĞ±í£¨ClusterIndexList£©¡£
-    // - sphereVertex/Index/Normal£º´æ´¢¹âÔ´ÇòÌåµÄ¶¥µã¡¢Ë÷ÒıºÍ·¨Ïß»º³åÇø£¬ÓÃÓÚ¿ÉÊÓ»¯¹âÔ´¡£
+    // å®šä¹‰ uniformBuffers ç»“æ„ä½“ï¼Œå­˜å‚¨ Vulkan ç¼“å†²åŒºå¯¹è±¡ï¼š
+    // - objectï¼šå­˜å‚¨æŠ•å½±ã€æ¨¡å‹ã€è§†å›¾çŸ©é˜µå’Œç›¸æœºä½ç½®ã€‚
+    // - paramsï¼šå­˜å‚¨å…‰æºæ•°æ®ï¼ˆUBOParamsï¼‰ã€‚
+    // - clusterDataï¼šå­˜å‚¨é›†ç¾¤è®¡æ•°å’Œåç§»ï¼ˆClusterCountsandOffsetsï¼‰ã€‚
+    // - clusterIndexListï¼šå­˜å‚¨å…‰æºç´¢å¼•åˆ—è¡¨ï¼ˆClusterIndexListï¼‰ã€‚
+    // - sphereVertex/Index/Normalï¼šå­˜å‚¨å…‰æºçƒä½“çš„é¡¶ç‚¹ã€ç´¢å¼•å’Œæ³•çº¿ç¼“å†²åŒºï¼Œç”¨äºå¯è§†åŒ–å…‰æºã€‚
 
     struct UBOMatrices {
-        glm::mat4 projection; // Í¶Ó°¾ØÕó
-        glm::mat4 model;      // Ä£ĞÍ¾ØÕó
-        glm::mat4 view;       // ÊÓÍ¼¾ØÕó
-        glm::vec3 camPos;     // Ïà»úÎ»ÖÃ
-        float padding;        // Ìî³äÒÔ¶ÔÆë 16 ×Ö½Ú
+        glm::mat4 projection; // æŠ•å½±çŸ©é˜µ
+        glm::mat4 model;      // æ¨¡å‹çŸ©é˜µ
+        glm::mat4 view;       // è§†å›¾çŸ©é˜µ
+        glm::vec3 camPos;     // ç›¸æœºä½ç½®
+        float padding;        // å¡«å……ä»¥å¯¹é½ 16 å­—èŠ‚
     } uboMatrices;
-    // ¶¨Òå UBOMatrices ½á¹¹Ìå£¬´æ´¢Ïà»úºÍ±ä»»¾ØÕó£º
-    // - projection£ºÍ¸ÊÓÍ¶Ó°¾ØÕó¡£
-    // - model£ºÄ£ĞÍ±ä»»¾ØÕó¡£
-    // - view£ºÊÓÍ¼¾ØÕó£¨Ïà»ú·½Ïò£©¡£
-    // - camPos£ºÏà»úÊÀ½ç¿Õ¼äÎ»ÖÃ¡£
-    // - padding£ºÌî³ä 4 ×Ö½Ú£¬È·±£½á¹¹ÌåÂú×ã 16 ×Ö½Ú¶ÔÆë£¨std140 ²¼¾Ö£©¡£
+    // å®šä¹‰ UBOMatrices ç»“æ„ä½“ï¼Œå­˜å‚¨ç›¸æœºå’Œå˜æ¢çŸ©é˜µï¼š
+    // - projectionï¼šé€è§†æŠ•å½±çŸ©é˜µã€‚
+    // - modelï¼šæ¨¡å‹å˜æ¢çŸ©é˜µã€‚
+    // - viewï¼šè§†å›¾çŸ©é˜µï¼ˆç›¸æœºæ–¹å‘ï¼‰ã€‚
+    // - camPosï¼šç›¸æœºä¸–ç•Œç©ºé—´ä½ç½®ã€‚
+    // - paddingï¼šå¡«å…… 4 å­—èŠ‚ï¼Œç¡®ä¿ç»“æ„ä½“æ»¡è¶³ 16 å­—èŠ‚å¯¹é½ï¼ˆstd140 å¸ƒå±€ï¼‰ã€‚
 
     UBOParams uboParams;
     ClusterCountsandOffsets clusterData;
     ClusterIndexList clusterIndexList;
-    // ÉùÃ÷ Uniform Buffer Êı¾İÊµÀı£º
-    // - uboParams£º´æ´¢¹âÔ´Êı¾İ¡£
-    // - clusterData£º´æ´¢¼¯Èº¼ÆÊıºÍÆ«ÒÆ¡£
-    // - clusterIndexList£º´æ´¢¹âÔ´Ë÷ÒıÁĞ±í¡£
+    // å£°æ˜ Uniform Buffer æ•°æ®å®ä¾‹ï¼š
+    // - uboParamsï¼šå­˜å‚¨å…‰æºæ•°æ®ã€‚
+    // - clusterDataï¼šå­˜å‚¨é›†ç¾¤è®¡æ•°å’Œåç§»ã€‚
+    // - clusterIndexListï¼šå­˜å‚¨å…‰æºç´¢å¼•åˆ—è¡¨ã€‚
 
     VkPipelineLayout pipelineLayout{ VK_NULL_HANDLE };
     VkPipeline pipeline{ VK_NULL_HANDLE };
     VkDescriptorSetLayout descriptorSetLayout{ VK_NULL_HANDLE };
     VkDescriptorSet descriptorSet{ VK_NULL_HANDLE };
-    // ÉùÃ÷ Vulkan ¹ÜÏßÏà¹Ø¶ÔÏó£º
-    // - pipelineLayout£º¹ÜÏß²¼¾Ö£¬¶¨Òå×ÅÉ«Æ÷×ÊÔ´°ó¶¨¡£
-    // - pipeline£ºÍ¼ĞÎ¹ÜÏß£¬¶¨ÒåäÖÈ¾Á÷³Ì¡£
-    // - descriptorSetLayout£ºÃèÊö·û¼¯²¼¾Ö£¬¶¨Òå Uniform Buffer °ó¶¨¡£
-    // - descriptorSet£ºÃèÊö·û¼¯£¬°ó¶¨Êµ¼Ê»º³åÇø¡£
+    // å£°æ˜ Vulkan ç®¡çº¿ç›¸å…³å¯¹è±¡ï¼š
+    // - pipelineLayoutï¼šç®¡çº¿å¸ƒå±€ï¼Œå®šä¹‰ç€è‰²å™¨èµ„æºç»‘å®šã€‚
+    // - pipelineï¼šå›¾å½¢ç®¡çº¿ï¼Œå®šä¹‰æ¸²æŸ“æµç¨‹ã€‚
+    // - descriptorSetLayoutï¼šæè¿°ç¬¦é›†å¸ƒå±€ï¼Œå®šä¹‰ Uniform Buffer ç»‘å®šã€‚
+    // - descriptorSetï¼šæè¿°ç¬¦é›†ï¼Œç»‘å®šå®é™…ç¼“å†²åŒºã€‚
 
     std::vector<Material> materials;
     int32_t materialIndex = 0;
     std::vector<std::string> materialNames;
     std::vector<std::string> objectNames;
-    // ÉùÃ÷²ÄÖÊºÍÄ£ĞÍÑ¡ÔñÏà¹Ø±äÁ¿£º  std::vector<Material>Ä£°åÀà
-    // - materials£º´æ´¢ËùÓĞ²ÄÖÊ£¨Èç½ğ¡¢Í­µÈ£©¡£
-    // - materialIndex£ºµ±Ç°Ñ¡ÖĞµÄ²ÄÖÊË÷Òı£¬Ä¬ÈÏÎª 0£¨½ğ£©¡£
-    // - materialNames£º²ÄÖÊÃû³ÆÁĞ±í£¬ÓÃÓÚ UI ÏÔÊ¾¡£
-    // - objectNames£ºÄ£ĞÍÃû³ÆÁĞ±í£¨Èç "Sphere", "Teapot"£©£¬ÓÃÓÚ UI Ñ¡Ôñ¡£
+    // å£°æ˜æè´¨å’Œæ¨¡å‹é€‰æ‹©ç›¸å…³å˜é‡ï¼š  std::vector<Material>æ¨¡æ¿ç±»
+    // - materialsï¼šå­˜å‚¨æ‰€æœ‰æè´¨ï¼ˆå¦‚é‡‘ã€é“œç­‰ï¼‰ã€‚
+    // - materialIndexï¼šå½“å‰é€‰ä¸­çš„æè´¨ç´¢å¼•ï¼Œé»˜è®¤ä¸º 0ï¼ˆé‡‘ï¼‰ã€‚
+    // - materialNamesï¼šæè´¨åç§°åˆ—è¡¨ï¼Œç”¨äº UI æ˜¾ç¤ºã€‚
+    // - objectNamesï¼šæ¨¡å‹åç§°åˆ—è¡¨ï¼ˆå¦‚ "Sphere", "Teapot"ï¼‰ï¼Œç”¨äº UI é€‰æ‹©ã€‚
 
-    // ¹âÔ´ÇòÌå¼¸ºÎÌåÊı¾İ
+    // å…‰æºçƒä½“å‡ ä½•ä½“æ•°æ®
     uint32_t sphereIndexCount = 0;
-    // ´æ´¢¹âÔ´ÇòÌåµÄË÷ÒıÊıÁ¿£¬ÓÃÓÚ»æÖÆ¹âÔ´Î»ÖÃµÄ¿ÉÊÓ»¯ÇòÌå¡£
+    // å­˜å‚¨å…‰æºçƒä½“çš„ç´¢å¼•æ•°é‡ï¼Œç”¨äºç»˜åˆ¶å…‰æºä½ç½®çš„å¯è§†åŒ–çƒä½“ã€‚
 
     VulkanExample() : VulkanExampleBase() {
-        // ¹¹Ôìº¯Êı£¬³õÊ¼»¯Ê¾Àı¡£
+        // æ„é€ å‡½æ•°ï¼Œåˆå§‹åŒ–ç¤ºä¾‹ã€‚
         title = "Physical based shading basics";
-        // ÉèÖÃ´°¿Ú±êÌâÎª "Physical based shading basics"¡£
+        // è®¾ç½®çª—å£æ ‡é¢˜ä¸º "Physical based shading basics"ã€‚
         camera.type = Camera::CameraType::firstperson;
-        // ÉèÖÃÏà»úÎªµÚÒ»ÈË³ÆÄ£Ê½£¬ÓÃ»§¿ÉÍ¨¹ıÊó±ê/¼üÅÌ¿ØÖÆ¡£
+        // è®¾ç½®ç›¸æœºä¸ºç¬¬ä¸€äººç§°æ¨¡å¼ï¼Œç”¨æˆ·å¯é€šè¿‡é¼ æ ‡/é”®ç›˜æ§åˆ¶ã€‚
         camera.setPosition(glm::vec3(10.0f, 13.0f, 1.8f));
-        // ÉèÖÃÏà»ú³õÊ¼Î»ÖÃÎª (10.0, 13.0, 1.8)£º
-        // - X=10.0£ºÓÒ²à¡£
-        // - Y=13.0£ºÉÏ·½¡£
-        // - Z=1.8£ºÂÔÏòÇ°¡£
+        // è®¾ç½®ç›¸æœºåˆå§‹ä½ç½®ä¸º (10.0, 13.0, 1.8)ï¼š
+        // - X=10.0ï¼šå³ä¾§ã€‚
+        // - Y=13.0ï¼šä¸Šæ–¹ã€‚
+        // - Z=1.8ï¼šç•¥å‘å‰ã€‚
         camera.setRotation(glm::vec3(-62.5f, 90.0f, 0.0f));
-        // ÉèÖÃÏà»ú³õÊ¼Ğı×ª£¨Å·À­½Ç£¬µ¥Î»£º¶È£©£º
-        // - Pitch=-62.5¡ã£ºÏòÏÂÇãĞ± 62.5¡ã¡£
-        // - Yaw=90.0¡ã£ºÏòÓÒĞı×ª 90¡ã¡£
-        // - Roll=0.0¡ã£ºÎŞ¹ö×ª¡£
-        camera.movementSpeed = 4.0f;
-        // ÉèÖÃÏà»úÒÆ¶¯ËÙ¶ÈÎª 4.0 µ¥Î»/Ãë¡£
+        // è®¾ç½®ç›¸æœºåˆå§‹æ—‹è½¬ï¼ˆæ¬§æ‹‰è§’ï¼Œå•ä½ï¼šåº¦ï¼‰ï¼š
+        // - Pitch=-62.5Â°ï¼šå‘ä¸‹å€¾æ–œ 62.5Â°ã€‚
+        // - Yaw=90.0Â°ï¼šå‘å³æ—‹è½¬ 90Â°ã€‚
+        // - Roll=0.0Â°ï¼šæ— æ»šè½¬ã€‚
+        camera.movementSpeed = 8.0f;
+        // è®¾ç½®ç›¸æœºç§»åŠ¨é€Ÿåº¦ä¸º 4.0 å•ä½/ç§’ã€‚
         camera.setPerspective(60.0f, (float)width / (float)height, 0.1f, 256.0f);
-        // ÉèÖÃÍ¸ÊÓÍ¶Ó°£º
-        // - FOV£º60¡ã¡£
-        // - ¿í¸ß±È£º´°¿Ú¿í¶È/¸ß¶È¡£
-        // - ½ü²Ã¼ôÃæ£º0.1¡£
-        // - Ô¶²Ã¼ôÃæ£º256.0¡£
+        // è®¾ç½®é€è§†æŠ•å½±ï¼š
+        // - FOVï¼š60Â°ã€‚
+        // - å®½é«˜æ¯”ï¼šçª—å£å®½åº¦/é«˜åº¦ã€‚
+        // - è¿‘è£å‰ªé¢ï¼š0.1ã€‚
+        // - è¿œè£å‰ªé¢ï¼š256.0ã€‚
         camera.rotationSpeed = 0.25f;
-        // ÉèÖÃÏà»úĞı×ªËÙ¶ÈÎª 0.25 ¶È/ÏñËØ¡£
+        // è®¾ç½®ç›¸æœºæ—‹è½¬é€Ÿåº¦ä¸º 0.25 åº¦/åƒç´ ã€‚
         timerSpeed *= 0.25f;
-        // ¼õÂıÊ±¼äÁ÷ÊÅËÙ¶È£¨ÓÃÓÚ¶¯»­£©£¬³ËÒÔ 0.25¡£
+        // å‡æ…¢æ—¶é—´æµé€é€Ÿåº¦ï¼ˆç”¨äºåŠ¨ç”»ï¼‰ï¼Œä¹˜ä»¥ 0.25ã€‚
 
-        // ³õÊ¼»¯²ÄÖÊ
+        // åˆå§‹åŒ–æè´¨
         materials.push_back(Material("Gold", glm::vec3(1.0f, 0.765557f, 0.336057f), 0.1f, 1.0f));
         materials.push_back(Material("Copper", glm::vec3(0.955008f, 0.637427f, 0.538163f), 0.1f, 1.0f));
         materials.push_back(Material("Chromium", glm::vec3(0.549585f, 0.556114f, 0.554256f), 0.1f, 1.0f));
@@ -221,32 +221,32 @@ public:
         materials.push_back(Material("Red", glm::vec3(1.0f, 0.0f, 0.0f), 0.1f, 1.0f));
         materials.push_back(Material("Blue", glm::vec3(0.0f, 0.0f, 1.0f), 0.1f, 1.0f));
         materials.push_back(Material("Black", glm::vec3(0.0f), 0.1f, 1.0f));
-        // ³õÊ¼»¯²ÄÖÊÁĞ±í£¬Ìí¼Ó 12 ÖÖ²ÄÖÊ£º
-        // - Ã¿ÖÖ²ÄÖÊÖ¸¶¨Ãû³Æ¡¢RGB ÑÕÉ«¡¢´Ö²Ú¶È£¨0.1£©¡¢½ğÊô¶È£¨1.0£©¡£
-        // - ²ÄÖÊ°üÀ¨½ğ¡¢Í­¡¢¸õµÈ½ğÊô£¬ÒÔ¼°´¿É«£¨°×¡¢ºì¡¢À¶¡¢ºÚ£©¡£
+        // åˆå§‹åŒ–æè´¨åˆ—è¡¨ï¼Œæ·»åŠ  12 ç§æè´¨ï¼š
+        // - æ¯ç§æè´¨æŒ‡å®šåç§°ã€RGB é¢œè‰²ã€ç²—ç³™åº¦ï¼ˆ0.1ï¼‰ã€é‡‘å±åº¦ï¼ˆ1.0ï¼‰ã€‚
+        // - æè´¨åŒ…æ‹¬é‡‘ã€é“œã€é“¬ç­‰é‡‘å±ï¼Œä»¥åŠçº¯è‰²ï¼ˆç™½ã€çº¢ã€è“ã€é»‘ï¼‰ã€‚
 
         for (auto material : materials) {
             materialNames.push_back(material.name);
         }
-        // ±éÀú²ÄÖÊÁĞ±í£¬½«²ÄÖÊÃû³ÆÌí¼Óµ½ materialNames£¬ÓÃÓÚ UI ÏÔÊ¾¡£
+        // éå†æè´¨åˆ—è¡¨ï¼Œå°†æè´¨åç§°æ·»åŠ åˆ° materialNamesï¼Œç”¨äº UI æ˜¾ç¤ºã€‚
 
         objectNames = { "Sphere", "Teapot", "Torusknot", "Venus", "plane", "plane_circle" };
-        // ³õÊ¼»¯Ä£ĞÍÃû³ÆÁĞ±í£¬°üº¬ 6 ÖÖÄ£ĞÍ£ºÇòÌå¡¢²èºø¡¢»·Ãæ½á¡¢½ğĞÇ¡¢Æ½Ãæ¡¢Ô²ĞÎÆ½Ãæ¡£
+        // åˆå§‹åŒ–æ¨¡å‹åç§°åˆ—è¡¨ï¼ŒåŒ…å« 6 ç§æ¨¡å‹ï¼šçƒä½“ã€èŒ¶å£¶ã€ç¯é¢ç»“ã€é‡‘æ˜Ÿã€å¹³é¢ã€åœ†å½¢å¹³é¢ã€‚
 
         materialIndex = 0;
-        // ÉèÖÃ³õÊ¼²ÄÖÊË÷ÒıÎª 0£¨½ğ£©¡£
+        // è®¾ç½®åˆå§‹æè´¨ç´¢å¼•ä¸º 0ï¼ˆé‡‘ï¼‰ã€‚
     }
 
     ~VulkanExample() {
-        // Îö¹¹º¯Êı£¬ÊÍ·Å Vulkan ×ÊÔ´¡£
+        // ææ„å‡½æ•°ï¼Œé‡Šæ”¾ Vulkan èµ„æºã€‚
         if (device) {
-            // ¼ì²é Vulkan Éè±¸ÊÇ·ñÓĞĞ§¡£
+            // æ£€æŸ¥ Vulkan è®¾å¤‡æ˜¯å¦æœ‰æ•ˆã€‚
             vkDestroyPipeline(device, pipeline, nullptr);
-            // Ïú»ÙÍ¼ĞÎ¹ÜÏß¡£
+            // é”€æ¯å›¾å½¢ç®¡çº¿ã€‚
             vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
-            // Ïú»Ù¹ÜÏß²¼¾Ö¡£
+            // é”€æ¯ç®¡çº¿å¸ƒå±€ã€‚
             vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
-            // Ïú»ÙÃèÊö·û¼¯²¼¾Ö¡£
+            // é”€æ¯æè¿°ç¬¦é›†å¸ƒå±€ã€‚
             uniformBuffers.object.destroy();
             uniformBuffers.params.destroy();
             uniformBuffers.clusterData.destroy();
@@ -254,75 +254,75 @@ public:
             uniformBuffers.sphereVertex.destroy();
             uniformBuffers.sphereIndex.destroy();
             uniformBuffers.sphereNormal.destroy();
-            // Ïú»ÙËùÓĞ Uniform Buffer ºÍ¹âÔ´ÇòÌå»º³åÇø¡£
+            // é”€æ¯æ‰€æœ‰ Uniform Buffer å’Œå…‰æºçƒä½“ç¼“å†²åŒºã€‚
         }
     }
 
-    // Éú³ÉÇòÌå¼¸ºÎÌå
+    // ç”Ÿæˆçƒä½“å‡ ä½•ä½“
     void generateSphereGeometry(std::vector<glm::vec3>& vertices, std::vector<glm::vec3>& normals, std::vector<uint32_t>& indices, uint32_t sectors = 64, uint32_t stacks = 64) {
-        // º¯ÊıÉú³ÉÇòÌå¼¸ºÎÌåÊı¾İ£¬ÓÃÓÚ»æÖÆ¹âÔ´Î»ÖÃµÄ¿ÉÊÓ»¯ÇòÌå£º
-        // - vertices£º´æ´¢¶¥µãÎ»ÖÃ¡£
-        // - normals£º´æ´¢¶¥µã·¨Ïß¡£
-        // - indices£º´æ´¢Èı½ÇĞÎË÷Òı¡£
-        // - sectors£º¾­¶ÈÏ¸·ÖÊı£¬Ä¬ÈÏ 32¡£
-        // - stacks£ºÎ³¶ÈÏ¸·ÖÊı£¬Ä¬ÈÏ 32¡£
+        // å‡½æ•°ç”Ÿæˆçƒä½“å‡ ä½•ä½“æ•°æ®ï¼Œç”¨äºç»˜åˆ¶å…‰æºä½ç½®çš„å¯è§†åŒ–çƒä½“ï¼š
+        // - verticesï¼šå­˜å‚¨é¡¶ç‚¹ä½ç½®ã€‚
+        // - normalsï¼šå­˜å‚¨é¡¶ç‚¹æ³•çº¿ã€‚
+        // - indicesï¼šå­˜å‚¨ä¸‰è§’å½¢ç´¢å¼•ã€‚
+        // - sectorsï¼šç»åº¦ç»†åˆ†æ•°ï¼Œé»˜è®¤ 32ã€‚
+        // - stacksï¼šçº¬åº¦ç»†åˆ†æ•°ï¼Œé»˜è®¤ 32ã€‚
         vertices.clear();
         normals.clear();
         indices.clear();
-        // Çå¿ÕÊäÈëÈİÆ÷£¬È·±£ÎŞ¾ÉÊı¾İ¡£
+        // æ¸…ç©ºè¾“å…¥å®¹å™¨ï¼Œç¡®ä¿æ— æ—§æ•°æ®ã€‚
         const float PI = 3.14159265359f;
-        // ¶¨Òå ¦Ğ ³£Á¿¡£
+        // å®šä¹‰ Ï€ å¸¸é‡ã€‚
         float sectorStep = 2 * PI / sectors;
-        // ¼ÆËã¾­¶È²½³¤£º2¦Ğ / Ï¸·ÖÊı¡£
+        // è®¡ç®—ç»åº¦æ­¥é•¿ï¼š2Ï€ / ç»†åˆ†æ•°ã€‚
         float stackStep = PI / stacks;
-        // ¼ÆËãÎ³¶È²½³¤£º¦Ğ / Ï¸·ÖÊı¡£
+        // è®¡ç®—çº¬åº¦æ­¥é•¿ï¼šÏ€ / ç»†åˆ†æ•°ã€‚
 
-        // Éú³É¶¥µãºÍ·¨Ïß£¨°ë¾¶Îª1£©
+        // ç”Ÿæˆé¡¶ç‚¹å’Œæ³•çº¿ï¼ˆåŠå¾„ä¸º1ï¼‰
         for (uint32_t i = 0; i <= stacks; ++i) {
-            // ±éÀúÎ³¶È£¨´Ó±±¼«µ½ÄÏ¼«£©¡£
+            // éå†çº¬åº¦ï¼ˆä»åŒ—æåˆ°å—æï¼‰ã€‚
             float stackAngle = PI / 2 - i * stackStep;
-            // ¼ÆËãµ±Ç°Î³¶È½Ç¶È£º´Ó ¦Ğ/2£¨±±¼«£©µ½ -¦Ğ/2£¨ÄÏ¼«£©¡£
+            // è®¡ç®—å½“å‰çº¬åº¦è§’åº¦ï¼šä» Ï€/2ï¼ˆåŒ—æï¼‰åˆ° -Ï€/2ï¼ˆå—æï¼‰ã€‚
             float xy = cosf(stackAngle);
-            // ¼ÆËã xy Æ½ÃæÍ¶Ó°£ºcos(Î³¶È½Ç)¡£
+            // è®¡ç®— xy å¹³é¢æŠ•å½±ï¼šcos(çº¬åº¦è§’)ã€‚
             float z =  sinf(stackAngle);
-            // ¼ÆËã z ×ø±ê£ºsin(Î³¶È½Ç)¡£
+            // è®¡ç®— z åæ ‡ï¼šsin(çº¬åº¦è§’)ã€‚
 
             for (uint32_t j = 0; j <= sectors; ++j) {
-                // ±éÀú¾­¶È£¨ÈÆ Z ÖáĞı×ª£©¡£
+                // éå†ç»åº¦ï¼ˆç»• Z è½´æ—‹è½¬ï¼‰ã€‚
                 float sectorAngle = j * sectorStep;
-                // ¼ÆËãµ±Ç°¾­¶È½Ç¶È£º0 µ½ 2¦Ğ¡£
+                // è®¡ç®—å½“å‰ç»åº¦è§’åº¦ï¼š0 åˆ° 2Ï€ã€‚
                 glm::vec3 vertex;
                 vertex.x = xy * cosf(sectorAngle);
-                // X ×ø±ê£ºxy * cos(¾­¶È½Ç)¡£
+                // X åæ ‡ï¼šxy * cos(ç»åº¦è§’)ã€‚
                 vertex.y = xy * sinf(sectorAngle);
-                // Y ×ø±ê£ºxy * sin(¾­¶È½Ç)¡£
+                // Y åæ ‡ï¼šxy * sin(ç»åº¦è§’)ã€‚
                 vertex.z = z;
-                // Z ×ø±ê£ºz¡£
+                // Z åæ ‡ï¼šzã€‚
                 vertices.push_back(vertex);
-                // Ìí¼Ó¶¥µãµ½ vertices¡£
+                // æ·»åŠ é¡¶ç‚¹åˆ° verticesã€‚
                 normals.push_back(glm::normalize(vertex));
-                // ·¨ÏßÎª¹éÒ»»¯µÄ¶¥µãÎ»ÖÃ£¨ÇòÌå°ë¾¶Îª 1£¬ËµÃ÷ÒÑ¾­¹éÒ»»¯ÁË£¬²»Ê¹ÓÃ¹éÒ»»¯Ò²ÊÇ¿ÉÒÔµÄ£©¡£
+                // æ³•çº¿ä¸ºå½’ä¸€åŒ–çš„é¡¶ç‚¹ä½ç½®ï¼ˆçƒä½“åŠå¾„ä¸º 1ï¼Œè¯´æ˜å·²ç»å½’ä¸€åŒ–äº†ï¼Œä¸ä½¿ç”¨å½’ä¸€åŒ–ä¹Ÿæ˜¯å¯ä»¥çš„ï¼‰ã€‚
             }
         }
 
-        // Éú³ÉË÷Òı
+        // ç”Ÿæˆç´¢å¼•
         for (uint32_t i = 0; i < stacks; ++i) {
-            // ±éÀúÎ³¶È´ø¡£
+            // éå†çº¬åº¦å¸¦ã€‚
             uint32_t k1 = i * (sectors + 1);
-            // µ±Ç°Î³¶È´øµÄÆğÊ¼¶¥µãË÷Òı¡£
+            // å½“å‰çº¬åº¦å¸¦çš„èµ·å§‹é¡¶ç‚¹ç´¢å¼•ã€‚
             uint32_t k2 = k1 + sectors + 1;
-            // ÏÂÒ»Î³¶È´øµÄÆğÊ¼¶¥µãË÷Òı¡£
+            // ä¸‹ä¸€çº¬åº¦å¸¦çš„èµ·å§‹é¡¶ç‚¹ç´¢å¼•ã€‚
 
             for (uint32_t j = 0; j < sectors; ++j, ++k1, ++k2) {
-                // ±éÀú¾­¶È£¬Éú³ÉÈı½ÇĞÎ¡£
+                // éå†ç»åº¦ï¼Œç”Ÿæˆä¸‰è§’å½¢ã€‚
                 if (i != 0) {
-                    // ·Ç±±¼«£¬Éú³ÉÉÏÈı½ÇĞÎ¡£
+                    // éåŒ—æï¼Œç”Ÿæˆä¸Šä¸‰è§’å½¢ã€‚
                     indices.push_back(k1);
                     indices.push_back(k2);
                     indices.push_back(k1 + 1);
                 }
                 if (i != (stacks - 1)) {
-                    // ·ÇÄÏ¼«£¬Éú³ÉÏÂÈı½ÇĞÎ¡£
+                    // éå—æï¼Œç”Ÿæˆä¸‹ä¸‰è§’å½¢ã€‚
                     indices.push_back(k1 + 1);
                     indices.push_back(k2);
                     indices.push_back(k2 + 1);
@@ -331,108 +331,108 @@ public:
         }
     }
 
-    // ´´½¨ÇòÌå»º³åÇø
+    // åˆ›å»ºçƒä½“ç¼“å†²åŒº
     void prepareSphereBuffers() {
-        // º¯Êı´´½¨ Vulkan »º³åÇø£¬´æ´¢¹âÔ´ÇòÌåµÄ¼¸ºÎÊı¾İ¡£
+        // å‡½æ•°åˆ›å»º Vulkan ç¼“å†²åŒºï¼Œå­˜å‚¨å…‰æºçƒä½“çš„å‡ ä½•æ•°æ®ã€‚
         std::vector<glm::vec3> vertices;
         std::vector<glm::vec3> normals;
         std::vector<uint32_t>  indices;
-        // ¶¨ÒåÁÙÊ±ÈİÆ÷£¬´æ´¢¶¥µã¡¢·¨ÏßºÍË÷Òı¡£
+        // å®šä¹‰ä¸´æ—¶å®¹å™¨ï¼Œå­˜å‚¨é¡¶ç‚¹ã€æ³•çº¿å’Œç´¢å¼•ã€‚
         generateSphereGeometry(vertices, normals, indices);
-        // µ÷ÓÃ generateSphereGeometry Éú³ÉÇòÌåÊı¾İ¡£
+        // è°ƒç”¨ generateSphereGeometry ç”Ÿæˆçƒä½“æ•°æ®ã€‚
         sphereIndexCount = static_cast<uint32_t>(indices.size());
-        // ´æ´¢Ë÷ÒıÊıÁ¿£¬ÓÃÓÚ»æÖÆ¡£static_cast<uint32_t>ÎªÇ¿ÖÆÀàĞÍ×ª»»
+        // å­˜å‚¨ç´¢å¼•æ•°é‡ï¼Œç”¨äºç»˜åˆ¶ã€‚static_cast<uint32_t>ä¸ºå¼ºåˆ¶ç±»å‹è½¬æ¢
 
-        // ´´½¨¶¥µã»º³åÇø£¨Î»ÖÃ£©
+        // åˆ›å»ºé¡¶ç‚¹ç¼“å†²åŒºï¼ˆä½ç½®ï¼‰
         VkDeviceSize vertexBufferSize = vertices.size() * sizeof(glm::vec3);
-        // ¼ÆËã¶¥µã»º³åÇø´óĞ¡£º¶¥µãÊı * Ã¿¸ö¶¥µã´óĞ¡¡£
+        // è®¡ç®—é¡¶ç‚¹ç¼“å†²åŒºå¤§å°ï¼šé¡¶ç‚¹æ•° * æ¯ä¸ªé¡¶ç‚¹å¤§å°ã€‚
         vks::Buffer stagingVertexBuffer;
-        // ´´½¨ÁÙÊ±Ôİ´æ»º³åÇø£¬ÓÃÓÚ CPU µ½ GPU Êı¾İ´«Êä¡£ÊÇCPUÄÚ´æµ½GPUÏÔ´æµÄÖĞ¼äÍ¨µÀ£¬Ôö¼Ó´«ÊäĞ§ÂÊ
+        // åˆ›å»ºä¸´æ—¶æš‚å­˜ç¼“å†²åŒºï¼Œç”¨äº CPU åˆ° GPU æ•°æ®ä¼ è¾“ã€‚æ˜¯CPUå†…å­˜åˆ°GPUæ˜¾å­˜çš„ä¸­é—´é€šé“ï¼Œå¢åŠ ä¼ è¾“æ•ˆç‡
         VK_CHECK_RESULT(vulkanDevice->createBuffer(
             VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
             &stagingVertexBuffer,
             vertexBufferSize,
             vertices.data()));
-        // ´´½¨Ôİ´æ»º³åÇø£º
-        // - ÓÃ·¨£ºVK_BUFFER_USAGE_TRANSFER_SRC_BIT ´«ÊäÔ´¡£
-        // - ÄÚ´æÊôĞÔ£ºVK_MEMORY_PROPERTY_HOST_VISIBLE_BIT  Ö÷»ú¿É¼û
-        //             VK_MEMORY_PROPERTY_HOST_COHERENT_BIT ¿ÉÒ»ÖÂĞÔÓ³Éä¡¢»º´æÒ»ÖÂ¡£
-        // - »º³åÇø´óĞ¡£ºvertexBufferSize¡£
-        // - Êı¾İÀ´Ô´£ºvertices µÄÖ¸Õë¡£
+        // åˆ›å»ºæš‚å­˜ç¼“å†²åŒºï¼š
+        // - ç”¨æ³•ï¼šVK_BUFFER_USAGE_TRANSFER_SRC_BIT ä¼ è¾“æºã€‚
+        // - å†…å­˜å±æ€§ï¼šVK_MEMORY_PROPERTY_HOST_VISIBLE_BIT  ä¸»æœºå¯è§
+        //             VK_MEMORY_PROPERTY_HOST_COHERENT_BIT å¯ä¸€è‡´æ€§æ˜ å°„ã€ç¼“å­˜ä¸€è‡´ã€‚
+        // - ç¼“å†²åŒºå¤§å°ï¼švertexBufferSizeã€‚
+        // - æ•°æ®æ¥æºï¼švertices çš„æŒ‡é’ˆã€‚
         VK_CHECK_RESULT(vulkanDevice->createBuffer(
             VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
             &uniformBuffers.sphereVertex,
             vertexBufferSize));
-        // ´´½¨Ä¿±ê¶¥µã»º³åÇø£º
-        // - ÓÃ·¨£ºVK_BUFFER_USAGE_VERTEX_BUFFER_BIT           ¶¥µã»º³åÇø
-        //         VK_BUFFER_USAGE_TRANSFER_DST_BIT            ´«ÊäÄ¿±ê¡£
-        // - ÄÚ´æÊôĞÔ£ºVK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT     Éè±¸±¾µØ£¨GPU ÓÅ»¯£©¡£
-        // - ´óĞ¡£ºvertexBufferSize                            »º³åÇø´óĞ¡       
+        // åˆ›å»ºç›®æ ‡é¡¶ç‚¹ç¼“å†²åŒºï¼š
+        // - ç”¨æ³•ï¼šVK_BUFFER_USAGE_VERTEX_BUFFER_BIT           é¡¶ç‚¹ç¼“å†²åŒº
+        //         VK_BUFFER_USAGE_TRANSFER_DST_BIT            ä¼ è¾“ç›®æ ‡ã€‚
+        // - å†…å­˜å±æ€§ï¼šVK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT     è®¾å¤‡æœ¬åœ°ï¼ˆGPU ä¼˜åŒ–ï¼‰ã€‚
+        // - å¤§å°ï¼švertexBufferSize                            ç¼“å†²åŒºå¤§å°       
         vulkanDevice->copyBuffer(&stagingVertexBuffer, &uniformBuffers.sphereVertex, queue);
-        // ½«Êı¾İ´ÓÔİ´æ»º³åÇø¸´ÖÆµ½Ä¿±ê»º³åÇø£¬Ê¹ÓÃÃüÁî¶ÓÁĞ¡£
+        // å°†æ•°æ®ä»æš‚å­˜ç¼“å†²åŒºå¤åˆ¶åˆ°ç›®æ ‡ç¼“å†²åŒºï¼Œä½¿ç”¨å‘½ä»¤é˜Ÿåˆ—ã€‚
         stagingVertexBuffer.destroy();
-        // Ïú»ÙÔİ´æ»º³åÇø£¬ÊÍ·ÅÄÚ´æ¡£
+        // é”€æ¯æš‚å­˜ç¼“å†²åŒºï¼Œé‡Šæ”¾å†…å­˜ã€‚
 
-        // ´´½¨·¨Ïß»º³åÇø
+        // åˆ›å»ºæ³•çº¿ç¼“å†²åŒº
         VkDeviceSize normalBufferSize = normals.size() * sizeof(glm::vec3);
-        // ¼ÆËã·¨Ïß»º³åÇø´óĞ¡¡£
+        // è®¡ç®—æ³•çº¿ç¼“å†²åŒºå¤§å°ã€‚
         vks::Buffer stagingNormalBuffer;
-        // ´´½¨·¨ÏßÔİ´æ»º³åÇø¡£
+        // åˆ›å»ºæ³•çº¿æš‚å­˜ç¼“å†²åŒºã€‚
         VK_CHECK_RESULT(vulkanDevice->createBuffer(
             VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
             &stagingNormalBuffer,
             normalBufferSize,
             normals.data()));
-        // ´´½¨·¨ÏßÔİ´æ»º³åÇø£¬ÀàËÆ¶¥µã»º³åÇø¡£
+        // åˆ›å»ºæ³•çº¿æš‚å­˜ç¼“å†²åŒºï¼Œç±»ä¼¼é¡¶ç‚¹ç¼“å†²åŒºã€‚
         VK_CHECK_RESULT(vulkanDevice->createBuffer(
             VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
             &uniformBuffers.sphereNormal,
             normalBufferSize));
-        // ´´½¨·¨ÏßÄ¿±ê»º³åÇø¡£
+        // åˆ›å»ºæ³•çº¿ç›®æ ‡ç¼“å†²åŒºã€‚
         vulkanDevice->copyBuffer(&stagingNormalBuffer, &uniformBuffers.sphereNormal, queue);
-        // ¸´ÖÆ·¨ÏßÊı¾İ¡£
+        // å¤åˆ¶æ³•çº¿æ•°æ®ã€‚
         stagingNormalBuffer.destroy();
-        // Ïú»Ù·¨ÏßÔİ´æ»º³åÇø¡£
+        // é”€æ¯æ³•çº¿æš‚å­˜ç¼“å†²åŒºã€‚
 
-        // ´´½¨Ë÷Òı»º³åÇø
+        // åˆ›å»ºç´¢å¼•ç¼“å†²åŒº
         VkDeviceSize indexBufferSize = indices.size() * sizeof(uint32_t);
-        // ¼ÆËãË÷Òı»º³åÇø´óĞ¡¡£
+        // è®¡ç®—ç´¢å¼•ç¼“å†²åŒºå¤§å°ã€‚
         vks::Buffer stagingIndexBuffer;
-        // ´´½¨Ë÷ÒıÔİ´æ»º³åÇø¡£
+        // åˆ›å»ºç´¢å¼•æš‚å­˜ç¼“å†²åŒºã€‚
         VK_CHECK_RESULT(vulkanDevice->createBuffer(
             VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
             &stagingIndexBuffer,
             indexBufferSize,
             indices.data()));
-        // ´´½¨Ë÷ÒıÔİ´æ»º³åÇø¡£
+        // åˆ›å»ºç´¢å¼•æš‚å­˜ç¼“å†²åŒºã€‚
         VK_CHECK_RESULT(vulkanDevice->createBuffer(
             VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
             &uniformBuffers.sphereIndex,
             indexBufferSize));
-        // ´´½¨Ë÷ÒıÄ¿±ê»º³åÇø£º
-        // - ÓÃ·¨£ºË÷Òı»º³åÇø¡¢´«ÊäÄ¿±ê¡£
+        // åˆ›å»ºç´¢å¼•ç›®æ ‡ç¼“å†²åŒºï¼š
+        // - ç”¨æ³•ï¼šç´¢å¼•ç¼“å†²åŒºã€ä¼ è¾“ç›®æ ‡ã€‚
         vulkanDevice->copyBuffer(&stagingIndexBuffer, &uniformBuffers.sphereIndex, queue);
-        // ¸´ÖÆË÷ÒıÊı¾İ¡£
+        // å¤åˆ¶ç´¢å¼•æ•°æ®ã€‚
         stagingIndexBuffer.destroy();
-        // Ïú»ÙË÷ÒıÔİ´æ»º³åÇø¡£
+        // é”€æ¯ç´¢å¼•æš‚å­˜ç¼“å†²åŒºã€‚
     }
 
     void buildCommandBuffers() {
-        // º¯Êı¹¹½¨ÃüÁî»º³åÇø£¬¼ÇÂ¼äÖÈ¾ÃüÁî¡£
+        // å‡½æ•°æ„å»ºå‘½ä»¤ç¼“å†²åŒºï¼Œè®°å½•æ¸²æŸ“å‘½ä»¤ã€‚
         VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
-        // ³õÊ¼»¯ÃüÁî»º³åÇø¿ªÊ¼ĞÅÏ¢£¬ÉèÖÃÄ¬ÈÏ±êÖ¾¡£
+        // åˆå§‹åŒ–å‘½ä»¤ç¼“å†²åŒºå¼€å§‹ä¿¡æ¯ï¼Œè®¾ç½®é»˜è®¤æ ‡å¿—ã€‚
         VkClearValue clearValues[2];
         clearValues[0].color = defaultClearColor;
         clearValues[1].depthStencil = { 1.0f, 0 };
-        // ¶¨ÒåÇå¿ÕÖµ£º
-        // - clearValues[0]£ºÑÕÉ«»º³åÇøÇå¿ÕÎªÄ¬ÈÏÑÕÉ«£¨Í¨³£ºÚÉ«£©¡£
-        // - clearValues[1]£ºÉî¶È»º³åÇøÇå¿ÕÎª 1.0£¨×îÔ¶£©£¬Ä£°åÖµÎª 0¡£
+        // å®šä¹‰æ¸…ç©ºå€¼ï¼š
+        // - clearValues[0]ï¼šé¢œè‰²ç¼“å†²åŒºæ¸…ç©ºä¸ºé»˜è®¤é¢œè‰²ï¼ˆé€šå¸¸é»‘è‰²ï¼‰ã€‚
+        // - clearValues[1]ï¼šæ·±åº¦ç¼“å†²åŒºæ¸…ç©ºä¸º 1.0ï¼ˆæœ€è¿œï¼‰ï¼Œæ¨¡æ¿å€¼ä¸º 0ã€‚
 
         VkRenderPassBeginInfo renderPassBeginInfo = vks::initializers::renderPassBeginInfo();
         renderPassBeginInfo.renderPass = renderPass;
@@ -442,153 +442,153 @@ public:
         renderPassBeginInfo.renderArea.extent.height = height;
         renderPassBeginInfo.clearValueCount = 2;
         renderPassBeginInfo.pClearValues = clearValues;
-        // ³õÊ¼»¯äÖÈ¾Í¨µÀ¿ªÊ¼ĞÅÏ¢£º
-        // - renderPass£ºÊ¹ÓÃµÄäÖÈ¾Í¨µÀ¡£
-        // - renderArea£ºäÖÈ¾ÇøÓòÎªÕû¸ö´°¿Ú£¨Æ«ÒÆ 0,0£¬¿í¸ßÎª´°¿Ú³ß´ç£©¡£
-        // - clearValueCount£º2 ¸öÇå¿ÕÖµ£¨ÑÕÉ«ºÍÉî¶È£©¡£
-        // - pClearValues£ºÖ¸Ïò clearValues Êı×é¡£
+        // åˆå§‹åŒ–æ¸²æŸ“é€šé“å¼€å§‹ä¿¡æ¯ï¼š
+        // - renderPassï¼šä½¿ç”¨çš„æ¸²æŸ“é€šé“ã€‚
+        // - renderAreaï¼šæ¸²æŸ“åŒºåŸŸä¸ºæ•´ä¸ªçª—å£ï¼ˆåç§» 0,0ï¼Œå®½é«˜ä¸ºçª—å£å°ºå¯¸ï¼‰ã€‚
+        // - clearValueCountï¼š2 ä¸ªæ¸…ç©ºå€¼ï¼ˆé¢œè‰²å’Œæ·±åº¦ï¼‰ã€‚
+        // - pClearValuesï¼šæŒ‡å‘ clearValues æ•°ç»„ã€‚
 
         for (int32_t i = 0; i < drawCmdBuffers.size(); ++i) {
-            // ±éÀúËùÓĞÃüÁî»º³åÇø£¨Í¨³£ÓëÖ¡»º³åÇøÊıÁ¿ÏàÍ¬£©¡£
+            // éå†æ‰€æœ‰å‘½ä»¤ç¼“å†²åŒºï¼ˆé€šå¸¸ä¸å¸§ç¼“å†²åŒºæ•°é‡ç›¸åŒï¼‰ã€‚
             renderPassBeginInfo.framebuffer = frameBuffers[i];
-            // ÉèÖÃµ±Ç°Ö¡»º³åÇø¡£
+            // è®¾ç½®å½“å‰å¸§ç¼“å†²åŒºã€‚
             VK_CHECK_RESULT(vkBeginCommandBuffer(drawCmdBuffers[i], &cmdBufInfo));
-            // ¿ªÊ¼¼ÇÂ¼ÃüÁî»º³åÇø¡£
+            // å¼€å§‹è®°å½•å‘½ä»¤ç¼“å†²åŒºã€‚
             vkCmdBeginRenderPass(drawCmdBuffers[i], &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
-            // ¿ªÊ¼äÖÈ¾Í¨µÀ£º
-            // - Ê¹ÓÃ renderPassBeginInfo ÅäÖÃ¡£
-            // - ×ÓÍ¨µÀÄÚÈİÎªÄÚÁª£¨Ö±½Ó¼ÇÂ¼ÃüÁî£©¡£
+            // å¼€å§‹æ¸²æŸ“é€šé“ï¼š
+            // - ä½¿ç”¨ renderPassBeginInfo é…ç½®ã€‚
+            // - å­é€šé“å†…å®¹ä¸ºå†…è”ï¼ˆç›´æ¥è®°å½•å‘½ä»¤ï¼‰ã€‚
 
             VkViewport viewport = vks::initializers::viewport((float)width, (float)height, 0.0f, 1.0f);
             vkCmdSetViewport(drawCmdBuffers[i], 0, 1, &viewport);
-            // ÉèÖÃÊÓ¿Ú£º
-            // - ´óĞ¡£º´°¿Ú¿í¸ß¡£
-            // - Z ·¶Î§£º0.0 µ½ 1.0£¨±ê×¼Éî¶È·¶Î§£©¡£
+            // è®¾ç½®è§†å£ï¼š
+            // - å¤§å°ï¼šçª—å£å®½é«˜ã€‚
+            // - Z èŒƒå›´ï¼š0.0 åˆ° 1.0ï¼ˆæ ‡å‡†æ·±åº¦èŒƒå›´ï¼‰ã€‚
 
             VkRect2D scissor = vks::initializers::rect2D(width, height, 0, 0);
             vkCmdSetScissor(drawCmdBuffers[i], 0, 1, &scissor);
-            // ÉèÖÃ²Ã¼ô¾ØĞÎ£º
-            // - ¸²¸ÇÕû¸ö´°¿Ú£¨Æ«ÒÆ 0,0£¬¿í¸ßÎª´°¿Ú³ß´ç£©¡£
+            // è®¾ç½®è£å‰ªçŸ©å½¢ï¼š
+            // - è¦†ç›–æ•´ä¸ªçª—å£ï¼ˆåç§» 0,0ï¼Œå®½é«˜ä¸ºçª—å£å°ºå¯¸ï¼‰ã€‚
 
             vkCmdBindPipeline(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-            // °ó¶¨Í¼ĞÎ¹ÜÏß£¬Ö¸¶¨äÖÈ¾Ê¹ÓÃµÄ¹ÜÏß¶ÔÏó¡£
+            // ç»‘å®šå›¾å½¢ç®¡çº¿ï¼ŒæŒ‡å®šæ¸²æŸ“ä½¿ç”¨çš„ç®¡çº¿å¯¹è±¡ã€‚
 
             vkCmdBindDescriptorSets(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSet, 0, NULL);
-            // °ó¶¨ÃèÊö·û¼¯£º
-            // - °ó¶¨µ½Í¼ĞÎ¹ÜÏß¡£
-            // - Ê¹ÓÃ pipelineLayout¡£
-            // - °ó¶¨µÚ 0 ¸öÃèÊö·û¼¯£¨descriptorSet£©¡£
-            // - ÎŞ¶¯Ì¬Æ«ÒÆ¡£
+            // ç»‘å®šæè¿°ç¬¦é›†ï¼š
+            // - ç»‘å®šåˆ°å›¾å½¢ç®¡çº¿ã€‚
+            // - ä½¿ç”¨ pipelineLayoutã€‚
+            // - ç»‘å®šç¬¬ 0 ä¸ªæè¿°ç¬¦é›†ï¼ˆdescriptorSetï¼‰ã€‚
+            // - æ— åŠ¨æ€åç§»ã€‚
 
-            // »æÖÆ³¡¾°¼¸ºÎÌå
+            // ç»˜åˆ¶åœºæ™¯å‡ ä½•ä½“
             Material mat = materials[materialIndex];
-            // »ñÈ¡µ±Ç°Ñ¡ÖĞµÄ²ÄÖÊ¡£
+            // è·å–å½“å‰é€‰ä¸­çš„æè´¨ã€‚
             const uint32_t gridSize = 7;
-            // ¶¨ÒåÍø¸ñ´óĞ¡Îª 7x7£¬ÓÃÓÚÅÅÁĞÄ£ĞÍ¡£
+            // å®šä¹‰ç½‘æ ¼å¤§å°ä¸º 7x7ï¼Œç”¨äºæ’åˆ—æ¨¡å‹ã€‚
 
             for (uint32_t y = 0; y < gridSize; y++) {
-                // ±éÀúÍø¸ñ Y Öá¡£
+                // éå†ç½‘æ ¼ Y è½´ã€‚
                 for (uint32_t x = 0; x < gridSize; x++) {
-                    // ±éÀúÍø¸ñ X Öá¡£
+                    // éå†ç½‘æ ¼ X è½´ã€‚
                     glm::vec3 pos = glm::vec3(float(x - (gridSize / 2.0f)) * 2.5f, 0.0f, float(y - (gridSize / 2.0f)) * 2.5f);
-                    // ¼ÆËãÄ£ĞÍÎ»ÖÃ£º
-                    // - X£º(x - 3.5) * 2.5£¬·¶Î§ [-8.75, 8.75]¡£
-                    // - Y£º0.0£¨µØÃæ£©¡£
-                    // - Z£º(y - 3.5) * 2.5£¬·¶Î§ [-8.75, 8.75]¡£
+                    // è®¡ç®—æ¨¡å‹ä½ç½®ï¼š
+                    // - Xï¼š(x - 3.5) * 2.5ï¼ŒèŒƒå›´ [-8.75, 8.75]ã€‚
+                    // - Yï¼š0.0ï¼ˆåœ°é¢ï¼‰ã€‚
+                    // - Zï¼š(y - 3.5) * 2.5ï¼ŒèŒƒå›´ [-8.75, 8.75]ã€‚
                     vkCmdPushConstants(drawCmdBuffers[i], pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::vec3), &pos);
-                    // ÍÆËÍ¶¥µã×ÅÉ«Æ÷µÄÍÆËÍ³£Á¿£º
-                    // - Æ«ÒÆ 0£¬´óĞ¡Îª glm::vec3¡£
-                    // - Êı¾İ£ºÄ£ĞÍÎ»ÖÃ pos¡£
+                    // æ¨é€é¡¶ç‚¹ç€è‰²å™¨çš„æ¨é€å¸¸é‡ï¼š
+                    // - åç§» 0ï¼Œå¤§å°ä¸º glm::vec3ã€‚
+                    // - æ•°æ®ï¼šæ¨¡å‹ä½ç½® posã€‚
                     vkCmdPushConstants(drawCmdBuffers[i], pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(glm::vec3), sizeof(Material::PushBlock), &mat.params);
-                    // ÍÆËÍÆ¬¶Î×ÅÉ«Æ÷µÄÍÆËÍ³£Á¿£º
-                    // - Æ«ÒÆ sizeof(glm::vec3)£¬´óĞ¡Îª PushBlock¡£
-                    // - Êı¾İ£º²ÄÖÊ²ÎÊı£¨´Ö²Ú¶È¡¢½ğÊô¶È¡¢ÑÕÉ«£©¡£
+                    // æ¨é€ç‰‡æ®µç€è‰²å™¨çš„æ¨é€å¸¸é‡ï¼š
+                    // - åç§» sizeof(glm::vec3)ï¼Œå¤§å°ä¸º PushBlockã€‚
+                    // - æ•°æ®ï¼šæè´¨å‚æ•°ï¼ˆç²—ç³™åº¦ã€é‡‘å±åº¦ã€é¢œè‰²ï¼‰ã€‚
                     models.objects[models.objectIndex].draw(drawCmdBuffers[i]);
-                    // »æÖÆµ±Ç°Ñ¡ÖĞµÄÄ£ĞÍ£¨ÓÉ objectIndex Ö¸¶¨£©¡£
+                    // ç»˜åˆ¶å½“å‰é€‰ä¸­çš„æ¨¡å‹ï¼ˆç”± objectIndex æŒ‡å®šï¼‰ã€‚
                 }
             }
 
-            // »æÖÆ¹âÔ´ÇòÌå
+            // ç»˜åˆ¶å…‰æºçƒä½“
             VkDeviceSize offsets[] = { 0, 0 };
-            // ¶¨Òå¶¥µã»º³åÇøÆ«ÒÆ£¬¾ùÎª 0¡£
+            // å®šä¹‰é¡¶ç‚¹ç¼“å†²åŒºåç§»ï¼Œå‡ä¸º 0ã€‚
             VkBuffer vertexBuffers[] = { uniformBuffers.sphereVertex.buffer, uniformBuffers.sphereNormal.buffer };
-            // ¶¨Òå¶¥µã»º³åÇøÊı×é£ºÎ»ÖÃºÍ·¨Ïß¡£
+            // å®šä¹‰é¡¶ç‚¹ç¼“å†²åŒºæ•°ç»„ï¼šä½ç½®å’Œæ³•çº¿ã€‚
             vkCmdBindVertexBuffers(drawCmdBuffers[i], 0, 2, vertexBuffers, offsets);
-            // °ó¶¨¶¥µã»º³åÇø£º
-            // - °ó¶¨µã 0 ºÍ 1£¨Î»ÖÃºÍ·¨Ïß£©¡£
-            // - Ê¹ÓÃ vertexBuffers ºÍ offsets¡£
+            // ç»‘å®šé¡¶ç‚¹ç¼“å†²åŒºï¼š
+            // - ç»‘å®šç‚¹ 0 å’Œ 1ï¼ˆä½ç½®å’Œæ³•çº¿ï¼‰ã€‚
+            // - ä½¿ç”¨ vertexBuffers å’Œ offsetsã€‚
             vkCmdBindIndexBuffer(drawCmdBuffers[i], uniformBuffers.sphereIndex.buffer, 0, VK_INDEX_TYPE_UINT32);
-            // °ó¶¨Ë÷Òı»º³åÇø£º
-            // - Ê¹ÓÃ sphereIndex.buffer¡£
-            // - Æ«ÒÆ 0£¬Ë÷ÒıÀàĞÍÎª uint32¡£
+            // ç»‘å®šç´¢å¼•ç¼“å†²åŒºï¼š
+            // - ä½¿ç”¨ sphereIndex.bufferã€‚
+            // - åç§» 0ï¼Œç´¢å¼•ç±»å‹ä¸º uint32ã€‚
 
             for (int j = 0; j < maxnumLights; ++j) {
-                // ±éÀúËùÓĞ¹âÔ´£¨64 ¸ö£©¡£
+                // éå†æ‰€æœ‰å…‰æºï¼ˆ64 ä¸ªï¼‰ã€‚
                 glm::vec3 pos = glm::vec3(uboParams.lights[j].position);
-                // »ñÈ¡¹âÔ´Î»ÖÃ£¨ºöÂÔ w ·ÖÁ¿£©¡£
+                // è·å–å…‰æºä½ç½®ï¼ˆå¿½ç•¥ w åˆ†é‡ï¼‰ã€‚
                 vkCmdPushConstants(drawCmdBuffers[i], pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::vec3), &pos);
-                // ÍÆËÍ¹âÔ´ÇòÌåÎ»ÖÃµ½¶¥µã×ÅÉ«Æ÷¡£
+                // æ¨é€å…‰æºçƒä½“ä½ç½®åˆ°é¡¶ç‚¹ç€è‰²å™¨ã€‚
                 Material::PushBlock dummyMat = { 0.5f, 0.1f, uboParams.lights[j].colorAndRadius.x,uboParams.lights[j].colorAndRadius.y,uboParams.lights[j].colorAndRadius.z };
-                // ´´½¨ĞéÄâ²ÄÖÊ£¨È«£¬ÑÕÉ«Îª¹âÔ´ÑÕÉ«£©£¬±ÜÃâÎ´¶¨ÒåĞĞÎª¡£
+                // åˆ›å»ºè™šæ‹Ÿæè´¨ï¼ˆå…¨ï¼Œé¢œè‰²ä¸ºå…‰æºé¢œè‰²ï¼‰ï¼Œé¿å…æœªå®šä¹‰è¡Œä¸ºã€‚
 
                 vkCmdPushConstants(drawCmdBuffers[i], pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(glm::vec3), sizeof(Material::PushBlock), &dummyMat);
-                // ÍÆËÍĞéÄâ²ÄÖÊµ½Æ¬¶Î×ÅÉ«Æ÷£¨¿ÉÄÜÓÃÓÚ½ûÓÃ PBR ×ÅÉ«£©¡£
+                // æ¨é€è™šæ‹Ÿæè´¨åˆ°ç‰‡æ®µç€è‰²å™¨ï¼ˆå¯èƒ½ç”¨äºç¦ç”¨ PBR ç€è‰²ï¼‰ã€‚
 
 
                 models.objects[models.objectIndex].draw(drawCmdBuffers[i]);
-                // »æÖÆµ±Ç°Ñ¡ÖĞµÄÄ£ĞÍ£¨ÓÉ objectIndex Ö¸¶¨£©
+                // ç»˜åˆ¶å½“å‰é€‰ä¸­çš„æ¨¡å‹ï¼ˆç”± objectIndex æŒ‡å®šï¼‰
 
 
                 vkCmdDrawIndexed(drawCmdBuffers[i], sphereIndexCount, 1, 0, 0, j);
-                // »æÖÆ¹âÔ´ÇòÌå£º
-                // - Ë÷ÒıÊı£ºsphereIndexCount¡£
-                // - ÊµÀıÊı£º1¡£
-                // - Ë÷ÒıÆ«ÒÆ£º0¡£
-                // - ¶¥µãÆ«ÒÆ£º0¡£
-                // - ÊµÀı ID£ºj£¨¿ÉÄÜÓÃÓÚ×ÅÉ«Æ÷ÖĞ£©¡£
+                // ç»˜åˆ¶å…‰æºçƒä½“ï¼š
+                // - ç´¢å¼•æ•°ï¼šsphereIndexCountã€‚
+                // - å®ä¾‹æ•°ï¼š1ã€‚
+                // - ç´¢å¼•åç§»ï¼š0ã€‚
+                // - é¡¶ç‚¹åç§»ï¼š0ã€‚
+                // - å®ä¾‹ IDï¼šjï¼ˆå¯èƒ½ç”¨äºç€è‰²å™¨ä¸­ï¼‰ã€‚
             }
 
             drawUI(drawCmdBuffers[i]);
-            // »æÖÆÓÃ»§½çÃæ£¨ÓÉ»ùÀàÌá¹©£©¡£
+            // ç»˜åˆ¶ç”¨æˆ·ç•Œé¢ï¼ˆç”±åŸºç±»æä¾›ï¼‰ã€‚
             vkCmdEndRenderPass(drawCmdBuffers[i]);
-            // ½áÊøäÖÈ¾Í¨µÀ¡£
+            // ç»“æŸæ¸²æŸ“é€šé“ã€‚
             VK_CHECK_RESULT(vkEndCommandBuffer(drawCmdBuffers[i]));
-            // ½áÊøÃüÁî»º³åÇø¼ÇÂ¼¡£
+            // ç»“æŸå‘½ä»¤ç¼“å†²åŒºè®°å½•ã€‚
         }
     }
 
     void loadAssets() {
-        // º¯Êı¼ÓÔØ glTF Ä£ĞÍ×Ê²ú¡£
+        // å‡½æ•°åŠ è½½ glTF æ¨¡å‹èµ„äº§ã€‚
         std::vector<std::string> filenames = { "sphere.gltf", "teapot.gltf", "torusknot.gltf", "venus.gltf", "plane.gltf", "plane_circle.gltf" };
-        // ¶¨ÒåÄ£ĞÍÎÄ¼şÃûÁĞ±í¡£
+        // å®šä¹‰æ¨¡å‹æ–‡ä»¶ååˆ—è¡¨ã€‚
         models.objects.resize(filenames.size());
-        // µ÷Õû models.objects ´óĞ¡ÒÔÆ¥ÅäÎÄ¼şÊıÁ¿£¨6£©¡£
+        // è°ƒæ•´ models.objects å¤§å°ä»¥åŒ¹é…æ–‡ä»¶æ•°é‡ï¼ˆ6ï¼‰ã€‚
         for (size_t i = 0; i < filenames.size(); i++) {
-            // ±éÀúÎÄ¼şÃû¡£
+            // éå†æ–‡ä»¶åã€‚
             models.objects[i].loadFromFile(getAssetPath() + "models/" + filenames[i], vulkanDevice, queue,
                 vkglTF::FileLoadingFlags::PreTransformVertices | vkglTF::FileLoadingFlags::FlipY);
-            // ¼ÓÔØ glTF Ä£ĞÍ£º
-            // - Â·¾¶£º×Ê²úÂ·¾¶ + "models/" + ÎÄ¼şÃû¡£
-            // - Éè±¸£ºvulkanDevice¡£
-            // - ¶ÓÁĞ£ºqueue¡£
-            // - ±êÖ¾£ºÔ¤±ä»»¶¥µã£¨Ó¦ÓÃÄ£ĞÍ±ä»»£©¡¢·­×ª Y Öá£¨ÊÊÅä Vulkan ×ø±êÏµ£©¡£
+            // åŠ è½½ glTF æ¨¡å‹ï¼š
+            // - è·¯å¾„ï¼šèµ„äº§è·¯å¾„ + "models/" + æ–‡ä»¶åã€‚
+            // - è®¾å¤‡ï¼švulkanDeviceã€‚
+            // - é˜Ÿåˆ—ï¼šqueueã€‚
+            // - æ ‡å¿—ï¼šé¢„å˜æ¢é¡¶ç‚¹ï¼ˆåº”ç”¨æ¨¡å‹å˜æ¢ï¼‰ã€ç¿»è½¬ Y è½´ï¼ˆé€‚é… Vulkan åæ ‡ç³»ï¼‰ã€‚
         }
     }
 
     void setupDescriptors() {
-        // º¯ÊıÉèÖÃÃèÊö·û³Ø¡¢ÃèÊö·û¼¯²¼¾ÖºÍÃèÊö·û¼¯¡£
+        // å‡½æ•°è®¾ç½®æè¿°ç¬¦æ± ã€æè¿°ç¬¦é›†å¸ƒå±€å’Œæè¿°ç¬¦é›†ã€‚
         std::vector<VkDescriptorPoolSize> poolSizes = {
             vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 4),
         };
-        // ¶¨ÒåÃèÊö·û³Ø´óĞ¡£º
-        // - ÀàĞÍ£ºUniform Buffer¡£
-        // - ÊıÁ¿£º4£¨¶ÔÓ¦ 4 ¸ö»º³åÇø£©¡£
+        // å®šä¹‰æè¿°ç¬¦æ± å¤§å°ï¼š
+        // - ç±»å‹ï¼šUniform Bufferã€‚
+        // - æ•°é‡ï¼š4ï¼ˆå¯¹åº” 4 ä¸ªç¼“å†²åŒºï¼‰ã€‚
         VkDescriptorPoolCreateInfo descriptorPoolInfo = vks::initializers::descriptorPoolCreateInfo(poolSizes, 2);
-        // ³õÊ¼»¯ÃèÊö·û³Ø´´½¨ĞÅÏ¢£º
-        // - ³Ø´óĞ¡£ºpoolSizes¡£
-        // - ×î´óÃèÊö·û¼¯Êı£º2¡£
+        // åˆå§‹åŒ–æè¿°ç¬¦æ± åˆ›å»ºä¿¡æ¯ï¼š
+        // - æ± å¤§å°ï¼špoolSizesã€‚
+        // - æœ€å¤§æè¿°ç¬¦é›†æ•°ï¼š2ã€‚
         VK_CHECK_RESULT(vkCreateDescriptorPool(device, &descriptorPoolInfo, nullptr, &descriptorPool));
-        // ´´½¨ÃèÊö·û³Ø£¬´æ´¢µ½ descriptorPool¡£
+        // åˆ›å»ºæè¿°ç¬¦æ± ï¼Œå­˜å‚¨åˆ° descriptorPoolã€‚
 
         std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {
             vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0),
@@ -596,23 +596,23 @@ public:
             vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT, 2),
             vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT, 3),
         };
-        // ¶¨ÒåÃèÊö·û¼¯²¼¾Ö°ó¶¨£º
-        // - °ó¶¨ 0£ºUniform Buffer£¨¾ØÕó£©£¬ÓÃÓÚ¶¥µãºÍÆ¬¶Î×ÅÉ«Æ÷¡£
-        // - °ó¶¨ 1£ºUniform Buffer£¨¹âÔ´Êı¾İ£©£¬ÓÃÓÚÆ¬¶Î×ÅÉ«Æ÷¡£
-        // - °ó¶¨ 2£ºUniform Buffer£¨¹âÔ´Ë÷ÒıÁĞ±í£©£¬ÓÃÓÚÆ¬¶Î×ÅÉ«Æ÷¡£
-        // - °ó¶¨ 3£ºUniform Buffer£¨¼¯Èº¼ÆÊıºÍÆ«ÒÆ£©£¬ÓÃÓÚÆ¬¶Î×ÅÉ«Æ÷¡£
+        // å®šä¹‰æè¿°ç¬¦é›†å¸ƒå±€ç»‘å®šï¼š
+        // - ç»‘å®š 0ï¼šUniform Bufferï¼ˆçŸ©é˜µï¼‰ï¼Œç”¨äºé¡¶ç‚¹å’Œç‰‡æ®µç€è‰²å™¨ã€‚
+        // - ç»‘å®š 1ï¼šUniform Bufferï¼ˆå…‰æºæ•°æ®ï¼‰ï¼Œç”¨äºç‰‡æ®µç€è‰²å™¨ã€‚
+        // - ç»‘å®š 2ï¼šUniform Bufferï¼ˆå…‰æºç´¢å¼•åˆ—è¡¨ï¼‰ï¼Œç”¨äºç‰‡æ®µç€è‰²å™¨ã€‚
+        // - ç»‘å®š 3ï¼šUniform Bufferï¼ˆé›†ç¾¤è®¡æ•°å’Œåç§»ï¼‰ï¼Œç”¨äºç‰‡æ®µç€è‰²å™¨ã€‚
         VkDescriptorSetLayoutCreateInfo descriptorLayout = vks::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings);
-        // ³õÊ¼»¯ÃèÊö·û¼¯²¼¾Ö´´½¨ĞÅÏ¢£¬Ê¹ÓÃ setLayoutBindings¡£
+        // åˆå§‹åŒ–æè¿°ç¬¦é›†å¸ƒå±€åˆ›å»ºä¿¡æ¯ï¼Œä½¿ç”¨ setLayoutBindingsã€‚
         VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &descriptorSetLayout));
-        // ´´½¨ÃèÊö·û¼¯²¼¾Ö£¬´æ´¢µ½ descriptorSetLayout¡£
+        // åˆ›å»ºæè¿°ç¬¦é›†å¸ƒå±€ï¼Œå­˜å‚¨åˆ° descriptorSetLayoutã€‚
 
         VkDescriptorSetAllocateInfo allocInfo = vks::initializers::descriptorSetAllocateInfo(descriptorPool, &descriptorSetLayout, 1);
-        // ³õÊ¼»¯ÃèÊö·û¼¯·ÖÅäĞÅÏ¢£º
-        // - ³Ø£ºdescriptorPool¡£
-        // - ²¼¾Ö£ºdescriptorSetLayout¡£
-        // - ÊıÁ¿£º1¡£
+        // åˆå§‹åŒ–æè¿°ç¬¦é›†åˆ†é…ä¿¡æ¯ï¼š
+        // - æ± ï¼šdescriptorPoolã€‚
+        // - å¸ƒå±€ï¼šdescriptorSetLayoutã€‚
+        // - æ•°é‡ï¼š1ã€‚
         VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSet));
-        // ·ÖÅäÃèÊö·û¼¯£¬´æ´¢µ½ descriptorSet¡£
+        // åˆ†é…æè¿°ç¬¦é›†ï¼Œå­˜å‚¨åˆ° descriptorSetã€‚
 
         std::vector<VkWriteDescriptorSet> writeDescriptorSets = {
             vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &uniformBuffers.object.descriptor),
@@ -620,104 +620,104 @@ public:
             vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2, &uniformBuffers.clusterIndexList.descriptor),
             vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 3, &uniformBuffers.clusterData.descriptor),
         };
-        // ¶¨ÒåÃèÊö·û¼¯Ğ´Èë²Ù×÷£º
-        // - °ó¶¨ 0£º¾ØÕó»º³åÇø£¨uniformBuffers.object£©¡£
-        // - °ó¶¨ 1£º¹âÔ´»º³åÇø£¨uniformBuffers.params£©¡£
-        // - °ó¶¨ 2£º¹âÔ´Ë÷ÒıÁĞ±í£¨uniformBuffers.clusterIndexList£©¡£
-        // - °ó¶¨ 3£º¼¯Èº¼ÆÊıºÍÆ«ÒÆ£¨uniformBuffers.clusterData£©¡£
+        // å®šä¹‰æè¿°ç¬¦é›†å†™å…¥æ“ä½œï¼š
+        // - ç»‘å®š 0ï¼šçŸ©é˜µç¼“å†²åŒºï¼ˆuniformBuffers.objectï¼‰ã€‚
+        // - ç»‘å®š 1ï¼šå…‰æºç¼“å†²åŒºï¼ˆuniformBuffers.paramsï¼‰ã€‚
+        // - ç»‘å®š 2ï¼šå…‰æºç´¢å¼•åˆ—è¡¨ï¼ˆuniformBuffers.clusterIndexListï¼‰ã€‚
+        // - ç»‘å®š 3ï¼šé›†ç¾¤è®¡æ•°å’Œåç§»ï¼ˆuniformBuffers.clusterDataï¼‰ã€‚
 
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, NULL);
-        // ¸üĞÂÃèÊö·û¼¯£¬Ó¦ÓÃËùÓĞĞ´Èë²Ù×÷¡£
+        // æ›´æ–°æè¿°ç¬¦é›†ï¼Œåº”ç”¨æ‰€æœ‰å†™å…¥æ“ä½œã€‚
     }
 
     VkPipelineShaderStageCreateInfo loadShader(std::string fileName, VkShaderStageFlagBits stage) {
-        // º¯Êı¼ÓÔØ×ÅÉ«Æ÷Ä£¿é¡£
+        // å‡½æ•°åŠ è½½ç€è‰²å™¨æ¨¡å—ã€‚
         VkPipelineShaderStageCreateInfo shaderStage = {};
-        // ³õÊ¼»¯×ÅÉ«Æ÷½×¶ÎĞÅÏ¢¡£
+        // åˆå§‹åŒ–ç€è‰²å™¨é˜¶æ®µä¿¡æ¯ã€‚
         shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        // ÉèÖÃ½á¹¹ÌåÀàĞÍ¡£
+        // è®¾ç½®ç»“æ„ä½“ç±»å‹ã€‚
         shaderStage.stage = stage;
-        // ÉèÖÃ×ÅÉ«Æ÷½×¶Î£¨¶¥µã»òÆ¬¶Î£©¡£
+        // è®¾ç½®ç€è‰²å™¨é˜¶æ®µï¼ˆé¡¶ç‚¹æˆ–ç‰‡æ®µï¼‰ã€‚
         shaderStage.pName = "main";
-        // ÉèÖÃ×ÅÉ«Æ÷Èë¿ÚµãÎª "main"¡£
+        // è®¾ç½®ç€è‰²å™¨å…¥å£ç‚¹ä¸º "main"ã€‚
 
-        // ¼ÙÉèHLSLÒÑÔ¤±àÒëÎªSPIR-V
+        // å‡è®¾HLSLå·²é¢„ç¼–è¯‘ä¸ºSPIR-V
         std::string spirvFile = fileName;
-        // ³õÊ¼»¯ SPIR-V ÎÄ¼şÃûÎªÊäÈëÎÄ¼şÃû¡£
+        // åˆå§‹åŒ– SPIR-V æ–‡ä»¶åä¸ºè¾“å…¥æ–‡ä»¶åã€‚
         if (fileName.ends_with(".hlsl")) {
-            // ¼ì²éÎÄ¼şÃûÊÇ·ñÒÔ ".hlsl" ½áÎ²¡£
+            // æ£€æŸ¥æ–‡ä»¶åæ˜¯å¦ä»¥ ".hlsl" ç»“å°¾ã€‚
             spirvFile = fileName.substr(0, fileName.size() - 5) + ".spv";
-            // ½«À©Õ¹ÃûÌæ»»Îª ".spv"¡£
+            // å°†æ‰©å±•åæ›¿æ¢ä¸º ".spv"ã€‚
         }
         shaderStage.module = vks::tools::loadShader(spirvFile.c_str(), device);
-        // ¼ÓÔØ SPIR-V ÎÄ¼ş£¬´´½¨×ÅÉ«Æ÷Ä£¿é¡£
+        // åŠ è½½ SPIR-V æ–‡ä»¶ï¼Œåˆ›å»ºç€è‰²å™¨æ¨¡å—ã€‚
 
         return shaderStage;
-        // ·µ»Ø×ÅÉ«Æ÷½×¶ÎĞÅÏ¢¡£
+        // è¿”å›ç€è‰²å™¨é˜¶æ®µä¿¡æ¯ã€‚
     }
 
     void preparePipelines() {
-        // º¯Êı´´½¨Í¼ĞÎ¹ÜÏß¡£
+        // å‡½æ•°åˆ›å»ºå›¾å½¢ç®¡çº¿ã€‚
         VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayout, 1);
-        // ³õÊ¼»¯¹ÜÏß²¼¾Ö´´½¨ĞÅÏ¢£º
-        // - ÃèÊö·û¼¯²¼¾Ö£ºdescriptorSetLayout¡£
-        // - ÊıÁ¿£º1¡£
+        // åˆå§‹åŒ–ç®¡çº¿å¸ƒå±€åˆ›å»ºä¿¡æ¯ï¼š
+        // - æè¿°ç¬¦é›†å¸ƒå±€ï¼šdescriptorSetLayoutã€‚
+        // - æ•°é‡ï¼š1ã€‚
         std::vector<VkPushConstantRange> pushConstantRanges = {
             vks::initializers::pushConstantRange(VK_SHADER_STAGE_VERTEX_BIT, sizeof(glm::vec3), 0),
             vks::initializers::pushConstantRange(VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(Material::PushBlock), sizeof(glm::vec3)),
         };
-        // ¶¨ÒåÍÆËÍ³£Á¿·¶Î§£º
-        // - ¶¥µã×ÅÉ«Æ÷£ºglm::vec3£¨Ä£ĞÍÎ»ÖÃ£©£¬Æ«ÒÆ 0¡£
-        // - Æ¬¶Î×ÅÉ«Æ÷£ºMaterial::PushBlock£¨²ÄÖÊ²ÎÊı£©£¬Æ«ÒÆ sizeof(glm::vec3)¡£
+        // å®šä¹‰æ¨é€å¸¸é‡èŒƒå›´ï¼š
+        // - é¡¶ç‚¹ç€è‰²å™¨ï¼šglm::vec3ï¼ˆæ¨¡å‹ä½ç½®ï¼‰ï¼Œåç§» 0ã€‚
+        // - ç‰‡æ®µç€è‰²å™¨ï¼šMaterial::PushBlockï¼ˆæè´¨å‚æ•°ï¼‰ï¼Œåç§» sizeof(glm::vec3)ã€‚
         pipelineLayoutCreateInfo.pushConstantRangeCount = 2;
-        // ÉèÖÃÍÆËÍ³£Á¿·¶Î§ÊıÁ¿Îª 2¡£
+        // è®¾ç½®æ¨é€å¸¸é‡èŒƒå›´æ•°é‡ä¸º 2ã€‚
         pipelineLayoutCreateInfo.pPushConstantRanges = pushConstantRanges.data();
-        // ÉèÖÃÍÆËÍ³£Á¿·¶Î§Êı×é¡£
+        // è®¾ç½®æ¨é€å¸¸é‡èŒƒå›´æ•°ç»„ã€‚
         VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout));
-        // ´´½¨¹ÜÏß²¼¾Ö£¬´æ´¢µ½ pipelineLayout¡£
+        // åˆ›å»ºç®¡çº¿å¸ƒå±€ï¼Œå­˜å‚¨åˆ° pipelineLayoutã€‚
 
         VkPipelineInputAssemblyStateCreateInfo inputAssemblyState = vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
-        // ³õÊ¼»¯ÊäÈë×é×°×´Ì¬£º
-        // - ÍØÆË£ºÈı½ÇĞÎÁĞ±í¡£
-        // - »ùÔªÖØÆô£º½ûÓÃ¡£
+        // åˆå§‹åŒ–è¾“å…¥ç»„è£…çŠ¶æ€ï¼š
+        // - æ‹“æ‰‘ï¼šä¸‰è§’å½¢åˆ—è¡¨ã€‚
+        // - åŸºå…ƒé‡å¯ï¼šç¦ç”¨ã€‚
         VkPipelineRasterizationStateCreateInfo rasterizationState = vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE);
-        // ³õÊ¼»¯¹âÕ¤»¯×´Ì¬£º
-        // - ¶à±ßĞÎÄ£Ê½£ºÌî³ä¡£
-        // - ±³ÃæÌŞ³ı£ºÆôÓÃ¡£
-        // - ÕıÃæ·½Ïò£ºÄæÊ±Õë¡£
+        // åˆå§‹åŒ–å…‰æ …åŒ–çŠ¶æ€ï¼š
+        // - å¤šè¾¹å½¢æ¨¡å¼ï¼šå¡«å……ã€‚
+        // - èƒŒé¢å‰”é™¤ï¼šå¯ç”¨ã€‚
+        // - æ­£é¢æ–¹å‘ï¼šé€†æ—¶é’ˆã€‚
         VkPipelineColorBlendAttachmentState blendAttachmentState = vks::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE);
-        // ³õÊ¼»¯ÑÕÉ«»ìºÏ¸½¼ş×´Ì¬£º
-        // - Ğ´ÑÚÂë£ºRGBA È«Ğ´¡£
-        // - »ìºÏ£º½ûÓÃ¡£
+        // åˆå§‹åŒ–é¢œè‰²æ··åˆé™„ä»¶çŠ¶æ€ï¼š
+        // - å†™æ©ç ï¼šRGBA å…¨å†™ã€‚
+        // - æ··åˆï¼šç¦ç”¨ã€‚
         VkPipelineColorBlendStateCreateInfo colorBlendState = vks::initializers::pipelineColorBlendStateCreateInfo(1, &blendAttachmentState);
-        // ³õÊ¼»¯ÑÕÉ«»ìºÏ×´Ì¬£º
-        // - ¸½¼şÊı£º1¡£
-        // - ¸½¼ş£ºblendAttachmentState¡£
+        // åˆå§‹åŒ–é¢œè‰²æ··åˆçŠ¶æ€ï¼š
+        // - é™„ä»¶æ•°ï¼š1ã€‚
+        // - é™„ä»¶ï¼šblendAttachmentStateã€‚
         VkPipelineDepthStencilStateCreateInfo depthStencilState = vks::initializers::pipelineDepthStencilStateCreateInfo(VK_TRUE, VK_TRUE, VK_COMPARE_OP_LESS_OR_EQUAL);
-        // ³õÊ¼»¯Éî¶ÈÄ£°å×´Ì¬£º
-        // - Éî¶È²âÊÔ£ºÆôÓÃ¡£
-        // - Éî¶ÈĞ´Èë£ºÆôÓÃ¡£
-        // - ±È½Ï²Ù×÷£ºĞ¡ÓÚµÈÓÚ¡£
+        // åˆå§‹åŒ–æ·±åº¦æ¨¡æ¿çŠ¶æ€ï¼š
+        // - æ·±åº¦æµ‹è¯•ï¼šå¯ç”¨ã€‚
+        // - æ·±åº¦å†™å…¥ï¼šå¯ç”¨ã€‚
+        // - æ¯”è¾ƒæ“ä½œï¼šå°äºç­‰äºã€‚
         VkPipelineViewportStateCreateInfo viewportState = vks::initializers::pipelineViewportStateCreateInfo(1, 1);
-        // ³õÊ¼»¯ÊÓ¿Ú×´Ì¬£º
-        // - ÊÓ¿ÚÊı£º1¡£
-        // - ²Ã¼ô¾ØĞÎÊı£º1¡£
+        // åˆå§‹åŒ–è§†å£çŠ¶æ€ï¼š
+        // - è§†å£æ•°ï¼š1ã€‚
+        // - è£å‰ªçŸ©å½¢æ•°ï¼š1ã€‚
         VkPipelineMultisampleStateCreateInfo multisampleState = vks::initializers::pipelineMultisampleStateCreateInfo(VK_SAMPLE_COUNT_1_BIT);
-        // ³õÊ¼»¯¶àÖØ²ÉÑù×´Ì¬£º
-        // - ²ÉÑùÊı£º1£¨ÎŞ¶àÖØ²ÉÑù£©¡£
+        // åˆå§‹åŒ–å¤šé‡é‡‡æ ·çŠ¶æ€ï¼š
+        // - é‡‡æ ·æ•°ï¼š1ï¼ˆæ— å¤šé‡é‡‡æ ·ï¼‰ã€‚
         std::vector<VkDynamicState> dynamicStateEnables = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
-        // ¶¨Òå¶¯Ì¬×´Ì¬£º
-        // - ÊÓ¿Ú¡£
-        // - ²Ã¼ô¾ØĞÎ¡£
+        // å®šä¹‰åŠ¨æ€çŠ¶æ€ï¼š
+        // - è§†å£ã€‚
+        // - è£å‰ªçŸ©å½¢ã€‚
         VkPipelineDynamicStateCreateInfo dynamicState = vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables);
-        // ³õÊ¼»¯¶¯Ì¬×´Ì¬ĞÅÏ¢¡£
+        // åˆå§‹åŒ–åŠ¨æ€çŠ¶æ€ä¿¡æ¯ã€‚
         VkGraphicsPipelineCreateInfo pipelineCI = vks::initializers::pipelineCreateInfo(pipelineLayout, renderPass);
-        // ³õÊ¼»¯Í¼ĞÎ¹ÜÏß´´½¨ĞÅÏ¢£º
-        // - ¹ÜÏß²¼¾Ö£ºpipelineLayout¡£
-        // - äÖÈ¾Í¨µÀ£ºrenderPass¡£
+        // åˆå§‹åŒ–å›¾å½¢ç®¡çº¿åˆ›å»ºä¿¡æ¯ï¼š
+        // - ç®¡çº¿å¸ƒå±€ï¼špipelineLayoutã€‚
+        // - æ¸²æŸ“é€šé“ï¼šrenderPassã€‚
 
         std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages;
-        // ¶¨Òå×ÅÉ«Æ÷½×¶ÎÊı×é£¬´óĞ¡Îª 2£¨¶¥µãºÍÆ¬¶Î£©¡£
+        // å®šä¹‰ç€è‰²å™¨é˜¶æ®µæ•°ç»„ï¼Œå¤§å°ä¸º 2ï¼ˆé¡¶ç‚¹å’Œç‰‡æ®µï¼‰ã€‚
         pipelineCI.pInputAssemblyState = &inputAssemblyState;
         pipelineCI.pRasterizationState = &rasterizationState;
         pipelineCI.pColorBlendState = &colorBlendState;
@@ -727,116 +727,116 @@ public:
         pipelineCI.pDynamicState = &dynamicState;
         pipelineCI.stageCount = static_cast<uint32_t>(shaderStages.size());
         pipelineCI.pStages = shaderStages.data();
-        // ÉèÖÃ¹ÜÏß×´Ì¬£º
-        // - ÊäÈë×é×°¡¢Õ¤¸ñ»¯¡¢ÑÕÉ«»ìºÏ¡¢¶àÖØ²ÉÑù¡¢ÊÓ¿Ú¡¢Éî¶ÈÄ£°å¡¢¶¯Ì¬×´Ì¬¡£
-        // - ×ÅÉ«Æ÷½×¶ÎÊıºÍÖ¸Õë¡£
+        // è®¾ç½®ç®¡çº¿çŠ¶æ€ï¼š
+        // - è¾“å…¥ç»„è£…ã€æ …æ ¼åŒ–ã€é¢œè‰²æ··åˆã€å¤šé‡é‡‡æ ·ã€è§†å£ã€æ·±åº¦æ¨¡æ¿ã€åŠ¨æ€çŠ¶æ€ã€‚
+        // - ç€è‰²å™¨é˜¶æ®µæ•°å’ŒæŒ‡é’ˆã€‚
         pipelineCI.pVertexInputState = vkglTF::Vertex::getPipelineVertexInputState({ vkglTF::VertexComponent::Position, vkglTF::VertexComponent::Normal });
-        // ÉèÖÃ¶¥µãÊäÈë×´Ì¬£º
-        // - Ê¹ÓÃ glTF ¶¥µã¸ñÊ½£¨Î»ÖÃºÍ·¨Ïß£©¡£
+        // è®¾ç½®é¡¶ç‚¹è¾“å…¥çŠ¶æ€ï¼š
+        // - ä½¿ç”¨ glTF é¡¶ç‚¹æ ¼å¼ï¼ˆä½ç½®å’Œæ³•çº¿ï¼‰ã€‚
 
         shaderStages[0] = loadShader(getShadersPath() + "pbrbasic/pbr.vert.hlsl", VK_SHADER_STAGE_VERTEX_BIT);
         shaderStages[1] = loadShader(getShadersPath() + "pbrbasic/pbr.frag.hlsl", VK_SHADER_STAGE_FRAGMENT_BIT);
-        // ¼ÓÔØ¶¥µãºÍÆ¬¶Î×ÅÉ«Æ÷£º
-        // - ¶¥µã×ÅÉ«Æ÷£ºpbr.vert.hlsl¡£
-        // - Æ¬¶Î×ÅÉ«Æ÷£ºpbr.frag.hlsl¡£
+        // åŠ è½½é¡¶ç‚¹å’Œç‰‡æ®µç€è‰²å™¨ï¼š
+        // - é¡¶ç‚¹ç€è‰²å™¨ï¼špbr.vert.hlslã€‚
+        // - ç‰‡æ®µç€è‰²å™¨ï¼špbr.frag.hlslã€‚
         VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipeline));
-        // ´´½¨Í¼ĞÎ¹ÜÏß£¬´æ´¢µ½ pipeline¡£
+        // åˆ›å»ºå›¾å½¢ç®¡çº¿ï¼Œå­˜å‚¨åˆ° pipelineã€‚
     }
 
     void prepareUniformBuffers() {
-        // º¯Êı´´½¨ºÍÓ³Éä Uniform Buffer¡£
+        // å‡½æ•°åˆ›å»ºå’Œæ˜ å°„ Uniform Bufferã€‚
         VkPhysicalDeviceProperties properties;
         vkGetPhysicalDeviceProperties(physicalDevice, &properties);
-        // »ñÈ¡ÎïÀíÉè±¸ÊôĞÔ¡£
+        // è·å–ç‰©ç†è®¾å¤‡å±æ€§ã€‚
         VkDeviceSize minAlignment = properties.limits.minUniformBufferOffsetAlignment;
-        // »ñÈ¡ Uniform Buffer µÄ×îĞ¡¶ÔÆëÒªÇó¡£
+        // è·å– Uniform Buffer çš„æœ€å°å¯¹é½è¦æ±‚ã€‚
         VkDeviceSize alignedSizeClusterIndexList = ((sizeof(clusterIndexList) + minAlignment - 1) / minAlignment) * minAlignment;
-        // ¼ÆËã¶ÔÆëºóµÄ¼¯ÈºË÷ÒıÁĞ±í»º³åÇø´óĞ¡£º
-        // - Ê¹ÓÃ ceiling ¹«Ê½È·±£¶ÔÆë¡£
+        // è®¡ç®—å¯¹é½åçš„é›†ç¾¤ç´¢å¼•åˆ—è¡¨ç¼“å†²åŒºå¤§å°ï¼š
+        // - ä½¿ç”¨ ceiling å…¬å¼ç¡®ä¿å¯¹é½ã€‚
 
         VK_CHECK_RESULT(vulkanDevice->createBuffer(
             VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
             &uniformBuffers.object,
             sizeof(uboMatrices)));
-        // ´´½¨¾ØÕó»º³åÇø£º
-        // - ÓÃ·¨£ºUniform Buffer¡£
-        // - ÄÚ´æÊôĞÔ£ºÖ÷»ú¿É¼û¡¢¿ÉÒ»ÖÂĞÔÓ³Éä¡£
-        // - ´óĞ¡£ºUBOMatrices ½á¹¹Ìå´óĞ¡¡£
+        // åˆ›å»ºçŸ©é˜µç¼“å†²åŒºï¼š
+        // - ç”¨æ³•ï¼šUniform Bufferã€‚
+        // - å†…å­˜å±æ€§ï¼šä¸»æœºå¯è§ã€å¯ä¸€è‡´æ€§æ˜ å°„ã€‚
+        // - å¤§å°ï¼šUBOMatrices ç»“æ„ä½“å¤§å°ã€‚
 
         VK_CHECK_RESULT(vulkanDevice->createBuffer(
             VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
             &uniformBuffers.params,
             sizeof(uboParams)));
-        // ´´½¨¹âÔ´Êı¾İ»º³åÇø£¬ÀàËÆ¾ØÕó»º³åÇø¡£
+        // åˆ›å»ºå…‰æºæ•°æ®ç¼“å†²åŒºï¼Œç±»ä¼¼çŸ©é˜µç¼“å†²åŒºã€‚
 
         VK_CHECK_RESULT(vulkanDevice->createBuffer(
             VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
             &uniformBuffers.clusterData,
             sizeof(clusterData)));
-        // ´´½¨¼¯Èº¼ÆÊıºÍÆ«ÒÆ»º³åÇø¡£
+        // åˆ›å»ºé›†ç¾¤è®¡æ•°å’Œåç§»ç¼“å†²åŒºã€‚
 
         VK_CHECK_RESULT(vulkanDevice->createBuffer(
             VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
             &uniformBuffers.clusterIndexList,
             alignedSizeClusterIndexList));
-        // ´´½¨¹âÔ´Ë÷ÒıÁĞ±í»º³åÇø£¬Ê¹ÓÃ¶ÔÆë´óĞ¡¡£
+        // åˆ›å»ºå…‰æºç´¢å¼•åˆ—è¡¨ç¼“å†²åŒºï¼Œä½¿ç”¨å¯¹é½å¤§å°ã€‚
 
         VK_CHECK_RESULT(uniformBuffers.object.map());
         VK_CHECK_RESULT(uniformBuffers.params.map());
         VK_CHECK_RESULT(uniformBuffers.clusterData.map());
         VK_CHECK_RESULT(uniformBuffers.clusterIndexList.map());
-        // Ó³ÉäËùÓĞ»º³åÇø£¬Ê¹ CPU ¿ÉÖ±½ÓĞ´ÈëÊı¾İ¡£
+        // æ˜ å°„æ‰€æœ‰ç¼“å†²åŒºï¼Œä½¿ CPU å¯ç›´æ¥å†™å…¥æ•°æ®ã€‚
 
         prepareSphereBuffers();
-        // ´´½¨¹âÔ´ÇòÌå»º³åÇø¡£
+        // åˆ›å»ºå…‰æºçƒä½“ç¼“å†²åŒºã€‚
     }
 
     void updateUniformBuffers() {
-        // º¯Êı¸üĞÂ¾ØÕó»º³åÇøÊı¾İ¡£
+        // å‡½æ•°æ›´æ–°çŸ©é˜µç¼“å†²åŒºæ•°æ®ã€‚
         uboMatrices.projection = camera.matrices.perspective;
-        // ÉèÖÃÍ¶Ó°¾ØÕóÎªÏà»úÍ¸ÊÓ¾ØÕó¡£
+        // è®¾ç½®æŠ•å½±çŸ©é˜µä¸ºç›¸æœºé€è§†çŸ©é˜µã€‚
         uboMatrices.view = camera.matrices.view;
-        // ÉèÖÃÊÓÍ¼¾ØÕóÎªÏà»úÊÓÍ¼¾ØÕó¡£
+        // è®¾ç½®è§†å›¾çŸ©é˜µä¸ºç›¸æœºè§†å›¾çŸ©é˜µã€‚
         float rotationAngle = -90.0f + (models.objectIndex == 1 ? 45.0f : 0.0f);
-        // ¼ÆËãÄ£ĞÍĞı×ª½Ç¶È£º
-        // - »ù´¡½Ç¶È£º-90¡ã¡£
-        // - Èç¹ûÊÇ²èºø£¨objectIndex == 1£©£¬¶îÍâ¼Ó 45¡ã¡£
+        // è®¡ç®—æ¨¡å‹æ—‹è½¬è§’åº¦ï¼š
+        // - åŸºç¡€è§’åº¦ï¼š-90Â°ã€‚
+        // - å¦‚æœæ˜¯èŒ¶å£¶ï¼ˆobjectIndex == 1ï¼‰ï¼Œé¢å¤–åŠ  45Â°ã€‚
         uboMatrices.model = glm::rotate(glm::mat4(1.0f), glm::radians(rotationAngle), glm::vec3(0.0f, 1.0f, 0.0f));
-        // ÉèÖÃÄ£ĞÍ¾ØÕóÎªÈÆ Y ÖáĞı×ªµÄ¾ØÕó¡£
+        // è®¾ç½®æ¨¡å‹çŸ©é˜µä¸ºç»• Y è½´æ—‹è½¬çš„çŸ©é˜µã€‚
         uboMatrices.camPos = camera.position * -1.0f;
-        // ÉèÖÃÏà»úÎ»ÖÃÎªÏà·´Öµ£¨¿ÉÄÜÊÇ×ø±êÏµµ÷Õû£©¡£
+        // è®¾ç½®ç›¸æœºä½ç½®ä¸ºç›¸åå€¼ï¼ˆå¯èƒ½æ˜¯åæ ‡ç³»è°ƒæ•´ï¼‰ã€‚
         memcpy(uniformBuffers.object.mapped, &uboMatrices, sizeof(uboMatrices));
-        // ½« uboMatrices Êı¾İ¸´ÖÆµ½Ó³ÉäµÄ»º³åÇø¡£
+        // å°† uboMatrices æ•°æ®å¤åˆ¶åˆ°æ˜ å°„çš„ç¼“å†²åŒºã€‚
     }
 
     void updateLights() {
-        // º¯Êı¸üĞÂ¹âÔ´Êı¾İ¡£
+        // å‡½æ•°æ›´æ–°å…‰æºæ•°æ®ã€‚
         const float p = 15.0f;
-        // ¶¨Òå¹âÔ´Íø¸ñ·¶Î§²ÎÊı£º¡À15.0¡£
+        // å®šä¹‰å…‰æºç½‘æ ¼èŒƒå›´å‚æ•°ï¼šÂ±15.0ã€‚
         const int gridSize = static_cast<int>(ceil(sqrt(static_cast<float>(maxnumLights))));
-        // ¼ÆËã¹âÔ´Íø¸ñ´óĞ¡£ºceil(sqrt(64)) = 8¡£
+        // è®¡ç®—å…‰æºç½‘æ ¼å¤§å°ï¼šceil(sqrt(64)) = 8ã€‚
         const float spacing = 2.0f * p / (gridSize - 1);
-        // ¼ÆËã¹âÔ´¼ä¾à£º2 * 15.0 / (8 - 1) ¡Ö 4.2857¡£
+        // è®¡ç®—å…‰æºé—´è·ï¼š2 * 15.0 / (8 - 1) â‰ˆ 4.2857ã€‚
 
         int lightIndex = 0;
-        // ³õÊ¼»¯¹âÔ´Ë÷Òı¡£
+        // åˆå§‹åŒ–å…‰æºç´¢å¼•ã€‚
         for (int y = 0; y < gridSize && lightIndex < maxnumLights; y++) {
-            // ±éÀúÍø¸ñ Y Öá¡£
+            // éå†ç½‘æ ¼ Y è½´ã€‚
             for (int x = 0; x < gridSize && lightIndex < maxnumLights; x++) {
-                // ±éÀúÍø¸ñ X Öá¡£
+                // éå†ç½‘æ ¼ X è½´ã€‚
                 float posX = -p + x * spacing;
-                // ¼ÆËã X ×ø±ê£º-15.0 µ½ +15.0¡£
+                // è®¡ç®— X åæ ‡ï¼š-15.0 åˆ° +15.0ã€‚
                 float posZ = -p + y * spacing;
-                // ¼ÆËã Z ×ø±ê£º-15.0 µ½ +15.0¡£
+                // è®¡ç®— Z åæ ‡ï¼š-15.0 åˆ° +15.0ã€‚
                 float posY = -p * 0.5f;
-                // ÉèÖÃ Y ×ø±ê£º-7.5£¨¹Ì¶¨¸ß¶È£©¡£
+                // è®¾ç½® Y åæ ‡ï¼š-7.5ï¼ˆå›ºå®šé«˜åº¦ï¼‰ã€‚
 
                 uboParams.lights[lightIndex].position = glm::vec4(posX, posY, posZ, 1.0f);
-                // ÉèÖÃ¹âÔ´Î»ÖÃ£¬w=1.0¡£
+                // è®¾ç½®å…‰æºä½ç½®ï¼Œw=1.0ã€‚
 
                 glm::vec3 color;
                 switch (lightIndex % 4) {
@@ -845,76 +845,76 @@ public:
                 case 2: color = glm::vec3(0.0f, 0.0f, 1.0f); break;
                 case 3: color = glm::vec3(1.0f, 1.0f, 0.0f); break;
                 }
-                // ¸ù¾İË÷ÒıÄ£ 4 ÉèÖÃ¹âÔ´ÑÕÉ«£º
-                // - 0£ººì¡£
-                // - 1£ºÂÌ¡£
-                // - 2£ºÀ¶¡£
-                // - 3£º»Æ¡£
+                // æ ¹æ®ç´¢å¼•æ¨¡ 4 è®¾ç½®å…‰æºé¢œè‰²ï¼š
+                // - 0ï¼šçº¢ã€‚
+                // - 1ï¼šç»¿ã€‚
+                // - 2ï¼šè“ã€‚
+                // - 3ï¼šé»„ã€‚
                 uboParams.lights[lightIndex].colorAndRadius = glm::vec4(color, 15.0f);
-                // ÉèÖÃ¹âÔ´ÑÕÉ«ºÍ°ë¾¶£¨15.0£©¡£
+                // è®¾ç½®å…‰æºé¢œè‰²å’ŒåŠå¾„ï¼ˆ15.0ï¼‰ã€‚
                 glm::vec3 direction = glm::normalize(glm::vec3(0.0f, 0.0f, 0.0f) - glm::vec3(posX, posY, posZ));
-                // ¼ÆËã¹âÔ´·½Ïò£º´Ó¹âÔ´Î»ÖÃÖ¸ÏòÔ­µã (0,0,0)¡£
+                // è®¡ç®—å…‰æºæ–¹å‘ï¼šä»å…‰æºä½ç½®æŒ‡å‘åŸç‚¹ (0,0,0)ã€‚
                 uboParams.lights[lightIndex].direction = glm::vec4(direction, 1.0f);
-                // ÉèÖÃ¹âÔ´·½Ïò£¬w=1.0¡£
+                // è®¾ç½®å…‰æºæ–¹å‘ï¼Œw=1.0ã€‚
                 uboParams.lights[lightIndex].cutOff = glm::vec4(12.5f, 18.5f, 0.0f, 0.0f);
-                // ÉèÖÃ¾Û¹âµÆ½ØÖ¹½Ç¶È£º
-                // - ÄÚ½Ç£º12.5¡ã¡£
-                // - Íâ½Ç£º18.5¡ã¡£
-                // - Ìî³ä£º0.0¡£
+                // è®¾ç½®èšå…‰ç¯æˆªæ­¢è§’åº¦ï¼š
+                // - å†…è§’ï¼š12.5Â°ã€‚
+                // - å¤–è§’ï¼š18.5Â°ã€‚
+                // - å¡«å……ï¼š0.0ã€‚
                 lightIndex++;
-                // µİÔö¹âÔ´Ë÷Òı¡£
+                // é€’å¢å…‰æºç´¢å¼•ã€‚
             }
         }
 
         if (!paused) {
-            // Èç¹ûÎ´ÔİÍ££¬¸üĞÂ¹âÔ´Î»ÖÃ£¨¶¯»­Ğ§¹û£©¡£
+            // å¦‚æœæœªæš‚åœï¼Œæ›´æ–°å…‰æºä½ç½®ï¼ˆåŠ¨ç”»æ•ˆæœï¼‰ã€‚
             for (int i = 0; i < maxnumLights; i++) {
                 uboParams.lights[i].position.x += sin(glm::radians(timer * 360.0f)) * 0.1f;
                 uboParams.lights[i].position.z += cos(glm::radians(timer * 360.0f)) * 0.1f;
 
-                // Ê¹¹âÔ´ÑØÍÖÔ²Â·¾¶ÒÆ¶¯£º
-                // - X£ºÔö¼Ó sin(Ê±¼ä * 360¡ã) * 0.1¡£
-                // - Z£ºÔö¼Ó cos(Ê±¼ä * 360¡ã) * 0.1¡£
+                // ä½¿å…‰æºæ²¿æ¤­åœ†è·¯å¾„ç§»åŠ¨ï¼š
+                // - Xï¼šå¢åŠ  sin(æ—¶é—´ * 360Â°) * 0.1ã€‚
+                // - Zï¼šå¢åŠ  cos(æ—¶é—´ * 360Â°) * 0.1ã€‚
             }
         }
 
         memcpy(uniformBuffers.params.mapped, &uboParams, sizeof(uboParams));
-        // ½«¹âÔ´Êı¾İ¸´ÖÆµ½Ó³ÉäµÄ»º³åÇø¡£
+        // å°†å…‰æºæ•°æ®å¤åˆ¶åˆ°æ˜ å°„çš„ç¼“å†²åŒºã€‚
     }
 
     void updateLightsCluster() {
-        // º¯Êı¸üĞÂ¼¯Èº¹âÕÕÊı¾İ¡£
+        // å‡½æ•°æ›´æ–°é›†ç¾¤å…‰ç…§æ•°æ®ã€‚
         memset(clusterIndexList.indices, 0, sizeof(clusterIndexList.indices));
-        // Çå¿Õ¹âÔ´Ë÷ÒıÁĞ±í¡£
+        // æ¸…ç©ºå…‰æºç´¢å¼•åˆ—è¡¨ã€‚
         memset(clusterData.cluster, 0, sizeof(clusterData.cluster));
-        // Çå¿Õ¼¯Èº¼ÆÊıºÍÆ«ÒÆ¡£
+        // æ¸…ç©ºé›†ç¾¤è®¡æ•°å’Œåç§»ã€‚
         glm::mat4 viewProj = uboMatrices.projection * uboMatrices.view;
-        // ¼ÆËãÊÓÍ¼Í¶Ó°¾ØÕó£ºÍ¶Ó° * ÊÓÍ¼¡£
+        // è®¡ç®—è§†å›¾æŠ•å½±çŸ©é˜µï¼šæŠ•å½± * è§†å›¾ã€‚
         float zNear = 0.1f;
         float zFar = 256.0f;
-        // ¶¨Òå½ü²Ã¼ôÃæºÍÔ¶²Ã¼ôÃæ¡£
+        // å®šä¹‰è¿‘è£å‰ªé¢å’Œè¿œè£å‰ªé¢ã€‚
 
         std::vector<std::vector<bool>> assignedLights(TOTAL_CLUSTERS, std::vector<bool>(maxnumLights, false));
-        // ´´½¨²¼¶ûÊı×é£¬¼ÇÂ¼Ã¿¸ö¼¯ÈºÒÑ·ÖÅäµÄ¹âÔ´£º
-        // - ³ß´ç£º64 ¼¯Èº x 64 ¹âÔ´¡£
-        // - ³õÊ¼Öµ£ºfalse¡£
+        // åˆ›å»ºå¸ƒå°”æ•°ç»„ï¼Œè®°å½•æ¯ä¸ªé›†ç¾¤å·²åˆ†é…çš„å…‰æºï¼š
+        // - å°ºå¯¸ï¼š64 é›†ç¾¤ x 64 å…‰æºã€‚
+        // - åˆå§‹å€¼ï¼šfalseã€‚
 
         for (int lightIdx = 0; lightIdx < maxnumLights; lightIdx++) {
-            // ±éÀúËùÓĞ¹âÔ´¡£
+            // éå†æ‰€æœ‰å…‰æºã€‚
             Light& light = uboParams.lights[lightIdx];
-            // »ñÈ¡µ±Ç°¹âÔ´¡£
+            // è·å–å½“å‰å…‰æºã€‚
             float radius = light.colorAndRadius.w;
-            // »ñÈ¡¹âÔ´Ó°Ïì°ë¾¶¡£
+            // è·å–å…‰æºå½±å“åŠå¾„ã€‚
 
             glm::vec4 clipPos = viewProj * light.position;
-            // ½«¹âÔ´Î»ÖÃ±ä»»µ½²Ã¼ô¿Õ¼ä¡£
+            // å°†å…‰æºä½ç½®å˜æ¢åˆ°è£å‰ªç©ºé—´ã€‚
             float ndcX = clipPos.x / clipPos.w;
             float ndcY = clipPos.y / clipPos.w;
             float ndcZ = clipPos.z / clipPos.w;
-            // ×ª»»Îª NDC ×ø±ê£¨[-1, 1]£©¡£
+            // è½¬æ¢ä¸º NDC åæ ‡ï¼ˆ[-1, 1]ï¼‰ã€‚
 
             float radiusNDC = radius / clipPos.w;
-            // ¼ÆËã NDC ¿Õ¼äÖĞµÄ°ë¾¶¡£
+            // è®¡ç®— NDC ç©ºé—´ä¸­çš„åŠå¾„ã€‚
 
             float minX = glm::clamp(ndcX - radiusNDC, -1.0f, 1.0f);
             float maxX = glm::clamp(ndcX + radiusNDC, -1.0f, 1.0f);
@@ -922,9 +922,9 @@ public:
             float maxY = glm::clamp(ndcY + radiusNDC, -1.0f, 1.0f);
             float minZ = glm::clamp(ndcZ - radiusNDC, 0.0f, 1.0f);
             float maxZ = glm::clamp(ndcZ + radiusNDC, 0.0f, 1.0f);
-            // ¼ÆËã¹âÔ´Ó°ÏìµÄ NDC ·¶Î§£º
-            // - X/Y£ºÖĞĞÄ ¡À °ë¾¶£¬ÏŞÖÆÔÚ [-1, 1]¡£
-            // - Z£ºÖĞĞÄ ¡À °ë¾¶£¬ÏŞÖÆÔÚ [0, 1]¡£
+            // è®¡ç®—å…‰æºå½±å“çš„ NDC èŒƒå›´ï¼š
+            // - X/Yï¼šä¸­å¿ƒ Â± åŠå¾„ï¼Œé™åˆ¶åœ¨ [-1, 1]ã€‚
+            // - Zï¼šä¸­å¿ƒ Â± åŠå¾„ï¼Œé™åˆ¶åœ¨ [0, 1]ã€‚
 
             uint32_t minClusterX = static_cast<uint32_t>((minX * 0.5f + 0.5f) * CLUSTER_SIZE_X);
             uint32_t maxClusterX = static_cast<uint32_t>((maxX * 0.5f + 0.5f) * CLUSTER_SIZE_X);
@@ -932,9 +932,9 @@ public:
             uint32_t maxClusterY = static_cast<uint32_t>((maxY * 0.5f + 0.5f) * CLUSTER_SIZE_Y);
             uint32_t minClusterZ = static_cast<uint32_t>((log(minZ * (zFar - zNear) + zNear) / log(zFar / zNear)) * CLUSTER_SIZE_Z);
             uint32_t maxClusterZ = static_cast<uint32_t>((log(maxZ * (zFar - zNear) + zNear) / log(zFar / zNear)) * CLUSTER_SIZE_Z);
-            // Ó³Éä NDC ·¶Î§µ½¼¯ÈºË÷Òı£º
-            // - X/Y£º½« [-1, 1] Ó³Éäµ½ [0, 1]£¬ÔÙ³ËÒÔ CLUSTER_SIZE_X/Y¡£
-            // - Z£ºÊ¹ÓÃ¶ÔÊıÉî¶È¹«Ê½Ó³Éäµ½ [0, CLUSTER_SIZE_Z]¡£
+            // æ˜ å°„ NDC èŒƒå›´åˆ°é›†ç¾¤ç´¢å¼•ï¼š
+            // - X/Yï¼šå°† [-1, 1] æ˜ å°„åˆ° [0, 1]ï¼Œå†ä¹˜ä»¥ CLUSTER_SIZE_X/Yã€‚
+            // - Zï¼šä½¿ç”¨å¯¹æ•°æ·±åº¦å…¬å¼æ˜ å°„åˆ° [0, CLUSTER_SIZE_Z]ã€‚
 
             minClusterX = glm::clamp(minClusterX, 0u, CLUSTER_SIZE_X - 1);
             maxClusterX = glm::clamp(maxClusterX, 0u, CLUSTER_SIZE_X - 1);
@@ -942,24 +942,24 @@ public:
             maxClusterY = glm::clamp(maxClusterY, 0u, CLUSTER_SIZE_Y - 1);
             minClusterZ = glm::clamp(minClusterZ, 0u, CLUSTER_SIZE_Z - 1);
             maxClusterZ = glm::clamp(maxClusterZ, 0u, CLUSTER_SIZE_Z - 1);
-            // ÏŞÖÆ¼¯ÈºË÷ÒıÔÚÓĞĞ§·¶Î§ÄÚ£º[0, CLUSTER_SIZE_X/Y/Z - 1]¡£
+            // é™åˆ¶é›†ç¾¤ç´¢å¼•åœ¨æœ‰æ•ˆèŒƒå›´å†…ï¼š[0, CLUSTER_SIZE_X/Y/Z - 1]ã€‚
 
             for (uint32_t z = minClusterZ; z <= maxClusterZ; ++z) {
-                // ±éÀú Z ·½Ïò¼¯Èº¡£
+                // éå† Z æ–¹å‘é›†ç¾¤ã€‚
                 for (uint32_t y = minClusterY; y <= maxClusterY; ++y) {
-                    // ±éÀú Y ·½Ïò¼¯Èº¡£
+                    // éå† Y æ–¹å‘é›†ç¾¤ã€‚
                     for (uint32_t x = minClusterX; x <= maxClusterX; ++x) {
-                        // ±éÀú X ·½Ïò¼¯Èº¡£
+                        // éå† X æ–¹å‘é›†ç¾¤ã€‚
                         uint32_t clusterIdx = z * CLUSTER_SIZE_X * CLUSTER_SIZE_Y + y * CLUSTER_SIZE_X + x;
-                        // ¼ÆËã¼¯ÈºË÷Òı£ºz * 8 * 8 + y * 8 + x¡£
+                        // è®¡ç®—é›†ç¾¤ç´¢å¼•ï¼šz * 8 * 8 + y * 8 + xã€‚
                         if (!assignedLights[clusterIdx][lightIdx] && clusterData.cluster[clusterIdx].count < maxnumLights) {
-                            // ¼ì²éÌõ¼ş£º
-                            // - ¸Ã¹âÔ´Î´·ÖÅäµ½´Ë¼¯Èº¡£
-                            // - ¼¯ÈºµÄ¹âÔ´¼ÆÊıÎ´´ïÉÏÏŞ£¨64£©¡£
+                            // æ£€æŸ¥æ¡ä»¶ï¼š
+                            // - è¯¥å…‰æºæœªåˆ†é…åˆ°æ­¤é›†ç¾¤ã€‚
+                            // - é›†ç¾¤çš„å…‰æºè®¡æ•°æœªè¾¾ä¸Šé™ï¼ˆ64ï¼‰ã€‚
                             clusterData.cluster[clusterIdx].count++;
-                            // Ôö¼Ó¼¯ÈºµÄ¹âÔ´¼ÆÊı¡£
+                            // å¢åŠ é›†ç¾¤çš„å…‰æºè®¡æ•°ã€‚
                             assignedLights[clusterIdx][lightIdx] = true;
-                            // ±ê¼Ç¹âÔ´ÒÑ·ÖÅä¡£
+                            // æ ‡è®°å…‰æºå·²åˆ†é…ã€‚
                         }
                     }
                 }
@@ -967,19 +967,19 @@ public:
         }
 
         uint32_t runningSum = 0;
-        // ³õÊ¼»¯Æ«ÒÆÀÛ¼ÓÆ÷¡£
+        // åˆå§‹åŒ–åç§»ç´¯åŠ å™¨ã€‚
         for (uint32_t i = 0; i < TOTAL_CLUSTERS; i++) {
-            // ±éÀúËùÓĞ¼¯Èº¡£
+            // éå†æ‰€æœ‰é›†ç¾¤ã€‚
             clusterData.cluster[i].offset = runningSum;
-            // ÉèÖÃµ±Ç°¼¯ÈºµÄÆ«ÒÆÎªÀÛ¼ÓÖµ¡£
+            // è®¾ç½®å½“å‰é›†ç¾¤çš„åç§»ä¸ºç´¯åŠ å€¼ã€‚
             runningSum += clusterData.cluster[i].count;
-            // ÀÛ¼Ó¹âÔ´¼ÆÊı£¬¸üĞÂÏÂ¸öÆ«ÒÆ¡£
+            // ç´¯åŠ å…‰æºè®¡æ•°ï¼Œæ›´æ–°ä¸‹ä¸ªåç§»ã€‚
         }
 
         std::vector<uint32_t> tempOffsets(TOTAL_CLUSTERS, 0);
-        // ´´½¨ÁÙÊ±Æ«ÒÆÊı×é£¬³õÊ¼»¯Îª 0£¬¼ÇÂ¼Ã¿¸ö¼¯ÈºÒÑ·ÖÅäµÄ¹âÔ´Êı¡£
+        // åˆ›å»ºä¸´æ—¶åç§»æ•°ç»„ï¼Œåˆå§‹åŒ–ä¸º 0ï¼Œè®°å½•æ¯ä¸ªé›†ç¾¤å·²åˆ†é…çš„å…‰æºæ•°ã€‚
         for (int lightIdx = 0; lightIdx < maxnumLights; lightIdx++) {
-            // ÔÙ´Î±éÀúËùÓĞ¹âÔ´£¬Ìî³äË÷ÒıÁĞ±í¡£
+            // å†æ¬¡éå†æ‰€æœ‰å…‰æºï¼Œå¡«å……ç´¢å¼•åˆ—è¡¨ã€‚
             Light& light = uboParams.lights[lightIdx];
             float radius = light.colorAndRadius.w;
 
@@ -996,16 +996,16 @@ public:
             float maxY = glm::clamp(ndcY + radiusNDC, -1.0f, 1.0f);
             float minZ = glm::clamp(ndcZ - radiusNDC, 0.0f, 1.0f);
             float maxZ = glm::clamp(ndcZ + radiusNDC, 0.0f, 1.0f);
-            // ÖØ¸´¼ÆËã¹âÔ´µÄ NDC ·¶Î§£¨ÓëÖ®Ç°ÏàÍ¬£©¡£
-            minZ = glm::max(minZ, 0.0001f); // ±ÜÃâ log(0)
-            maxZ = glm::max(maxZ, 0.0001f);
+            // é‡å¤è®¡ç®—å…‰æºçš„ NDC èŒƒå›´ï¼ˆä¸ä¹‹å‰ç›¸åŒï¼‰ã€‚
+            //minZ = glm::max(minZ, 0.0001f); // é¿å… log(0)
+            //maxZ = glm::max(maxZ, 0.0001f);
             uint32_t minClusterX = static_cast<uint32_t>((minX * 0.5f + 0.5f) * CLUSTER_SIZE_X);
             uint32_t maxClusterX = static_cast<uint32_t>((maxX * 0.5f + 0.5f) * CLUSTER_SIZE_X);
             uint32_t minClusterY = static_cast<uint32_t>((minY * 0.5f + 0.5f) * CLUSTER_SIZE_Y);
             uint32_t maxClusterY = static_cast<uint32_t>((maxY * 0.5f + 0.5f) * CLUSTER_SIZE_Y);
             uint32_t minClusterZ = static_cast<uint32_t>((log(minZ * (zFar - zNear) + zNear) / log(zFar / zNear)) * CLUSTER_SIZE_Z);
             uint32_t maxClusterZ = static_cast<uint32_t>((log(maxZ * (zFar - zNear) + zNear) / log(zFar / zNear)) * CLUSTER_SIZE_Z);
-            // ÖØ¸´Ó³Éäµ½¼¯ÈºË÷Òı¡£
+            // é‡å¤æ˜ å°„åˆ°é›†ç¾¤ç´¢å¼•ã€‚
 
             minClusterX = glm::clamp(minClusterX, 0u, CLUSTER_SIZE_X - 1);
             maxClusterX = glm::clamp(maxClusterX, 0u, CLUSTER_SIZE_X - 1);
@@ -1013,23 +1013,23 @@ public:
             maxClusterY = glm::clamp(maxClusterY, 0u, CLUSTER_SIZE_Y - 1);
             minClusterZ = glm::clamp(minClusterZ, 0u, CLUSTER_SIZE_Z - 1);
             maxClusterZ = glm::clamp(maxClusterZ, 0u, CLUSTER_SIZE_Z - 1);
-            // ÖØ¸´ÏŞÖÆË÷Òı·¶Î§¡£
+            // é‡å¤é™åˆ¶ç´¢å¼•èŒƒå›´ã€‚
 
             for (uint32_t z = minClusterZ; z <= maxClusterZ; ++z) {
                 for (uint32_t y = minClusterY; y <= maxClusterY; ++y) {
                     for (uint32_t x = minClusterX; x <= maxClusterX; ++x) {
                         uint32_t clusterIdx = z * CLUSTER_SIZE_X * CLUSTER_SIZE_Y + y * CLUSTER_SIZE_X + x;
-                        // ¼ÆËã¼¯ÈºË÷Òı¡£
+                        // è®¡ç®—é›†ç¾¤ç´¢å¼•ã€‚
                         uint32_t offset = clusterData.cluster[clusterIdx].offset + tempOffsets[clusterIdx];
-                        // ¼ÆËãË÷ÒıÁĞ±íÖĞµÄÆ«ÒÆ£º¼¯ÈºÆ«ÒÆ + ÒÑ·ÖÅä¹âÔ´Êı¡£
+                        // è®¡ç®—ç´¢å¼•åˆ—è¡¨ä¸­çš„åç§»ï¼šé›†ç¾¤åç§» + å·²åˆ†é…å…‰æºæ•°ã€‚
                         if (offset < lightIndexListnum && tempOffsets[clusterIdx] < clusterData.cluster[clusterIdx].count) {
-                            // ¼ì²éÌõ¼ş£º
-                            // - Æ«ÒÆÎ´³¬³öË÷ÒıÁĞ±í´óĞ¡£¨4096£©¡£
-                            // - ¼¯ÈºÎ´·ÖÅäÂú¡£
+                            // æ£€æŸ¥æ¡ä»¶ï¼š
+                            // - åç§»æœªè¶…å‡ºç´¢å¼•åˆ—è¡¨å¤§å°ï¼ˆ4096ï¼‰ã€‚
+                            // - é›†ç¾¤æœªåˆ†é…æ»¡ã€‚
                             clusterIndexList.indices[offset].clusterIndexList = lightIdx;
-                            // ½«¹âÔ´Ë÷Òı´æ´¢µ½Ë÷ÒıÁĞ±í¡£
+                            // å°†å…‰æºç´¢å¼•å­˜å‚¨åˆ°ç´¢å¼•åˆ—è¡¨ã€‚
                             tempOffsets[clusterIdx]++;
-                            // Ôö¼Ó¼¯ÈºµÄÒÑ·ÖÅä¹âÔ´¼ÆÊı¡£
+                            // å¢åŠ é›†ç¾¤çš„å·²åˆ†é…å…‰æºè®¡æ•°ã€‚
                         }
                     }
                 }
@@ -1037,82 +1037,82 @@ public:
         }
 
         //memcpy(uniformBuffers.params.mapped, &uboParams, sizeof(uboParams));
-        //// ¸üĞÂ¹âÔ´Êı¾İ»º³åÇø£¨¿ÉÄÜÊÇ¶àÓàµÄ£¬ÒòÎª updateLights ÒÑ¸üĞÂ£©¡£
+        //// æ›´æ–°å…‰æºæ•°æ®ç¼“å†²åŒºï¼ˆå¯èƒ½æ˜¯å¤šä½™çš„ï¼Œå› ä¸º updateLights å·²æ›´æ–°ï¼‰ã€‚
         memcpy(uniformBuffers.clusterData.mapped, &clusterData, sizeof(clusterData));
-        // ¸üĞÂ¼¯Èº¼ÆÊıºÍÆ«ÒÆ»º³åÇø¡£
+        // æ›´æ–°é›†ç¾¤è®¡æ•°å’Œåç§»ç¼“å†²åŒºã€‚
         memcpy(uniformBuffers.clusterIndexList.mapped, &clusterIndexList, sizeof(clusterIndexList));
-        // ¸üĞÂ¹âÔ´Ë÷ÒıÁĞ±í»º³åÇø¡£
+        // æ›´æ–°å…‰æºç´¢å¼•åˆ—è¡¨ç¼“å†²åŒºã€‚
     }
 
     void draw() {
-        // º¯ÊıÖ´ĞĞ»æÖÆ²Ù×÷¡£
+        // å‡½æ•°æ‰§è¡Œç»˜åˆ¶æ“ä½œã€‚
         VulkanExampleBase::prepareFrame();
-        // ×¼±¸Ö¡£¨ÓÉ»ùÀàÊµÏÖ£¬¿ÉÄÜ°üÀ¨½»»»Á´²Ù×÷£©¡£
+        // å‡†å¤‡å¸§ï¼ˆç”±åŸºç±»å®ç°ï¼Œå¯èƒ½åŒ…æ‹¬äº¤æ¢é“¾æ“ä½œï¼‰ã€‚
         submitInfo.commandBufferCount = 1;
-        // ÉèÖÃÌá½»ĞÅÏ¢£º1 ¸öÃüÁî»º³åÇø¡£
+        // è®¾ç½®æäº¤ä¿¡æ¯ï¼š1 ä¸ªå‘½ä»¤ç¼“å†²åŒºã€‚
         submitInfo.pCommandBuffers = &drawCmdBuffers[currentBuffer];
-        // ÉèÖÃµ±Ç°Ö¡µÄÃüÁî»º³åÇø¡£
+        // è®¾ç½®å½“å‰å¸§çš„å‘½ä»¤ç¼“å†²åŒºã€‚
         VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE));
-        // Ìá½»ÃüÁî»º³åÇøµ½¶ÓÁĞ£¬ÎŞÎ§À¸£¨fence£©¡£
+        // æäº¤å‘½ä»¤ç¼“å†²åŒºåˆ°é˜Ÿåˆ—ï¼Œæ— å›´æ ï¼ˆfenceï¼‰ã€‚
         VulkanExampleBase::submitFrame();
-        // Ìá½»Ö¡£¨ÓÉ»ùÀàÊµÏÖ£¬¿ÉÄÜ°üÀ¨³ÊÏÖ£©¡£
+        // æäº¤å¸§ï¼ˆç”±åŸºç±»å®ç°ï¼Œå¯èƒ½åŒ…æ‹¬å‘ˆç°ï¼‰ã€‚
     }
 
     void prepare() {
-        // º¯Êı×¼±¸äÖÈ¾»·¾³¡£
+        // å‡½æ•°å‡†å¤‡æ¸²æŸ“ç¯å¢ƒã€‚
         VulkanExampleBase::prepare();
-        // µ÷ÓÃ»ùÀà×¼±¸º¯Êı£¨³õÊ¼»¯ Vulkan Éè±¸¡¢½»»»Á´µÈ£©¡£
+        // è°ƒç”¨åŸºç±»å‡†å¤‡å‡½æ•°ï¼ˆåˆå§‹åŒ– Vulkan è®¾å¤‡ã€äº¤æ¢é“¾ç­‰ï¼‰ã€‚
         loadAssets();
-        // ¼ÓÔØ glTF Ä£ĞÍ¡£
+        // åŠ è½½ glTF æ¨¡å‹ã€‚
         prepareUniformBuffers();
-        // ´´½¨ Uniform Buffer¡£
+        // åˆ›å»º Uniform Bufferã€‚
         setupDescriptors();
-        // ÉèÖÃÃèÊö·û¡£
+        // è®¾ç½®æè¿°ç¬¦ã€‚
         preparePipelines();
-        // ´´½¨¹ÜÏß¡£
+        // åˆ›å»ºç®¡çº¿ã€‚
         buildCommandBuffers();
-        // ¹¹½¨ÃüÁî»º³åÇø¡£
+        // æ„å»ºå‘½ä»¤ç¼“å†²åŒºã€‚
         prepared = true;
-        // ±ê¼Ç×¼±¸Íê³É¡£
+        // æ ‡è®°å‡†å¤‡å®Œæˆã€‚
     }
 
     virtual void render() {
-        // Ğéº¯Êı£¬Ö´ĞĞÃ¿Ö¡äÖÈ¾¡£
+        // è™šå‡½æ•°ï¼Œæ‰§è¡Œæ¯å¸§æ¸²æŸ“ã€‚
         if (!prepared) return;
-        // Èç¹ûÎ´×¼±¸ºÃ£¬Ö±½Ó·µ»Ø¡£
+        // å¦‚æœæœªå‡†å¤‡å¥½ï¼Œç›´æ¥è¿”å›ã€‚
         updateUniformBuffers();
-        // ¸üĞÂ¾ØÕó»º³åÇø¡£
+        // æ›´æ–°çŸ©é˜µç¼“å†²åŒºã€‚
         if (!paused) {
-            // Èç¹ûÎ´ÔİÍ££¬¸üĞÂ¹âÔ´ºÍ¼¯ÈºÊı¾İ¡£
+            // å¦‚æœæœªæš‚åœï¼Œæ›´æ–°å…‰æºå’Œé›†ç¾¤æ•°æ®ã€‚
             updateLights();
             updateLightsCluster();
         }
         draw();
-        // Ö´ĞĞ»æÖÆ¡£
+        // æ‰§è¡Œç»˜åˆ¶ã€‚
     }
 
     virtual void OnUpdateUIOverlay(vks::UIOverlay* overlay) {
-        // Ğéº¯Êı£¬¸üĞÂ UI ¸²¸Ç²ã¡£
+        // è™šå‡½æ•°ï¼Œæ›´æ–° UI è¦†ç›–å±‚ã€‚
         if (overlay->header("Settings")) {
-            // Èç¹û UI ÏÔÊ¾ÉèÖÃ±êÌâ¡£
+            // å¦‚æœ UI æ˜¾ç¤ºè®¾ç½®æ ‡é¢˜ã€‚
             if (overlay->comboBox("Material", &materialIndex, materialNames)) {
-                // ÏÔÊ¾²ÄÖÊÑ¡ÔñÏÂÀ­¿ò£º
-                // - µ±Ç°Öµ£ºmaterialIndex¡£
-                // - Ñ¡Ïî£ºmaterialNames¡£
-                // - ·µ»Ø true ±íÊ¾ÖµÒÑ¸ü¸Ä¡£
+                // æ˜¾ç¤ºæè´¨é€‰æ‹©ä¸‹æ‹‰æ¡†ï¼š
+                // - å½“å‰å€¼ï¼šmaterialIndexã€‚
+                // - é€‰é¡¹ï¼šmaterialNamesã€‚
+                // - è¿”å› true è¡¨ç¤ºå€¼å·²æ›´æ”¹ã€‚
                 buildCommandBuffers();
-                // ÖØ½¨ÃüÁî»º³åÇøÒÔÓ¦ÓÃĞÂ²ÄÖÊ¡£
+                // é‡å»ºå‘½ä»¤ç¼“å†²åŒºä»¥åº”ç”¨æ–°æè´¨ã€‚
             }
             if (overlay->comboBox("Type", &models.objectIndex, objectNames)) {
-                // ÏÔÊ¾Ä£ĞÍÀàĞÍÑ¡ÔñÏÂÀ­¿ò¡£
+                // æ˜¾ç¤ºæ¨¡å‹ç±»å‹é€‰æ‹©ä¸‹æ‹‰æ¡†ã€‚
                 updateUniformBuffers();
-                // ¸üĞÂ¾ØÕó»º³åÇø£¨ÒòÄ£ĞÍĞı×ª¿ÉÄÜ±ä»¯£©¡£
+                // æ›´æ–°çŸ©é˜µç¼“å†²åŒºï¼ˆå› æ¨¡å‹æ—‹è½¬å¯èƒ½å˜åŒ–ï¼‰ã€‚
                 buildCommandBuffers();
-                // ÖØ½¨ÃüÁî»º³åÇøÒÔÓ¦ÓÃĞÂÄ£ĞÍ¡£
+                // é‡å»ºå‘½ä»¤ç¼“å†²åŒºä»¥åº”ç”¨æ–°æ¨¡å‹ã€‚
             }
         }
     }
 };
 
 VULKAN_EXAMPLE_MAIN()
-// ¶¨ÒåÖ÷º¯Êıºê£¬´´½¨ VulkanExample ÊµÀı²¢ÔËĞĞ¡£
+// å®šä¹‰ä¸»å‡½æ•°å®ï¼Œåˆ›å»º VulkanExample å®ä¾‹å¹¶è¿è¡Œã€‚

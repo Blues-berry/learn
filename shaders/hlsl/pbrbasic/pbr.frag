@@ -54,16 +54,21 @@ cbuffer uboParams : register(b1) {
 // - 包含 NUM_LIGHTS（64）个 Light 结构体。
 // - 寄存器 b1（对应 uniformBuffers.params）。
 
-struct Indices {
-    uint clusterIndexList;
-    float3 padding;
+struct ClusterIndexList {
+    struct Indices {
+        uint32_t clusterIndexList; // 4 字节
+        float padding1;          // 12 字节，确保 16 字节对齐
+        float padding2;          // 12 字节，确保 16 字节对齐
+        float padding3;          // 12 字节，确保 16 字节对齐
+    };
+    Indices indices[LIGHT_INDEX_LIST_SIZE]; // 全局光源索引列表
 };
 // 定义光源索引结构体 Indices：
 // - clusterIndexList：光源索引。
 // - padding：填充 12 字节，确保 16 字节对齐。
 
 cbuffer clusterIndexList : register(b2) {
-    Indices indices[LIGHT_INDEX_LIST_SIZE];
+    ClusterIndexList clusterIndexList;
 };
 // 声明光源索引列表缓冲区：
 // - 包含 LIGHT_INDEX_LIST_SIZE（4096）个 Indices。
@@ -277,15 +282,16 @@ float4 main(VSOutput input) : SV_TARGET {
         // 如果集群有光源，计算光照。
         for (int i = lightOffset; i < lightOffset + lightCount; i++) {
             // 遍历集群的光源索引。
-            float3 lightVec = lights[indices[i].clusterIndexList].position.xyz - input.WorldPos;
+             
+            float3 lightVec = lights[clusterIndexList.indices[i].clusterIndexList].position.xyz - input.WorldPos;
             // 计算光源向量：光源位置 - 片段位置。
             float3 L = normalize(lightVec);
             // 归一化光源方向。
-            float radianceFactor = radiance(lights[indices[i].clusterIndexList].colorAndRadius.w, lightVec, N, L);
+            float radianceFactor = radiance(lights[clusterIndexList.indices[i].clusterIndexList].colorAndRadius.w, lightVec, N, L);
             // 计算辐射强度：
             // - 半径：light.colorAndRadius.w。
             // - 光源向量、N、L 传入 radiance 函数。
-            float3 lightColor = lights[indices[i].clusterIndexList].colorAndRadius.xyz;
+            float3 lightColor = lights[clusterIndexList.indices[i].clusterIndexList].colorAndRadius.xyz;
             // 获取光源颜色（RGB）。
             Lo += BRDF(L, V, N, material.metallic, roughness) * lightColor * radianceFactor;
             // 累加光照贡献：
