@@ -1,0 +1,153 @@
+#define NUM_LIGHTS 64
+#define CLUSTER_SIZE_X 8
+#define CLUSTER_SIZE_Y 8
+#define CLUSTER_SIZE_Z 8
+#define TOTAL_CLUSTERS (CLUSTER_SIZE_X * CLUSTER_SIZE_Y * CLUSTER_SIZE_Z)
+#define LIGHT_INDEX_LIST_SIZE (NUM_LIGHTS * TOTAL_CLUSTERS)
+
+struct Light {
+    float4 position;
+    float4 colorAndRadius;
+    float4 direction;
+    float4 cutOff;
+};
+
+struct Cluster {
+    uint counts;
+    uint offsets;
+    float2 padding;
+};
+
+struct ClusterIndexList {
+    uint clusterIndexList;
+    float padding1;
+    float padding2;
+    float padding3;
+};
+
+struct UBO {
+    float4x4 projection;
+    float4x4 model;
+    float4x4 view;
+    float3 camPos;
+    uint maxlightindexnum;
+};
+
+cbuffer ubo : register(b0) {
+    UBO ubo;
+};
+
+StructuredBuffer<Light> lights : register(t0);
+RWStructuredBuffer<Cluster> clusterCountsandOffsets : register(u0);
+RWStructuredBuffer<ClusterIndexList> clusterIndexList : register(u1);
+RWBuffer<uint> globalCounter : register(u2);
+
+groupshared uint sharedClusterCounts[TOTAL_CLUSTERS];
+
+#define WORKGROUP_SIZE_X 8
+#define WORKGROUP_SIZE_Y 8
+#define WORKGROUP_SIZE_Z 1
+#define TOTAL_THREADS (WORKGROUP_SIZE_X * WORKGROUP_SIZE_Y * WORKGROUP_SIZE_Z)
+
+[numthreads(WORKGROUP_SIZE_X, WORKGROUP_SIZE_Y, WORKGROUP_SIZE_Z)]
+void main(uint3 groupId : SV_GroupID, uint3 threadId : SV_GroupThreadID, uint3 dispatchId : SV_DispatchThreadID) {
+    if (threadId.x == 0 && threadId.y == 0 && threadId.z == 0) {
+        for (uint i = 0; i < TOTAL_CLUSTERS; i++) {
+            sharedClusterCounts[i] = 0;
+        }
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    uint lightIdx = groupId.x;
+    if (lightIdx >= NUM_LIGHTS) return;
+
+    Light light = lights[lightIdx];
+    float radius = light.colorAndRadius.w;
+
+    float4x4 viewProj = mul(ubo.projection, ubo.view);
+    float4 clipPos = mul(viewProj, light.position);
+    float ndcX = clipPos.x / clipPos.w;
+    float ndcY = clipPos.y / clipPos.w;
+    float ndcZ = clipPos.z / clipPos.w;
+    float radiusNDC = radius / clipPos.w;
+
+    float zNear = 0.1;
+    float zFar = 256.0;
+    float minX = clamp(ndcX - radiusNDC, -1.0, 1.0);
+    float maxX = clamp(ndcX + radiusNDC, -1.0, 1.0);
+    float minY = clamp(ndcY - radiusNDC, -1.0, 1.0);
+    float maxY = clamp(ndcY + radiusNDC, -1.0, 1.0);
+    float minZ = clamp(ndcZ - radiusNDC, 0.0, 1.0);
+    float maxZ = clamp(ndcZ + radiusNDC, 0.0, 1.0);
+
+    uint minClusterX = uint((minX * 0.5 + 0.5) * CLUSTER_SIZE_X);
+    uint maxClusterX = uint((maxX * 0.5 + 0.5) * CLUSTER_SIZE_X);
+    uint minClusterY = uint((minY * 0.5 + 0.5) * CLUSTER_SIZE_Y);
+    uint maxClusterY = uint((maxY * 0.5 + 0.5) * CLUSTER_SIZE_Y);
+    uint minClusterZ = uint((log(max(0.0001, minZ) * (zFar - zNear) + zNear) / log(zFar / zNear)) * CLUSTER_SIZE_Z);
+    uint maxClusterZ = uint((log(max(0.0001, maxZ) * (zFar - zNear) + zNear) / log(zFar / zNear)) * CLUSTER_SIZE_Z);
+
+    minClusterX = clamp(minClusterX, 0u, CLUSTER_SIZE_X - 1);
+    maxClusterX = clamp(maxClusterX, 0u, CLUSTER_SIZE_X - 1);
+    minClusterY = clamp(minClusterY, 0u, CLUSTER_SIZE_Y - 1);
+    maxClusterY = clamp(maxClusterY, 0u, CLUSTER_SIZE_Y - 1);
+    minClusterZ = clamp(minClusterZ, 0u, CLUSTER_SIZE_Z - 1);
+    maxClusterZ = clamp(maxClusterZ, 0u, CLUSTER_SIZE_Z - 1);
+
+    uint threadIdx = threadId.x + threadId.y * WORKGROUP_SIZE_X + threadId.z * WORKGROUP_SIZE_X * WORKGROUP_SIZE_Y;
+    uint clusterCountX = maxClusterX - minClusterX + 1;
+    uint clusterCountY = maxClusterY - minClusterY + 1;
+    uint clusterCountZ = maxClusterZ - minClusterZ + 1;
+    uint totalClusters = clusterCountX * clusterCountY * clusterCountZ;
+
+    for (uint i = threadIdx; i < totalClusters; i += TOTAL_THREADS) {
+        uint z = i / (clusterCountX * clusterCountY);
+        uint y = (i / clusterCountX) % clusterCountY;
+        uint x = i % clusterCountX;
+        z += minClusterZ;
+        y += minClusterY;
+        x += minClusterX;
+
+        uint clusterIdx = z * CLUSTER_SIZE_X * CLUSTER_SIZE_Y + y * CLUSTER_SIZE_X + x;
+        if (clusterIdx < TOTAL_CLUSTERS) {
+            InterlockedAdd(sharedClusterCounts[clusterIdx], 1);
+        }
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    if (threadIdx == 0) {
+        uint runningSum = 0;
+        InterlockedAdd(globalCounter[0], 0, runningSum);
+        for (uint i = 0; i < TOTAL_CLUSTERS; i++) {
+            if (sharedClusterCounts[i] > 0) {
+                clusterCountsandOffsets[i].counts = sharedClusterCounts[i];
+                clusterCountsandOffsets[i].offsets = runningSum;
+                InterlockedAdd(globalCounter[0], sharedClusterCounts[i]);
+                runningSum += sharedClusterCounts[i];
+            } else {
+                clusterCountsandOffsets[i].counts = 0;
+                clusterCountsandOffsets[i].offsets = runningSum;
+            }
+        }
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    for (uint i = threadIdx; i < totalClusters; i += TOTAL_THREADS) {
+        uint z = i / (clusterCountX * clusterCountY);
+        uint y = (i / clusterCountX) % clusterCountY;
+        uint x = i % clusterCountX;
+        z += minClusterZ;
+        y += minClusterY;
+        x += minClusterX;
+
+        uint clusterIdx = z * CLUSTER_SIZE_X * CLUSTER_SIZE_Y + y * CLUSTER_SIZE_X + x;
+        if (clusterIdx < TOTAL_CLUSTERS && sharedClusterCounts[clusterIdx] > 0) {
+            uint offset;
+            InterlockedAdd(clusterCountsandOffsets[clusterIdx].counts, -1, offset);
+            offset = clusterCountsandOffsets[clusterIdx].offsets + offset - 1;
+            if (offset < LIGHT_INDEX_LIST_SIZE) {
+                clusterIndexList[offset].clusterIndexList = lightIdx;
+            }
+        }
+    }
+}
