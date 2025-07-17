@@ -147,7 +147,7 @@ float4 main(VSOutput input) : SV_TARGET {
 
     float3 Lo = float3(0.0, 0.0, 0.0);
     if (lightCount > 0) {
-        for (uint i = lightOffset; i < lightOffset + lightCount; i++) {
+        for (uint i = lightOffset; i < min(lightOffset + lightCount, LIGHT_INDEX_LIST_SIZE); i++) {
             float3 lightVec = lights[clusterIndexList[i].clusterIndexList].position.xyz - input.WorldPos;
             float3 L = normalize(lightVec);
             float radianceFactor = radiance(lights[clusterIndexList[i].clusterIndexList].colorAndRadius.w, lightVec, N, L);

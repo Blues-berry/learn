@@ -320,7 +320,14 @@ public:
 
         vkCmdBindPipeline(computeCmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline);
         vkCmdBindDescriptorSets(computeCmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
-        vkCmdDispatch(computeCmdBuffer, maxnumLights, 1, 1); // One workgroup per light
+        vkCmdDispatch(computeCmdBuffer, maxnumLights, 1, 1);
+
+        // 添加内存屏障
+        VkMemoryBarrier memoryBarrier = {};
+        memoryBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+        memoryBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        memoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        vkCmdPipelineBarrier(computeCmdBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 1, &memoryBarrier, 0, nullptr, 0, nullptr);
 
         VK_CHECK_RESULT(vkEndCommandBuffer(computeCmdBuffer));
 
@@ -342,8 +349,8 @@ public:
 
     void setupDescriptors() {
         std::vector<VkDescriptorPoolSize> poolSizes = {
-            vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 4),
-            vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1), // For globalCounter
+            vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 8), // 增加数量
+            vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 4), // 增加数量
         };
         VkDescriptorPoolCreateInfo descriptorPoolInfo = vks::initializers::descriptorPoolCreateInfo(poolSizes, 2);
         VK_CHECK_RESULT(vkCreateDescriptorPool(device, &descriptorPoolInfo, nullptr, &descriptorPool));
@@ -436,6 +443,9 @@ public:
 	}
 
     void prepareUniformBuffers() {
+
+
+
         VkPhysicalDeviceProperties properties;
         vkGetPhysicalDeviceProperties(physicalDevice, &properties);
         VkDeviceSize minAlignment = properties.limits.minUniformBufferOffsetAlignment;
@@ -473,6 +483,10 @@ public:
         VK_CHECK_RESULT(uniformBuffers.clusterIndexList.map());
         VK_CHECK_RESULT(uniformBuffers.globalCounter.map());
 
+        //初始化数据
+        memset(uniformBuffers.clusterData.mapped, 0, sizeof(clusterData));
+        memset(uniformBuffers.clusterIndexList.mapped, 0, alignedSizeClusterIndexList);
+
         prepareSphereBuffers();
     }
 
@@ -483,6 +497,13 @@ public:
         uboMatrices.model = glm::rotate(glm::mat4(1.0f), glm::radians(rotationAngle), glm::vec3(0.0f, 1.0f, 0.0f));
         uboMatrices.camPos = camera.position * -1.0f;
         memcpy(uniformBuffers.object.mapped, &uboMatrices, sizeof(uboMatrices));
+        uniformBuffers.object.flush();
+        //在 prepareUniformBuffers 中，所有缓冲区都被映射为 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT，但未检查是否在 GPU 内存中正确更新。在 render 函数中，globalCounter 被重置为零，但可能未及时同步到 GPU。
+
+        //解决方案：
+
+        //    确保 updateUniformBuffers 和 updateLights 的 memcpy 操作后，调用 vkFlushMappedBufferMemory：
+    
     }
 
     void updateLights() {
@@ -522,6 +543,13 @@ public:
         }
 
         memcpy(uniformBuffers.params.mapped, &uboParams, sizeof(uboParams));
+        uniformBuffers.params.flush();
+
+        //在 prepareUniformBuffers 中，所有缓冲区都被映射为 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT，但未检查是否在 GPU 内存中正确更新。在 render 函数中，globalCounter 被重置为零，但可能未及时同步到 GPU。
+
+//解决方案：
+
+//    确保 updateUniformBuffers 和 updateLights 的 memcpy 操作后，调用 vkFlushMappedBufferMemory：
     }
 
     void prepare() {
@@ -550,11 +578,31 @@ public:
     void render() {
         if (!prepared) return;
         updateUniformBuffers();
+        // ... 调试信息..
+        uint32_t* counter = (uint32_t*)uniformBuffers.globalCounter.mapped;
+        printf("Global counter: %u\n", *counter);
+        ClusterCountsandOffsets* clusterData = (ClusterCountsandOffsets*)uniformBuffers.clusterData.mapped;
+
+
+        for (uint32_t i = 0; i < TOTAL_CLUSTERS; i++) {
+            printf("Cluster %u: count=%u, offset=%u\n", i, clusterData->cluster[i].count, clusterData->cluster[i].offset);
+        }
+
         if (!paused) {
             updateLights();
             uint32_t zero = 0;
             memcpy(uniformBuffers.globalCounter.mapped, &zero, sizeof(uint32_t)); // Reset global counter
             dispatchCompute(); // Run Compute Shader
+
+            // 等待计算完成
+            VkFence fence;
+            VkFenceCreateInfo fenceInfo = vks::initializers::fenceCreateInfo();
+            vkCreateFence(device, &fenceInfo, nullptr, &fence);
+            vkQueueSubmit(queue, 1, &submitInfo, fence);
+            vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);
+            vkDestroyFence(device, fence, nullptr);
+
+
         }
         draw();
     }
