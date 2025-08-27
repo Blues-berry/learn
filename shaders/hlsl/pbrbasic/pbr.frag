@@ -205,12 +205,16 @@ float radiance(float radius, float3 lightVec, float3 N, float3 L) {
     // 函数计算光源的辐射强度（考虑距离衰减和角度）。
     float distance = length(lightVec);
     // 计算片段到光源的距离。
-    if (distance > radius) return 0.0;
+    float normalizedDistance = distance / radius;
+    if (normalizedDistance > 1.0) return 0.0;
     // 如果距离超过光源半径，返回 0（无贡献）。
-    float attenuation = pow(clamp(1.0 - distance / radius, 0.0, 1.0), 2.0);
-    // 计算距离衰减：
-    // - 公式：(1 - 距离/半径)^2。
-    // - clamp 确保值在 [0, 1]。
+    
+    // 使用平滑的衰减函数
+    float attenuation = 1.0 / (distance * distance + 1.0);
+    // 平滑过渡到边界
+    float fade = smoothstep(0.8, 1.0, normalizedDistance);
+    attenuation *= (1.0 - fade);
+    
     float dotNL = max(dot(N, L), 0.0);
     // 计算 N·L，限制非负，表示光线对表面的贡献。
     return attenuation * dotNL;
@@ -250,22 +254,18 @@ float4 main(VSOutput input) : SV_TARGET {
     float zNear = 0.1;
     float zFar = 256.0;
     // 定义近裁剪面和远裁剪面，与 C++ 相机设置一致。
-    uint clusterZ = uint(float((log(viewZ / zNear) / log(zFar / zNear) * CLUSTER_SIZE_Z)));
-    // 计算 Z 方向集群索引：
-    // - 使用对数深度公式：log(z / zNear) / log(zFar / zNear)。
-    // - 乘以 CLUSTER_SIZE_Z（1），映射到集群范围。
+    // 计算 Z 方向集群索引
+    float normalizedZ = (log(viewZ / zNear) / log(zFar / zNear));
+    uint clusterZ = uint(normalizedZ * CLUSTER_SIZE_Z);
     clusterZ = clamp(clusterZ, 0u, CLUSTER_SIZE_Z - 1);
-    // 限制 Z 索引在 [0, CLUSTER_SIZE_Z - 1]（0）。
 
+    // 计算 X/Y 方向集群索引
     uint clusterX = uint(screenPos.x * CLUSTER_SIZE_X);
     uint clusterY = uint(screenPos.y * CLUSTER_SIZE_Y);
-    // 计算 X/Y 方向集群索引：
-    // - screenPos.x/y（[0, 1]）乘以 CLUSTER_SIZE_X/Y（8）。
     clusterX = clamp(clusterX, 0u, CLUSTER_SIZE_X - 1);
     clusterY = clamp(clusterY, 0u, CLUSTER_SIZE_Y - 1);
-    // 限制 X/Y 索引在 [0, 7]。
-    clusterZ = clamp(clusterZ, 0u, CLUSTER_SIZE_Z - 1);
-    // 再次限制 Z 索引（冗余，因为 CLUSTER_SIZE_Z = 1）。
+
+    // 计算集群索引
     uint clusterIdx = clusterZ * CLUSTER_SIZE_X * CLUSTER_SIZE_Y + clusterY * CLUSTER_SIZE_X + clusterX;
     // 计算集群索引：
     // - 公式：z * 8 * 8 + y * 8 + x。
@@ -282,16 +282,19 @@ float4 main(VSOutput input) : SV_TARGET {
         // 如果集群有光源，计算光照。
         for (int i = lightOffset; i < lightOffset + lightCount; i++) {
             // 遍历集群的光源索引。
-             
-            float3 lightVec = lights[clusterIndexList.indices[i].clusterIndexList].position.xyz - input.WorldPos;
+            if (i >= LIGHT_INDEX_LIST_SIZE) continue;
+            uint lightIndex = clusterIndexList.indices[i].clusterIndexList;
+            if (lightIndex >= NUM_LIGHTS) continue;
+            
+            float3 lightVec = lights[lightIndex].position.xyz - input.WorldPos;
             // 计算光源向量：光源位置 - 片段位置。
             float3 L = normalize(lightVec);
             // 归一化光源方向。
-            float radianceFactor = radiance(lights[clusterIndexList.indices[i].clusterIndexList].colorAndRadius.w, lightVec, N, L);
+            float radianceFactor = radiance(lights[lightIndex].colorAndRadius.w, lightVec, N, L);
             // 计算辐射强度：
             // - 半径：light.colorAndRadius.w。
             // - 光源向量、N、L 传入 radiance 函数。
-            float3 lightColor = lights[clusterIndexList.indices[i].clusterIndexList].colorAndRadius.xyz;
+            float3 lightColor = lights[lightIndex].colorAndRadius.xyz;
             // 获取光源颜色（RGB）。
             Lo += BRDF(L, V, N, material.metallic, roughness) * lightColor * radianceFactor;
             // 累加光照贡献：

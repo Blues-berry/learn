@@ -65,6 +65,12 @@ struct Light {
 // - direction：光源方向 (x, y, z, w)，用于聚光灯。
 // - cutOff：截止角度等参数 (innerAngle, outerAngle, 0, 0)，用于聚光灯的衰减。
 
+// 全局计数器结构体，用于计算着色器中的原子操作
+struct GlobalCounter {
+    uint32_t counter;
+    uint32_t padding[3]; // 12 字节，确保 16 字节对齐
+};
+
 // 修正后的集群数据结构
 struct ClusterCountsandOffsets {
     struct Cluster {
@@ -125,6 +131,7 @@ public:
         vks::Buffer sphereVertex;   // 光源球体顶点缓冲区
         vks::Buffer sphereIndex;    // 光源球体索引缓冲区
         vks::Buffer sphereNormal;   // 光源球体法线缓冲区
+        vks::Buffer globalCounter;  // 全局计数器，用于计算着色器的原子操作
     } uniformBuffers;
     // 定义 uniformBuffers 结构体，存储 Vulkan 缓冲区对象：
     // - object：存储投影、模型、视图矩阵和相机位置。
@@ -150,6 +157,7 @@ public:
     UBOParams uboParams;
     ClusterCountsandOffsets clusterData;
     ClusterIndexList clusterIndexList;
+    GlobalCounter globalCounter;
     // 声明 Uniform Buffer 数据实例：
     // - uboParams：存储光源数据。
     // - clusterData：存储集群计数和偏移。
@@ -159,6 +167,17 @@ public:
     VkPipeline pipeline{ VK_NULL_HANDLE };
     VkDescriptorSetLayout descriptorSetLayout{ VK_NULL_HANDLE };
     VkDescriptorSet descriptorSet{ VK_NULL_HANDLE };
+    
+    // 计算着色器相关
+    VkPipelineLayout computePipelineLayout{ VK_NULL_HANDLE };
+    VkPipeline computePipeline{ VK_NULL_HANDLE };
+    VkDescriptorSetLayout computeDescriptorSetLayout{ VK_NULL_HANDLE };
+    VkDescriptorSet computeDescriptorSet{ VK_NULL_HANDLE };
+    VkCommandBuffer computeCmdBuffer{ VK_NULL_HANDLE };
+    VkFence computeFence{ VK_NULL_HANDLE };
+    VkSemaphore computeCompleteSemaphore{ VK_NULL_HANDLE };
+    VkQueue computeQueue{ VK_NULL_HANDLE };
+    uint32_t queueFamilyIndexCompute = 0;
     // 声明 Vulkan 管线相关对象：
     // - pipelineLayout：管线布局，定义着色器资源绑定。
     // - pipeline：图形管线，定义渲染流程。
@@ -247,6 +266,14 @@ public:
             // 销毁管线布局。
             vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
             // 销毁描述符集布局。
+            
+            // 销毁计算管线相关资源
+            vkDestroyPipeline(device, computePipeline, nullptr);
+            vkDestroyPipelineLayout(device, computePipelineLayout, nullptr);
+            vkDestroyDescriptorSetLayout(device, computeDescriptorSetLayout, nullptr);
+            vkDestroyFence(device, computeFence, nullptr);
+            vkDestroySemaphore(device, computeCompleteSemaphore, nullptr);
+            
             uniformBuffers.object.destroy();
             uniformBuffers.params.destroy();
             uniformBuffers.clusterData.destroy();
@@ -254,6 +281,7 @@ public:
             uniformBuffers.sphereVertex.destroy();
             uniformBuffers.sphereIndex.destroy();
             uniformBuffers.sphereNormal.destroy();
+            uniformBuffers.globalCounter.destroy();
             // 销毁所有 Uniform Buffer 和光源球体缓冲区。
         }
     }
@@ -784,11 +812,19 @@ public:
             &uniformBuffers.clusterIndexList,
             alignedSizeClusterIndexList));
         // 创建光源索引列表缓冲区，使用对齐大小。
+        
+        // 创建全局计数器缓冲区
+        VK_CHECK_RESULT(vulkanDevice->createBuffer(
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            &uniformBuffers.globalCounter,
+            sizeof(GlobalCounter)));
 
         VK_CHECK_RESULT(uniformBuffers.object.map());
         VK_CHECK_RESULT(uniformBuffers.params.map());
         VK_CHECK_RESULT(uniformBuffers.clusterData.map());
         VK_CHECK_RESULT(uniformBuffers.clusterIndexList.map());
+        VK_CHECK_RESULT(uniformBuffers.globalCounter.map());
         // 映射所有缓冲区，使 CPU 可直接写入数据。
 
         prepareSphereBuffers();
@@ -809,6 +845,12 @@ public:
         // 设置模型矩阵为绕 Y 轴旋转的矩阵。
         uboMatrices.camPos = camera.position * -1.0f;
         // 设置相机位置为相反值（可能是坐标系调整）。
+        
+        // 更新计算着色器的输出数据
+        memcpy(uniformBuffers.globalCounter.mapped, &globalCounter, sizeof(GlobalCounter));
+        memcpy(uniformBuffers.clusterData.mapped, &clusterData, sizeof(ClusterCountsandOffsets));
+        memcpy(uniformBuffers.clusterIndexList.mapped, &clusterIndexList, sizeof(ClusterIndexList));
+        
         memcpy(uniformBuffers.object.mapped, &uboMatrices, sizeof(uboMatrices));
         // 将 uboMatrices 数据复制到映射的缓冲区。
     }
@@ -1044,7 +1086,60 @@ public:
         // 更新光源索引列表缓冲区。
     }
 
+    void runCompute() {
+        // 重置全局计数器
+        globalCounter.counter = 0;
+        memcpy(uniformBuffers.globalCounter.mapped, &globalCounter, sizeof(GlobalCounter));
+        
+        // 重置围栏以确保计算命令缓冲区已完成
+        vkResetFences(device, 1, &computeFence);
+        
+        // 记录计算命令缓冲区
+        VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
+        VK_CHECK_RESULT(vkBeginCommandBuffer(computeCmdBuffer, &cmdBufInfo));
+        
+        // 绑定计算管线
+        vkCmdBindPipeline(computeCmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline);
+        
+        // 绑定描述符集
+        vkCmdBindDescriptorSets(computeCmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelineLayout, 0, 1, &computeDescriptorSet, 0, nullptr);
+        
+        // 调度计算着色器
+        vkCmdDispatch(computeCmdBuffer, CLUSTER_SIZE_X, CLUSTER_SIZE_Y, CLUSTER_SIZE_Z);
+        
+        // 结束命令缓冲区记录
+        VK_CHECK_RESULT(vkEndCommandBuffer(computeCmdBuffer));
+        
+        // 提交计算命令缓冲区
+        VkSubmitInfo computeSubmitInfo = vks::initializers::submitInfo();
+        computeSubmitInfo.commandBufferCount = 1;
+        computeSubmitInfo.pCommandBuffers = &computeCmdBuffer;
+        computeSubmitInfo.signalSemaphoreCount = 1;
+        computeSubmitInfo.pSignalSemaphores = &computeCompleteSemaphore;
+        
+        VK_CHECK_RESULT(vkQueueSubmit(computeQueue, 1, &computeSubmitInfo, computeFence));
+        
+        // 等待计算完成
+        vkWaitForFences(device, 1, &computeFence, VK_TRUE, UINT64_MAX);
+    }
+    
     void draw() {
+        // 执行计算着色器
+        runCompute();
+        
+        // 确保计算着色器的结果对渲染管线可见
+        VkMemoryBarrier memoryBarrier = vks::initializers::memoryBarrier();
+        memoryBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        memoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        
+        VkSubmitInfo barrierSubmitInfo = vks::initializers::submitInfo();
+        VkPipelineStageFlags waitStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+        barrierSubmitInfo.pWaitDstStageMask = &waitStageMask;
+        barrierSubmitInfo.waitSemaphoreCount = 1;
+        barrierSubmitInfo.pWaitSemaphores = &computeCompleteSemaphore;
+        
+        VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &barrierSubmitInfo, VK_NULL_HANDLE));
+        
         // 函数执行绘制操作。
         VulkanExampleBase::prepareFrame();
         // 准备帧（由基类实现，可能包括交换链操作）。
@@ -1058,6 +1153,57 @@ public:
         // 提交帧（由基类实现，可能包括呈现）。
     }
 
+    void prepareCompute() {
+        // 准备计算着色器相关资源
+        vkGetDeviceQueue(device, queueFamilyIndexCompute, 0, &computeQueue);
+        
+        // 创建计算描述符集布局
+        std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {
+            vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT, 0),
+            vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT, 1),
+            vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT, 2),
+            vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT, 3),
+            vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT, 4)
+        };
+        
+        VkDescriptorSetLayoutCreateInfo descriptorLayout = vks::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings.data(), static_cast<uint32_t>(setLayoutBindings.size()));
+        VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &computeDescriptorSetLayout));
+        
+        // 创建计算管线布局
+        VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(&computeDescriptorSetLayout, 1);
+        VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &computePipelineLayout));
+        
+        // 创建计算管线
+        VkComputePipelineCreateInfo computePipelineCreateInfo = vks::initializers::computePipelineCreateInfo(computePipelineLayout);
+        computePipelineCreateInfo.stage = loadShader(getShadersPath() + "pbrbasic/clusterlight.comp.hlsl", VK_SHADER_STAGE_COMPUTE_BIT);
+        VK_CHECK_RESULT(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &computePipelineCreateInfo, nullptr, &computePipeline));
+        
+        // 创建计算描述符集
+        VkDescriptorSetAllocateInfo allocInfo = vks::initializers::descriptorSetAllocateInfo(descriptorPool, &computeDescriptorSetLayout, 1);
+        VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &computeDescriptorSet));
+        
+        // 更新计算描述符集
+        std::vector<VkWriteDescriptorSet> computeWriteDescriptorSets = {
+            vks::initializers::writeDescriptorSet(computeDescriptorSet, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 0, &uniformBuffers.globalCounter.descriptor),
+            vks::initializers::writeDescriptorSet(computeDescriptorSet, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, &uniformBuffers.clusterData.descriptor),
+            vks::initializers::writeDescriptorSet(computeDescriptorSet, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2, &uniformBuffers.clusterIndexList.descriptor),
+            vks::initializers::writeDescriptorSet(computeDescriptorSet, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 3, &uniformBuffers.params.descriptor),
+            vks::initializers::writeDescriptorSet(computeDescriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 4, &uniformBuffers.object.descriptor)
+        };
+        vkUpdateDescriptorSets(device, static_cast<uint32_t>(computeWriteDescriptorSets.size()), computeWriteDescriptorSets.data(), 0, nullptr);
+        
+        // 创建计算命令缓冲区
+        VkCommandBufferAllocateInfo cmdBufAllocateInfo = vks::initializers::commandBufferAllocateInfo(cmdPool, VK_COMMAND_BUFFER_LEVEL_PRIMARY, 1);
+        VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &computeCmdBuffer));
+        
+        // 创建计算同步对象
+        VkFenceCreateInfo fenceCreateInfo = vks::initializers::fenceCreateInfo(VK_FENCE_CREATE_SIGNALED_BIT);
+        VK_CHECK_RESULT(vkCreateFence(device, &fenceCreateInfo, nullptr, &computeFence));
+        
+        VkSemaphoreCreateInfo semaphoreCreateInfo = vks::initializers::semaphoreCreateInfo();
+        VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &computeCompleteSemaphore));
+    }
+    
     void prepare() {
         // 函数准备渲染环境。
         VulkanExampleBase::prepare();
@@ -1070,6 +1216,8 @@ public:
         // 设置描述符。
         preparePipelines();
         // 创建管线。
+        prepareCompute();
+        // 准备计算着色器相关资源。
         buildCommandBuffers();
         // 构建命令缓冲区。
         prepared = true;

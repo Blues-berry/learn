@@ -1,0 +1,249 @@
+#define NUM_LIGHTS 64
+#define CLUSTER_SIZE_X 8
+#define CLUSTER_SIZE_Y 8
+#define CLUSTER_SIZE_Z 8
+#define TOTAL_CLUSTERS CLUSTER_SIZE_X * CLUSTER_SIZE_Y * CLUSTER_SIZE_Z
+#define LIGHT_INDEX_LIST_SIZE (NUM_LIGHTS * TOTAL_CLUSTERS)
+
+struct Light {
+    float4 position;
+    float4 colorAndRadius;
+    float4 direction;
+    float4 cutOff;
+};
+
+struct Cluster {
+    uint counts;
+    uint offsets;
+    float2 padding;
+};
+
+struct ClusterIndexList {
+    struct Indices {
+        uint32_t clusterIndexList; // 4 字节
+        float padding1;          // 12 字节，确保 16 字节对齐
+        float padding2;          // 12 字节，确保 16 字节对齐
+        float padding3;          // 12 字节，确保 16 字节对齐
+    };
+    Indices indices[LIGHT_INDEX_LIST_SIZE]; // 全局光源索引列表
+};
+
+struct UBO {
+    float4x4 projection;
+    float4x4 model;
+    float4x4 view;
+    float3 camPos;
+    uint maxlightindexnum;
+};
+
+// 全局计数器，用于原子操作
+struct GlobalCounter {
+    uint counter;
+    uint3 padding;
+};
+
+// 绑定资源
+[[vk::binding(0, 0)]] RWStructuredBuffer<GlobalCounter> globalCounter;
+[[vk::binding(1, 0)]] StructuredBuffer<Light> lights;
+[[vk::binding(2, 0)]] RWStructuredBuffer<Cluster> clusterData;
+[[vk::binding(3, 0)]] RWStructuredBuffer<ClusterIndexList::Indices> clusterIndexList;
+[[vk::binding(4, 0)]] ConstantBuffer<UBO> ubo;
+
+// 计算光源的AABB包围盒
+void calculateLightBounds(uint lightIdx, inout float3 minBounds, inout float3 maxBounds) {
+    float3 lightPos = lights[lightIdx].position.xyz;
+    float lightRadius = lights[lightIdx].colorAndRadius.w;
+    
+    minBounds = lightPos - float3(lightRadius, lightRadius, lightRadius);
+    maxBounds = lightPos + float3(lightRadius, lightRadius, lightRadius);
+}
+
+// 将世界空间坐标转换为视图空间
+float3 worldToView(float3 worldPos) {
+    float4 viewPos = mul(ubo.view, float4(worldPos, 1.0));
+    return viewPos.xyz;
+}
+
+// 将视图空间坐标转换为裁剪空间
+float4 viewToClip(float3 viewPos) {
+    return mul(ubo.projection, float4(viewPos, 1.0));
+}
+
+// 将裁剪空间坐标转换为NDC空间
+float3 clipToNDC(float4 clipPos) {
+    return clipPos.xyz / clipPos.w;
+}
+
+// 将NDC坐标转换为屏幕空间
+float2 ndcToScreen(float3 ndcPos) {
+    return ndcPos.xy * 0.5 + 0.5;
+}
+
+// 计算深度集群索引
+uint calculateDepthClusterIndex(float viewZ) {
+    float zNear = 0.1;
+    float zFar = 256.0;
+    float normalizedZ = (log(viewZ / zNear) / log(zFar / zNear));
+    uint clusterZ = uint(normalizedZ * CLUSTER_SIZE_Z);
+    return clamp(clusterZ, 0u, CLUSTER_SIZE_Z - 1);
+}
+
+// 计算集群索引
+uint calculateClusterIndex(uint x, uint y, uint z) {
+    return z * CLUSTER_SIZE_X * CLUSTER_SIZE_Y + y * CLUSTER_SIZE_X + x;
+}
+
+// 检查光源是否与集群相交
+bool lightIntersectsCluster(uint lightIdx, uint clusterX, uint clusterY, uint clusterZ) {
+    // 获取光源位置和半径
+    float3 lightPos = lights[lightIdx].position.xyz;
+    float lightRadius = lights[lightIdx].colorAndRadius.w;
+    
+    // 计算集群在世界空间中的边界
+    float zNear = 0.1;
+    float zFar = 256.0;
+    
+    // 计算集群在屏幕空间的边界
+    float minX = float(clusterX) / CLUSTER_SIZE_X;
+    float maxX = float(clusterX + 1) / CLUSTER_SIZE_X;
+    float minY = float(clusterY) / CLUSTER_SIZE_Y;
+    float maxY = float(clusterY + 1) / CLUSTER_SIZE_Y;
+    
+    // 将屏幕空间映射回NDC空间 [0,1] -> [-1,1]
+    minX = minX * 2.0 - 1.0;
+    maxX = maxX * 2.0 - 1.0;
+    minY = minY * 2.0 - 1.0;
+    maxY = maxY * 2.0 - 1.0;
+    
+    // 计算深度范围
+    float minZ = zNear * pow(zFar / zNear, float(clusterZ) / CLUSTER_SIZE_Z);
+    float maxZ = zNear * pow(zFar / zNear, float(clusterZ + 1) / CLUSTER_SIZE_Z);
+    
+    // 创建视图空间中的8个角点
+    float3 corners[8];
+    corners[0] = float3(minX, minY, -minZ); // 近平面左下
+    corners[1] = float3(maxX, minY, -minZ); // 近平面右下
+    corners[2] = float3(minX, maxY, -minZ); // 近平面左上
+    corners[3] = float3(maxX, maxY, -minZ); // 近平面右上
+    corners[4] = float3(minX, minY, -maxZ); // 远平面左下
+    corners[5] = float3(maxX, minY, -maxZ); // 远平面右下
+    corners[6] = float3(minX, maxY, -maxZ); // 远平面左上
+    corners[7] = float3(maxX, maxY, -maxZ); // 远平面右上
+    
+    // 将视图空间角点转换为世界空间
+    float4x4 invView;
+    float4x4 view = ubo.view;
+    
+    // 计算完整的逆矩阵
+    float det = determinant(view);
+    if (abs(det) > 1e-6) {
+        // 手动计算逆矩阵
+        invView = view;
+        invView._11_12_13_14 = float4(
+            view._22 * view._33 * view._44 - view._22 * view._34 * view._43 - view._32 * view._23 * view._44 + view._32 * view._24 * view._43 + view._42 * view._23 * view._34 - view._42 * view._24 * view._33,
+            -view._12 * view._33 * view._44 + view._12 * view._34 * view._43 + view._32 * view._13 * view._44 - view._32 * view._14 * view._43 - view._42 * view._13 * view._34 + view._42 * view._14 * view._33,
+            view._12 * view._23 * view._44 - view._12 * view._24 * view._43 - view._22 * view._13 * view._44 + view._22 * view._14 * view._43 + view._42 * view._13 * view._24 - view._42 * view._14 * view._23,
+            -view._12 * view._23 * view._34 + view._12 * view._24 * view._33 + view._22 * view._13 * view._34 - view._22 * view._14 * view._33 - view._32 * view._13 * view._24 + view._32 * view._14 * view._23
+        ) / det;
+        
+        invView._21_22_23_24 = float4(
+            -view._21 * view._33 * view._44 + view._21 * view._34 * view._43 + view._31 * view._23 * view._44 - view._31 * view._24 * view._43 - view._41 * view._23 * view._34 + view._41 * view._24 * view._33,
+            view._11 * view._33 * view._44 - view._11 * view._34 * view._43 - view._31 * view._13 * view._44 + view._31 * view._14 * view._43 + view._41 * view._13 * view._34 - view._41 * view._14 * view._33,
+            -view._11 * view._23 * view._44 + view._11 * view._24 * view._43 + view._21 * view._13 * view._44 - view._21 * view._14 * view._43 - view._41 * view._13 * view._24 + view._41 * view._14 * view._23,
+            view._11 * view._23 * view._34 - view._11 * view._24 * view._33 - view._21 * view._13 * view._34 + view._21 * view._14 * view._33 + view._31 * view._13 * view._24 - view._31 * view._14 * view._23
+        ) / det;
+        
+        invView._31_32_33_34 = float4(
+            view._21 * view._32 * view._44 - view._21 * view._34 * view._42 - view._31 * view._22 * view._44 + view._31 * view._24 * view._42 + view._41 * view._22 * view._34 - view._41 * view._24 * view._32,
+            -view._11 * view._32 * view._44 + view._11 * view._34 * view._42 + view._31 * view._12 * view._44 - view._31 * view._14 * view._42 - view._41 * view._12 * view._34 + view._41 * view._14 * view._32,
+            view._11 * view._22 * view._44 - view._11 * view._24 * view._42 - view._21 * view._12 * view._44 + view._21 * view._14 * view._42 + view._41 * view._12 * view._24 - view._41 * view._14 * view._22,
+            -view._11 * view._22 * view._34 + view._11 * view._24 * view._32 + view._21 * view._12 * view._34 - view._21 * view._14 * view._32 - view._31 * view._12 * view._24 + view._31 * view._14 * view._22
+        ) / det;
+        
+        invView._41_42_43_44 = float4(
+            -view._21 * view._32 * view._43 + view._21 * view._33 * view._42 + view._31 * view._22 * view._43 - view._31 * view._23 * view._42 - view._41 * view._22 * view._33 + view._41 * view._23 * view._32,
+            view._11 * view._32 * view._43 - view._11 * view._33 * view._42 - view._31 * view._12 * view._43 + view._31 * view._13 * view._42 + view._41 * view._12 * view._33 - view._41 * view._13 * view._32,
+            -view._11 * view._22 * view._43 + view._11 * view._23 * view._42 + view._21 * view._12 * view._43 - view._21 * view._13 * view._42 - view._41 * view._12 * view._23 + view._41 * view._13 * view._22,
+            view._11 * view._22 * view._33 - view._11 * view._23 * view._32 - view._21 * view._12 * view._33 + view._21 * view._13 * view._32 + view._31 * view._12 * view._23 - view._31 * view._13 * view._22
+        ) / det;
+    } else {
+        // 如果矩阵不可逆，使用简化的逆矩阵计算
+        invView = transpose(view);
+    }
+    
+    float3 worldCorners[8];
+    for (int i = 0; i < 8; i++) {
+        float4 worldPos = mul(invView, float4(corners[i], 1.0));
+        worldCorners[i] = worldPos.xyz;
+    }
+    
+    // 计算集群的AABB包围盒
+    float3 clusterMin = worldCorners[0];
+    float3 clusterMax = worldCorners[0];
+    
+    for (int i = 1; i < 8; i++) {
+        clusterMin = min(clusterMin, worldCorners[i]);
+        clusterMax = max(clusterMax, worldCorners[i]);
+    }
+    
+    // 计算光源的AABB包围盒
+    float3 lightMin = lightPos - float3(lightRadius, lightRadius, lightRadius);
+    float3 lightMax = lightPos + float3(lightRadius, lightRadius, lightRadius);
+    
+    // 检查两个AABB是否相交
+    return !(
+        clusterMax.x < lightMin.x || clusterMin.x > lightMax.x ||
+        clusterMax.y < lightMin.y || clusterMin.y > lightMax.y ||
+        clusterMax.z < lightMin.z || clusterMin.z > lightMax.z
+    );
+}
+
+// 主计算着色器
+[numthreads(8, 8, 1)]
+void main(uint3 DTid : SV_DispatchThreadID) {
+    // 重置全局计数器
+    if (DTid.x == 0 && DTid.y == 0 && DTid.z == 0) {
+        globalCounter[0].counter = 0;
+    }
+    
+    // 确保线程在有效范围内
+    if (DTid.x >= CLUSTER_SIZE_X || DTid.y >= CLUSTER_SIZE_Y || DTid.z >= CLUSTER_SIZE_Z) {
+        return;
+    }
+    
+    // 计算当前集群索引
+    uint clusterIdx = calculateClusterIndex(DTid.x, DTid.y, DTid.z);
+    
+    // 重置当前集群的计数
+    clusterData[clusterIdx].counts = 0;
+    
+    // 遍历所有光源，检查是否与当前集群相交
+    for (uint lightIdx = 0; lightIdx < NUM_LIGHTS; lightIdx++) {
+        if (lightIntersectsCluster(lightIdx, DTid.x, DTid.y, DTid.z)) {
+            // 使用原子操作获取全局索引
+            uint index;
+            InterlockedAdd(globalCounter[0].counter, 1, index);
+            
+            if (index < LIGHT_INDEX_LIST_SIZE) {
+                // 记录光源索引
+                clusterIndexList[index].clusterIndexList = lightIdx;
+                
+                // 更新集群计数
+                InterlockedAdd(clusterData[clusterIdx].counts, 1);
+            }
+        }
+    }
+    
+    // 同步所有线程
+    GroupMemoryBarrierWithGroupSync();
+    
+    // 计算偏移量（只在每个集群的第一个线程中执行）
+    if (DTid.x == 0 && DTid.y == 0 && DTid.z == 0) {
+        uint runningOffset = 0;
+        for (uint i = 0; i < TOTAL_CLUSTERS; i++) {
+            uint count = clusterData[i].counts;
+            clusterData[i].offsets = runningOffset;
+            runningOffset += count;
+        }
+    }
+}
