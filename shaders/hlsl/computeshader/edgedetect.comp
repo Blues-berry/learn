@@ -1,3 +1,4 @@
+
 // Copyright 2020 Google LLC
 
 Texture2D inputImage : register(t0);
@@ -16,25 +17,42 @@ float conv(float kernel[9], in float data[9], in float denom, in float offset)
 [numthreads(16, 16, 1)]
 void main(uint3 GlobalInvocationID : SV_DispatchThreadID)
 {
-	float imageData[9];
-	// Fetch neighbouring texels
-	int n = -1;
-	for (int i=-1; i<2; ++i)
-	{
-		for(int j=-1; j<2; ++j)
-		{
-			n++;
-			float3 rgb = inputImage[uint2(GlobalInvocationID.x + i, GlobalInvocationID.y + j)].rgb;
-			imageData[n] = (rgb.r + rgb.g + rgb.b) / 3.0;
-		}
-	}
+    // 获取图像尺寸
+    uint width, height;
+    inputImage.GetDimensions(width, height);
 
-	float kernel[9];
-	kernel[0] = -1.0/8.0; kernel[1] = -1.0/8.0; kernel[2] = -1.0/8.0;
-	kernel[3] = -1.0/8.0; kernel[4] =  1.0;     kernel[5] = -1.0/8.0;
-	kernel[6] = -1.0/8.0; kernel[7] = -1.0/8.0; kernel[8] = -1.0/8.0;
+    float imageData[9];
 
-	float4 res = float4(conv(kernel, imageData, 0.1, 0.0).xxx, 1.0);
+    // 检查是否在边界上
+    bool isBorder = (GlobalInvocationID.x == 0 || GlobalInvocationID.x == width - 1 || 
+                    GlobalInvocationID.y == 0 || GlobalInvocationID.y == height - 1);
 
-	resultImage[int2(GlobalInvocationID.xy)] = res;
+    if (isBorder) {
+        // 边界处理：复制原始像素值
+        float3 rgb = inputImage[uint2(GlobalInvocationID.xy)].rgb;
+        resultImage[int2(GlobalInvocationID.xy)] = float4(rgb, 1.0);
+        return;
+    }
+
+    // Fetch neighbouring texels
+    int n = -1;
+    for (int i=-1; i<2; ++i)
+    {
+        for(int j=-1; j<2; ++j)
+        {
+            n++;
+            float3 rgb = inputImage[uint2(GlobalInvocationID.x + i, GlobalInvocationID.y + j)].rgb;
+            imageData[n] = (rgb.r + rgb.g + rgb.b) / 3.0;
+        }
+    }
+
+    float kernel[9];
+    kernel[0] = -1.0/8.0; kernel[1] = -1.0/8.0; kernel[2] = -1.0/8.0;
+    kernel[3] = -1.0/8.0; kernel[4] =  1.0;     kernel[5] = -1.0/8.0;
+    kernel[6] = -1.0/8.0; kernel[7] = -1.0/8.0; kernel[8] = -1.0/8.0;
+
+    float4 res = float4(conv(kernel, imageData, 0.1, 0.0).xxx, 1.0);
+
+    resultImage[int2(GlobalInvocationID.xy)] = res;
 }
+

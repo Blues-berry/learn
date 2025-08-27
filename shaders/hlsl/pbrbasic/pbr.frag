@@ -1,14 +1,14 @@
 ﻿
-#define NUM_LIGHTS 64
-#define CLUSTER_SIZE_X 8
-#define CLUSTER_SIZE_Y 8
-#define CLUSTER_SIZE_Z 8
+#define NUM_LIGHTS 16
+#define CLUSTER_SIZE_X 4
+#define CLUSTER_SIZE_Y 4
+#define CLUSTER_SIZE_Z 4
 #define TOTAL_CLUSTERS (CLUSTER_SIZE_X * CLUSTER_SIZE_Y * CLUSTER_SIZE_Z)
 #define LIGHT_INDEX_LIST_SIZE (NUM_LIGHTS * TOTAL_CLUSTERS)
 
 struct VSOutput {
-    [[vk::location(0)]] float3 WorldPos : POSITION0;
-    [[vk::location(1)]] float3 Normal : NORMAL0;
+    float3 WorldPos : POSITION0;
+    float3 Normal : NORMAL0;
 };
 
 struct UBO {
@@ -54,11 +54,11 @@ cbuffer clusterCountsandOffsets : register(b3) {
 };
 
 struct PushConsts {
-    [[vk::offset(12)]] float roughness;
-    [[vk::offset(16)]] float metallic;
-    [[vk::offset(20)]] float r;
-    [[vk::offset(24)]] float g;
-    [[vk::offset(28)]] float b;
+    float roughness;
+    float metallic;
+    float r;
+    float g;
+    float b;
 };
 
 [[vk::push_constant]] PushConsts material;
@@ -91,22 +91,54 @@ float3 F_Schlick(float cosTheta, float metallic) {
 }
 
 float3 BRDF(float3 L, float3 V, float3 N, float metallic, float roughness) {
-    float3 H = normalize(V + L);
-    float dotNV = clamp(dot(N, V), 0.0, 1.0);
-    float dotNL = clamp(dot(N, L), 0.0, 1.0);
+    // 确保输入向量是单位向量
+    L = normalize(L);
+    V = normalize(V);
+    N = normalize(N);
+    
+    // 计算半向量并确保其有效
+    float3 H = V + L;
+    float lenH = length(H);
+    
+    // 防止除以零
+    if (lenH < 0.001) {
+        return float3(0.0, 0.0, 0.0);
+    }
+    
+    H /= lenH;
+    
+    // 计算各种点积并进行安全的范围限制
+    float dotNV = clamp(dot(N, V), 0.001, 1.0);
+    float dotNL = clamp(dot(N, L), 0.001, 1.0);
     float dotLH = clamp(dot(L, H), 0.0, 1.0);
-    float dotNH = clamp(dot(N, H), 0.0, 1.0);
+    float dotNH = clamp(dot(N, H), 0.001, 1.0);
 
     float3 color = float3(0.0, 0.0, 0.0);
-    if (dotNL > 0.0) {
-        float rroughness = max(0.05, roughness);
-        float D = D_GGX(dotNH, roughness);
+    
+    // 只在有效的光照方向上计算BRDF
+    if (dotNL > 0.001) {
+        // 确保粗糙度在有效范围内
+        float rroughness = clamp(roughness, 0.05, 1.0);
+        
+        // 计算各种BRDF组件
+        float D = D_GGX(dotNH, rroughness);
         float G = G_SchlicksmithGGX(dotNL, dotNV, rroughness);
-        float3 F = F_Schlick(dotNV, metallic);
-        float3 spec = D * F * G / (4.0 * dotNL * dotNV);
+        float3 F = F_Schlick(dotNV, clamp(metallic, 0.0, 1.0));
+        
+        // 防止除以零或非常小的值
+        float denominator = max(4.0 * dotNL * dotNV, 0.001);
+        float3 spec = D * F * G / denominator;
+        
+        // 计算漫反射部分
         float3 diffuse = (1.0 - F) * (1.0 - metallic) * materialcolor() / PI;
+        
+        // 组合镜面反射和漫反射
         color = spec + diffuse * dotNL;
+        
+        // 确保结果在合理范围内
+        color = clamp(color, float3(0.0, 0.0, 0.0), float3(10.0, 10.0, 10.0));
     }
+    
     return color;
 }
 
@@ -146,15 +178,85 @@ float4 main(VSOutput input) : SV_TARGET {
     uint lightOffset = clusterCountsandOffsets[clusterIdx].offsets;
 
     float3 Lo = float3(0.0, 0.0, 0.0);
-    if (lightCount > 0) {
-        for (uint i = lightOffset; i < min(lightOffset + lightCount, LIGHT_INDEX_LIST_SIZE); i++) {
-            float3 lightVec = lights[clusterIndexList[i].clusterIndexList].position.xyz - input.WorldPos;
-            float3 L = normalize(lightVec);
-            float radianceFactor = radiance(lights[clusterIndexList[i].clusterIndexList].colorAndRadius.w, lightVec, N, L);
-            float3 lightColor = lights[clusterIndexList[i].clusterIndexList].colorAndRadius.xyz;
-            Lo += BRDF(L, V, N, material.metallic, roughness) * lightColor * radianceFactor;
+    
+    // 多重边界检查，确保集群索引在有效范围内
+    if (clusterIdx < TOTAL_CLUSTERS && 
+        clusterX < CLUSTER_SIZE_X && 
+        clusterY < CLUSTER_SIZE_Y && 
+        clusterZ < CLUSTER_SIZE_Z) {
+        
+        // 严格验证光照计数和偏移量
+        if (lightCount > 0 && lightCount <= NUM_LIGHTS && 
+            lightOffset < LIGHT_INDEX_LIST_SIZE) {
+            
+            // 增强的边界检查
+            uint maxLightIndexNum = min(ubo.maxlightindexnum, LIGHT_INDEX_LIST_SIZE);
+            
+            // 防止整数溢出
+            uint safeOffset = lightOffset;
+            if (safeOffset >= maxLightIndexNum) {
+                safeOffset = 0;
+                lightCount = 0; // 无效的偏移量，不处理任何光源
+            }
+            
+            // 计算安全的光照数量
+            uint remainingLights = 0;
+            if (maxLightIndexNum > safeOffset) {
+                remainingLights = maxLightIndexNum - safeOffset;
+            }
+            uint safeCount = min(lightCount, remainingLights);
+            
+            // 计算安全的最大索引
+            uint maxIndex = safeOffset;
+            if (maxIndex <= LIGHT_INDEX_LIST_SIZE - safeCount) {
+                maxIndex += safeCount;
+            } else {
+                maxIndex = LIGHT_INDEX_LIST_SIZE;
+            }
+            
+            uint processedLights = 0;
+            
+            // 使用安全的边界进行迭代
+            for (uint i = safeOffset; i < maxIndex && processedLights < safeCount; i++) {
+                // 获取光源索引并确保在有效范围内
+                uint lightIndex = 0;
+                if (i < LIGHT_INDEX_LIST_SIZE) {
+                    lightIndex = clusterIndexList[i].clusterIndexList;
+                }
+                
+                if (lightIndex < NUM_LIGHTS) {
+                    // 安全地读取光源数据
+                    Light currentLight = lights[lightIndex];
+                    
+                    // 计算光照向量
+                    float3 lightVec = currentLight.position.xyz - input.WorldPos;
+                    float lightDistance = length(lightVec);
+                    float radius = currentLight.colorAndRadius.w;
+                    
+                    // 只处理在半径范围内的光源，并添加额外的有效性检查
+                    if (lightDistance <= radius && lightDistance > 0.001) {
+                        float3 L = normalize(lightVec);
+                        
+                        // 确保法线和光照方向有效
+                        if (length(L) > 0.99 && length(N) > 0.99) {
+                            float radianceFactor = radiance(radius, lightVec, N, L);
+                            float3 lightColor = currentLight.colorAndRadius.xyz;
+                            
+                            // 确保光照颜色有效
+                            if (!any(isnan(lightColor)) && !any(isinf(lightColor))) {
+                                Lo += BRDF(L, V, N, material.metallic, roughness) * lightColor * radianceFactor;
+                            }
+                        }
+                    }
+                    
+                    processedLights++;
+                }
+            }
         }
     }
+    
+    // 确保最终颜色有效
+    Lo = clamp(Lo, float3(0.0, 0.0, 0.0), float3(16.0, 16.0, 16.0));
 
     float3 color = materialcolor() * 0.02;
     color += Lo;

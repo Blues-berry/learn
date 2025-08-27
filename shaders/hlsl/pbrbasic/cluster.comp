@@ -1,7 +1,7 @@
-#define NUM_LIGHTS 64
-#define CLUSTER_SIZE_X 8
-#define CLUSTER_SIZE_Y 8
-#define CLUSTER_SIZE_Z 8
+#define NUM_LIGHTS 16
+#define CLUSTER_SIZE_X 4
+#define CLUSTER_SIZE_Y 4
+#define CLUSTER_SIZE_Z 4
 #define TOTAL_CLUSTERS (CLUSTER_SIZE_X * CLUSTER_SIZE_Y * CLUSTER_SIZE_Z)
 #define LIGHT_INDEX_LIST_SIZE (NUM_LIGHTS * TOTAL_CLUSTERS)
 
@@ -44,24 +44,51 @@ RWBuffer<uint> globalCounter : register(u2);
 
 groupshared uint sharedClusterCounts[TOTAL_CLUSTERS];
 
-#define WORKGROUP_SIZE_X 8
-#define WORKGROUP_SIZE_Y 8
+#define WORKGROUP_SIZE_X 4
+#define WORKGROUP_SIZE_Y 4
 #define WORKGROUP_SIZE_Z 1
 #define TOTAL_THREADS (WORKGROUP_SIZE_X * WORKGROUP_SIZE_Y * WORKGROUP_SIZE_Z)
 
 [numthreads(WORKGROUP_SIZE_X, WORKGROUP_SIZE_Y, WORKGROUP_SIZE_Z)]
 void main(uint3 groupId : SV_GroupID, uint3 threadId : SV_GroupThreadID, uint3 dispatchId : SV_DispatchThreadID) {
-    if (threadId.x == 0 && threadId.y == 0 && threadId.z == 0) {
-        for (uint i = 0; i < TOTAL_CLUSTERS; i++) {
-            sharedClusterCounts[i] = 0;
-        }
+    // 计算线程索引，用于并行初始化
+    uint threadIdx = threadId.x + threadId.y * WORKGROUP_SIZE_X + threadId.z * WORKGROUP_SIZE_X * WORKGROUP_SIZE_Y;
+    
+    // 严格的边界检查
+    if (groupId.x >= NUM_LIGHTS) return;
+    
+    // 并行初始化共享内存，每个线程负责一部分
+    for (uint i = threadIdx; i < TOTAL_CLUSTERS; i += TOTAL_THREADS) {
+        sharedClusterCounts[i] = 0;
     }
+    
+    // 确保所有线程完成初始化
     GroupMemoryBarrierWithGroupSync();
+    
+    // 重置全局计数器（只在第一个工作组的第一个线程执行）
+    if (groupId.x == 0 && threadIdx == 0) {
+        globalCounter[0] = 0;
+    }
+    
+    // 确保全局计数器重置完成
+    DeviceMemoryBarrierWithGroupSync();
 
     uint lightIdx = groupId.x;
     if (lightIdx >= NUM_LIGHTS) return;
 
-    Light light = lights[lightIdx];
+    // 安全地读取光源数据
+    Light light;
+    if (lightIdx < NUM_LIGHTS) {
+        light = lights[lightIdx];
+    } else {
+        // 如果索引无效，使用默认值
+        light.position = float4(0, 0, 0, 1);
+        light.colorAndRadius = float4(0, 0, 0, 0);
+        light.direction = float4(0, 0, 0, 0);
+        light.cutOff = float4(0, 0, 0, 0);
+        return;
+    }
+    
     float radius = light.colorAndRadius.w;
 
     float4x4 viewProj = mul(ubo.projection, ubo.view);
@@ -94,7 +121,7 @@ void main(uint3 groupId : SV_GroupID, uint3 threadId : SV_GroupThreadID, uint3 d
     minClusterZ = clamp(minClusterZ, 0u, CLUSTER_SIZE_Z - 1);
     maxClusterZ = clamp(maxClusterZ, 0u, CLUSTER_SIZE_Z - 1);
 
-    uint threadIdx = threadId.x + threadId.y * WORKGROUP_SIZE_X + threadId.z * WORKGROUP_SIZE_X * WORKGROUP_SIZE_Y;
+    // 声明并初始化 clusterCountX 变量
     uint clusterCountX = maxClusterX - minClusterX + 1;
     uint clusterCountY = maxClusterY - minClusterY + 1;
     uint clusterCountZ = maxClusterZ - minClusterZ + 1;
@@ -117,21 +144,74 @@ void main(uint3 groupId : SV_GroupID, uint3 threadId : SV_GroupThreadID, uint3 d
 
     if (threadIdx == 0) {
         uint runningSum = 0;
+        
+        // 使用原子操作安全地读取全局计数器
         InterlockedAdd(globalCounter[0], 0, runningSum);
+        
+        // 严格检查是否超出最大灯光索引数量
+        uint maxLightIndexNum = min(ubo.maxlightindexnum, LIGHT_INDEX_LIST_SIZE);
+        
+        // 确保全局计数器不超过最大值
+        if (runningSum > maxLightIndexNum) {
+            // 如果已经超出范围，重置计数器
+            InterlockedExchange(globalCounter[0], 0, runningSum);
+            runningSum = 0;
+        }
+        
         for (uint i = 0; i < TOTAL_CLUSTERS; i++) {
-            if (sharedClusterCounts[i] > 0) {
-                clusterCountsandOffsets[i].counts = sharedClusterCounts[i];
-                clusterCountsandOffsets[i].offsets = runningSum;
-                InterlockedAdd(globalCounter[0], sharedClusterCounts[i]);
-                runningSum += sharedClusterCounts[i];
+            // 安全地读取共享内存中的计数
+            uint clusterCount = sharedClusterCounts[i];
+            
+            if (clusterCount > 0) {
+                // 确保不会超出最大灯光索引数量，使用安全的算术
+                uint remainingSpace = 0;
+                if (maxLightIndexNum > runningSum) {
+                    remainingSpace = maxLightIndexNum - runningSum;
+                }
+                
+                uint safeCount = min(clusterCount, remainingSpace);
+                
+                if (safeCount > 0) {
+                    // 原子操作更新全局计数器，带错误检查
+                    uint oldValue;
+                    InterlockedAdd(globalCounter[0], safeCount, oldValue);
+                    
+                    // 验证全局计数器是否在有效范围内
+                    uint newTotal = oldValue + safeCount;
+                    if (newTotal <= maxLightIndexNum) {
+                        // 安全地更新集群数据
+                        clusterCountsandOffsets[i].counts = safeCount;
+                        clusterCountsandOffsets[i].offsets = runningSum;
+                        runningSum += safeCount;
+                    } else {
+                        // 如果超出范围，回滚全局计数器并设置为0
+                        InterlockedAdd(globalCounter[0], (uint)(-safeCount));
+                        clusterCountsandOffsets[i].counts = 0;
+                        clusterCountsandOffsets[i].offsets = runningSum;
+                    }
+                } else {
+                    // 如果没有足够空间，则设置为0
+                    clusterCountsandOffsets[i].counts = 0;
+                    clusterCountsandOffsets[i].offsets = runningSum;
+                }
             } else {
+                // 集群中没有灯光
                 clusterCountsandOffsets[i].counts = 0;
                 clusterCountsandOffsets[i].offsets = runningSum;
             }
+            
+            // 每次更新后添加内存屏障，确保写入对其他线程可见
+            DeviceMemoryBarrier();
         }
+        
+        // 确保所有写入对其他线程可见
+        DeviceMemoryBarrierWithGroupSync();
     }
     GroupMemoryBarrierWithGroupSync();
 
+    // 添加全局内存屏障，确保前面的操作完成
+    DeviceMemoryBarrierWithGroupSync();
+    
     for (uint i = threadIdx; i < totalClusters; i += TOTAL_THREADS) {
         uint z = i / (clusterCountX * clusterCountY);
         uint y = (i / clusterCountX) % clusterCountY;
@@ -140,14 +220,47 @@ void main(uint3 groupId : SV_GroupID, uint3 threadId : SV_GroupThreadID, uint3 d
         y += minClusterY;
         x += minClusterX;
 
+        // 严格的边界检查
+        if (x >= CLUSTER_SIZE_X || y >= CLUSTER_SIZE_Y || z >= CLUSTER_SIZE_Z) {
+            continue;
+        }
+
         uint clusterIdx = z * CLUSTER_SIZE_X * CLUSTER_SIZE_Y + y * CLUSTER_SIZE_X + x;
-        if (clusterIdx < TOTAL_CLUSTERS && sharedClusterCounts[clusterIdx] > 0) {
+        
+        // 多重边界检查
+        if (clusterIdx < TOTAL_CLUSTERS && 
+            sharedClusterCounts[clusterIdx] > 0 && 
+            clusterCountsandOffsets[clusterIdx].counts > 0) {
+            
             uint offset;
+            // 原子操作获取偏移量
             InterlockedAdd(clusterCountsandOffsets[clusterIdx].counts, -1, offset);
-            offset = clusterCountsandOffsets[clusterIdx].offsets + offset - 1;
-            if (offset < LIGHT_INDEX_LIST_SIZE) {
-                clusterIndexList[offset].clusterIndexList = lightIdx;
+            
+            // 确保偏移量计算正确
+            if (offset > 0) {
+                uint baseOffset = clusterCountsandOffsets[clusterIdx].offsets;
+                
+                // 防止整数溢出
+                if (baseOffset <= 0xFFFFFFFF - offset) {
+                    offset = baseOffset + offset - 1;
+                    
+                    // 严格的边界检查，确保不会越界访问
+                    if (offset < ubo.maxlightindexnum && 
+                        offset < LIGHT_INDEX_LIST_SIZE && 
+                        lightIdx < NUM_LIGHTS) {
+                        
+                        // 使用原子操作确保写入安全
+                        uint oldValue;
+                        InterlockedExchange(clusterIndexList[offset].clusterIndexList, lightIdx, oldValue);
+                        
+                        // 内存屏障确保写入对其他线程可见
+                        DeviceMemoryBarrier();
+                    }
+                }
             }
         }
     }
+    
+    // 最终内存屏障，确保所有写入完成
+    DeviceMemoryBarrierWithGroupSync();
 }

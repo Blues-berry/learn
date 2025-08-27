@@ -39,18 +39,18 @@ VSOutput main(VSInput input)
 	// Setup (t)angent-(b)inormal-(n)ormal matrix for converting
 	// object coordinates into tangent space
 	float3x3 tbnMatrix;
-	tbnMatrix[0] =  mul((float3x3)ubo.normal, input.Tangent);
+	tbnMatrix[0] =  mul((float3x3)ubo.normal, input.Tangent.xyz);
 	tbnMatrix[1] =  mul((float3x3)ubo.normal, biTangent);
 	tbnMatrix[2] =  mul((float3x3)ubo.normal, input.Normal);
 
 	output.LightVec.xyz = mul(float3(ubo.lightPos.xyz - vertexPosition), tbnMatrix);
 
 	float3 lightDist = ubo.lightPos.xyz - input.Pos;
-	output.LightVecB.x = dot(input.Tangent, lightDist);
+	output.LightVecB.x = dot(input.Tangent.xyz, lightDist);
 	output.LightVecB.y = dot(biTangent, lightDist);
 	output.LightVecB.z = dot(input.Normal, lightDist);
 
-	output.ViewVec.x = dot(input.Tangent, input.Pos);
+	output.ViewVec.x = dot(input.Tangent.xyz, input.Pos);
 	output.ViewVec.y = dot(biTangent, input.Pos);
 	output.ViewVec.z = dot(input.Normal, input.Pos);
 

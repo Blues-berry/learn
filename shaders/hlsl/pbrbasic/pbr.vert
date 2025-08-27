@@ -1,81 +1,67 @@
-
+// é¡¶ç‚¹ç€è‰²å™¨ - PBR åŸºç¡€å®žçŽ°
+// ç”¨äºŽç‰©ç†åŸºç¡€æ¸²æŸ“çš„é¡¶ç‚¹ç€è‰²å™¨
 
 struct VSInput
 {
-    [[vk::location(0)]] float3 Pos : POSITION0;
-    [[vk::location(1)]] float3 Normal : NORMAL0;
+    [[vk::location(0)]] float3 Pos : POSITION0;    // é¡¶ç‚¹ä½ç½®ï¼Œç»‘å®šåˆ°ä½ç½® 0
+    [[vk::location(1)]] float3 Normal : NORMAL0;   // é¡¶ç‚¹æ³•çº¿ï¼Œç»‘å®šåˆ°ä½ç½® 1
 };
-// ¶¨Òå¶¥µãÊäÈë½á¹¹Ìå VSInput£º
-// - Pos£º¶¥µãÎ»ÖÃ£¬float3£¬°ó¶¨µ½Î»ÖÃ 0£¬ÓïÒå POSITION0¡£
-// - Normal£º¶¥µã·¨Ïß£¬float3£¬°ó¶¨µ½Î»ÖÃ 1£¬ÓïÒå NORMAL0¡£
 
+// Uniform Buffer ç»“æž„ä½“
 struct UBO
 {
-    float4x4 projection;
-    float4x4 model;
-    float4x4 view;
-    float3 camPos;
+    float4x4 projection;  // æŠ•å½±çŸ©é˜µ 4x4
+    float4x4 model;       // æ¨¡åž‹çŸ©é˜µ 4x4
+    float4x4 view;        // è§†å›¾çŸ©é˜µ 4x4
+    float3 camPos;        // ç›¸æœºä½ç½® float3
+    uint maxlightindexnum; // æœ€å¤§å…‰æºç´¢å¼•æ•°é‡
 };
-// ¶¨Òå Uniform Buffer ½á¹¹Ìå UBO£º
-// - projection£ºÍ¶Ó°¾ØÕó£¬4x4¡£
-// - model£ºÄ£ÐÍ¾ØÕó£¬4x4¡£
-// - view£ºÊÓÍ¼¾ØÕó£¬4x4¡£
-// - camPos£ºÏà»úÎ»ÖÃ£¬float3¡£
 
+// å¸¸é‡ç¼“å†²åŒº uboï¼Œå¯„å­˜å™¨ b0
 cbuffer ubo : register(b0) { UBO ubo; }
-// ÉùÃ÷³£Á¿»º³åÇø ubo£º
-// - ÀàÐÍ£ºUBO ½á¹¹Ìå¡£
-// - ¼Ä´æÆ÷£ºb0£¨¶ÔÓ¦ C++ ÖÐµÄ uniformBuffers.object£©¡£
 
+// é¡¶ç‚¹ç€è‰²å™¨è¾“å‡ºç»“æž„ä½“
 struct VSOutput
 {
-    float4 Pos : SV_POSITION;
-    [[vk::location(0)]] float3 WorldPos : POSITION0;
-    [[vk::location(1)]] float3 Normal : NORMAL0;
+    float4 Pos : SV_POSITION;                      // è£å‰ªç©ºé—´ä½ç½®ï¼Œç³»ç»Ÿå€¼ï¼Œä¼ é€’ç»™ç‰‡æ®µç€è‰²å™¨
+    [[vk::location(0)]] float3 WorldPos : POSITION0; // ä¸–ç•Œç©ºé—´ä½ç½®ï¼Œç»‘å®šåˆ°ä½ç½® 0
+    [[vk::location(1)]] float3 Normal : NORMAL0;    // ä¸–ç•Œç©ºé—´æ³•çº¿ï¼Œç»‘å®šåˆ°ä½ç½® 1
 };
-// ¶¨Òå¶¥µãÊä³ö½á¹¹Ìå VSOutput£º
-// - Pos£º²Ã¼ô¿Õ¼äÎ»ÖÃ£¬float4£¬ÓïÒå SV_POSITION£¨ÏµÍ³Öµ£¬´«µÝ¸ø¹âÕ¤»¯£©¡£
-// - WorldPos£ºÊÀ½ç¿Õ¼äÎ»ÖÃ£¬float3£¬°ó¶¨µ½Î»ÖÃ 0£¬ÓïÒå POSITION0¡£
-// - Normal£ºÊÀ½ç¿Õ¼ä·¨Ïß£¬float3£¬°ó¶¨µ½Î»ÖÃ 1£¬ÓïÒå NORMAL0¡£
 
+// æŽ¨é€å¸¸é‡ç»“æž„ä½“
 struct PushConsts {
-    float3 objPos;
+    float3 objPos;        // å¯¹è±¡ä½ç½®åç§»
 };
-// ¶¨ÒåÍÆËÍ³£Á¿½á¹¹Ìå PushConsts£º
-// - objPos£º¶ÔÏóÎ»ÖÃÆ«ÒÆ£¬float3¡£
 
+// æŽ¨é€å¸¸é‡ pushConsts
 [[vk::push_constant]] PushConsts pushConsts;
-// ÉùÃ÷ÍÆËÍ³£Á¿ pushConsts£º
-// - ÀàÐÍ£ºPushConsts ½á¹¹Ìå¡£
-// - Ê¹ÓÃ vk::push_constant ÊôÐÔ£¬°ó¶¨µ½ÍÆËÍ³£Á¿¡£
 
 VSOutput main(VSInput input)
 {
-    // Ö÷º¯Êý£¬¶¥µã×ÅÉ«Æ÷Èë¿Ú£¬ÊäÈë VSInput£¬·µ»Ø VSOutput¡£
+    // åˆå§‹åŒ–è¾“å‡ºç»“æž„ä½“ï¼Œæ‰€æœ‰æˆå‘˜ä¸º 0
     VSOutput output = (VSOutput)0;
-    // ³õÊ¼»¯Êä³ö½á¹¹Ìå£¬ËùÓÐ³ÉÔ±Îª 0¡£
-
+    
+    // è®¡ç®—å±€éƒ¨ä½ç½®ï¼š
+    // - å°†é¡¶ç‚¹ä½ç½® (x, y, z) æ‰©å±•ä¸º float4 (x, y, z, 1.0)
+    // - åº”ç”¨æ¨¡åž‹çŸ©é˜µå˜æ¢
+    // - æå– xyz åˆ†é‡ï¼Œå¿½ç•¥ w åˆ†é‡
     float3 locPos = mul(ubo.model, float4(input.Pos, 1.0)).xyz;
-    // ¼ÆËã¾Ö²¿Î»ÖÃ£º
-    // - ½«ÊäÈëÎ»ÖÃ (x, y, z) À©Õ¹Îª float4 (x, y, z, 1.0)¡£
-    // - Ó¦ÓÃÄ£ÐÍ¾ØÕó±ä»»£¨ubo.model£©¡£
-    // - ÌáÈ¡ xyz ·ÖÁ¿£¨¶ªÆú w£©¡£
-
+    
+    // è®¡ç®—ä¸–ç•Œç©ºé—´ä½ç½®ï¼š
+    // - å±€éƒ¨ä½ç½® + å¯¹è±¡ä½ç½®åç§»
     output.WorldPos = locPos + pushConsts.objPos;
-    // ¼ÆËãÊÀ½ç¿Õ¼äÎ»ÖÃ£º
-    // - ¾Ö²¿Î»ÖÃ + ¶ÔÏóÎ»ÖÃÆ«ÒÆ£¨pushConsts.objPos£©¡£
-
+    
+    // è®¡ç®—ä¸–ç•Œç©ºé—´æ³•çº¿ï¼š
+    // - å°†æ¨¡åž‹çŸ©é˜µè½¬æ¢ä¸º 3x3 çŸ©é˜µï¼ˆå¿½ç•¥å¹³ç§»ï¼‰
+    // - å˜æ¢è¾“å…¥æ³•çº¿
+    // - ç¡®ä¿æ³•çº¿è¢«å½’ä¸€åŒ–
     output.Normal = normalize(mul((float3x3)ubo.model, input.Normal));
-    // ¼ÆËãÊÀ½ç¿Õ¼ä·¨Ïß£º
-    // - ½«Ä£ÐÍ¾ØÕó×ª»»Îª 3x3 ¾ØÕó£¨ºöÂÔÆ½ÒÆ£©¡£
-    // - ±ä»»ÊäÈë·¨Ïß¡£
-    // - ¼ÙÉèÄ£ÐÍ¾ØÕóÎÞ·Ç¾ùÔÈËõ·Å£¬Ô­´úÂëÎ´¹éÒ»»¯·¨Ïß¡£
-
+    
+    // è®¡ç®—è£å‰ªç©ºé—´ä½ç½®ï¼š
+    // - å°†ä¸–ç•Œä½ç½®æ‰©å±•ä¸º float4 (x, y, z, 1.0)
+    // - ä¾æ¬¡åº”ç”¨è§†å›¾çŸ©é˜µå’ŒæŠ•å½±çŸ©é˜µå˜æ¢
     output.Pos = mul(ubo.projection, mul(ubo.view, float4(output.WorldPos, 1.0)));
-    // ¼ÆËã²Ã¼ô¿Õ¼äÎ»ÖÃ£º
-    // - ½«ÊÀ½çÎ»ÖÃÀ©Õ¹Îª float4 (x, y, z, 1.0)¡£
-    // - ÒÀ´ÎÓ¦ÓÃÊÓÍ¼¾ØÕóºÍÍ¶Ó°¾ØÕó±ä»»¡£
-
+    
+    // è¿”å›žè¾“å‡ºç»“æž„ä½“ï¼Œä¼ é€’åˆ°ç‰‡æ®µç€è‰²å™¨
     return output;
-    // ·µ»ØÊä³ö½á¹¹Ìå£¬´«µÝµ½Æ¬¶Î×ÅÉ«Æ÷¡£
 }

@@ -7,12 +7,14 @@
 #include "vulkanexamplebase.h"
 #include "VulkanglTFModel.h"
 
-const int maxnumLights = 64;
-const uint32_t CLUSTER_SIZE_X = 8;
-const uint32_t CLUSTER_SIZE_Y = 8;
-const uint32_t CLUSTER_SIZE_Z = 8;
+const int maxnumLights = 16;
+const uint32_t CLUSTER_SIZE_X = 4;
+const uint32_t CLUSTER_SIZE_Y = 4;
+const uint32_t CLUSTER_SIZE_Z = 4;
 const uint32_t TOTAL_CLUSTERS = CLUSTER_SIZE_X * CLUSTER_SIZE_Y * CLUSTER_SIZE_Z;
 const uint32_t lightIndexListnum = maxnumLights * TOTAL_CLUSTERS;
+// 定义栅栏超时时间为5秒（以纳秒为单位）
+// 使用 VulkanTools.h 中定义的 DEFAULT_FENCE_TIMEOUT
 
 struct Material {
     struct PushBlock {
@@ -60,6 +62,8 @@ struct UBOParams {
 };
 
 class VulkanExample : public VulkanExampleBase {
+private:
+    VkFence computeFence;
 public:
     struct Meshes {
         std::vector<vkglTF::Model> objects;
@@ -83,7 +87,7 @@ public:
         glm::mat4 model;
         glm::mat4 view;
         glm::vec3 camPos;
-        float padding;
+        uint32_t maxlightindexnum; // 替换 padding 为 maxlightindexnum，与着色器保持一致
     } uboMatrices;
 
     UBOParams uboParams;
@@ -97,6 +101,7 @@ public:
     VkDescriptorSetLayout descriptorSetLayout{ VK_NULL_HANDLE };
     VkDescriptorSet descriptorSet{ VK_NULL_HANDLE };
     VkCommandBuffer computeCmdBuffer{ VK_NULL_HANDLE }; // Added for Compute Shader
+    VkQueue computeQueue = VK_NULL_HANDLE;
 
     std::vector<Material> materials;
     int32_t materialIndex = 0;
@@ -105,7 +110,7 @@ public:
 
     uint32_t sphereIndexCount = 0;
 
-    VulkanExample() : VulkanExampleBase() {
+    VulkanExample() : VulkanExampleBase(), computeFence(VK_NULL_HANDLE) {
         title = "Physical based shading basics";
         camera.type = Camera::CameraType::firstperson;
         camera.setPosition(glm::vec3(10.0f, 13.0f, 1.8f));
@@ -138,12 +143,48 @@ public:
 
     ~VulkanExample() {
         if (device) {
-            vkDestroyPipeline(device, pipeline, nullptr);
-            vkDestroyPipeline(device, computePipeline, nullptr);
-            vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
-            vkDestroyPipelineLayout(device, computePipelineLayout, nullptr);
-            vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
-            vkFreeCommandBuffers(device, cmdPool, 1, &computeCmdBuffer);
+            // 确保所有操作完成
+            vkDeviceWaitIdle(device);
+
+            // 销毁fence
+            if (computeFence != VK_NULL_HANDLE) {
+                vkDestroyFence(device, computeFence, nullptr);
+                computeFence = VK_NULL_HANDLE;
+            }
+
+            // 销毁管线
+            if (pipeline != VK_NULL_HANDLE) {
+                vkDestroyPipeline(device, pipeline, nullptr);
+                pipeline = VK_NULL_HANDLE;
+            }
+            if (computePipeline != VK_NULL_HANDLE) {
+                vkDestroyPipeline(device, computePipeline, nullptr);
+                computePipeline = VK_NULL_HANDLE;
+            }
+
+            // 销毁管线布局
+            if (pipelineLayout != VK_NULL_HANDLE) {
+                vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+                pipelineLayout = VK_NULL_HANDLE;
+            }
+            if (computePipelineLayout != VK_NULL_HANDLE) {
+                vkDestroyPipelineLayout(device, computePipelineLayout, nullptr);
+                computePipelineLayout = VK_NULL_HANDLE;
+            }
+
+            // 销毁描述符集布局
+            if (descriptorSetLayout != VK_NULL_HANDLE) {
+                vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+                descriptorSetLayout = VK_NULL_HANDLE;
+            }
+
+            // 释放命令缓冲区
+            if (computeCmdBuffer != VK_NULL_HANDLE) {
+                vkFreeCommandBuffers(device, cmdPool, 1, &computeCmdBuffer);
+                computeCmdBuffer = VK_NULL_HANDLE;
+            }
+
+            // 销毁缓冲区
             uniformBuffers.object.destroy();
             uniformBuffers.params.destroy();
             uniformBuffers.clusterData.destroy();
@@ -272,6 +313,16 @@ public:
         for (int32_t i = 0; i < drawCmdBuffers.size(); ++i) {
             renderPassBeginInfo.framebuffer = frameBuffers[i];
             VK_CHECK_RESULT(vkBeginCommandBuffer(drawCmdBuffers[i], &cmdBufInfo));
+
+
+            // 添加内存屏障
+            VkMemoryBarrier memoryBarrier = {};
+            memoryBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+            memoryBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+            memoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+            vkCmdPipelineBarrier(drawCmdBuffers[i], VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 1, &memoryBarrier, 0, nullptr, 0, nullptr);
+
+            //插入管线屏障：从计算着色器阶段到片段着色器阶段
             vkCmdBeginRenderPass(drawCmdBuffers[i], &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
             VkViewport viewport = vks::initializers::viewport((float)width, (float)height, 0.0f, 1.0f);
@@ -315,27 +366,279 @@ public:
     }
 
     void dispatchCompute() {
-        VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
-        VK_CHECK_RESULT(vkBeginCommandBuffer(computeCmdBuffer, &cmdBufInfo));
+        // 检查计算队列是否有效
+        if (computeQueue == VK_NULL_HANDLE) {
+            // 尝试重新获取计算队列
+            vkGetDeviceQueue(device, vulkanDevice->queueFamilyIndices.compute, 0, &computeQueue);
+            if (computeQueue == VK_NULL_HANDLE) {
+                std::cerr << "Error: Invalid compute queue" << std::endl;
+                return; // 不抛出异常，而是返回
+            }
+        }
 
+        // 检查命令缓冲区是否有效
+        if (computeCmdBuffer == VK_NULL_HANDLE) {
+            // 重新分配命令缓冲区
+            VkCommandBufferAllocateInfo cmdBufAllocateInfo = vks::initializers::commandBufferAllocateInfo(cmdPool, VK_COMMAND_BUFFER_LEVEL_PRIMARY, 1);
+            VkResult result = vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &computeCmdBuffer);
+            if (result != VK_SUCCESS) {
+                std::cerr << "Error: Failed to allocate compute command buffer: " << result << std::endl;
+                return; // 不抛出异常，而是返回
+            }
+        }
+
+        // 检查计算管线是否有效
+        if (computePipeline == VK_NULL_HANDLE) {
+            std::cerr << "Error: Invalid compute pipeline" << std::endl;
+            return; // 不抛出异常，而是返回
+        }
+
+        // 检查描述符集是否有效
+        if (descriptorSet == VK_NULL_HANDLE) {
+            std::cerr << "Error: Invalid descriptor set" << std::endl;
+            return; // 不抛出异常，而是返回
+        }
+
+        // 确保之前的计算操作已完成
+        if (computeFence != VK_NULL_HANDLE) {
+            // 使用更长的超时时间
+            VkResult waitResult = vkWaitForFences(device, 1, &computeFence, VK_TRUE, UINT64_MAX);
+            if (waitResult == VK_SUCCESS) {
+                // 重置fence以备下次使用
+                vkResetFences(device, 1, &computeFence);
+            } else {
+                std::cerr << "Warning: Compute fence wait failed with error: " << waitResult << std::endl;
+                
+                // 根据错误类型采取不同的恢复策略
+                if (waitResult == VK_TIMEOUT) {
+                    // 超时情况下，尝试等待设备空闲
+                    std::cerr << "Fence wait timed out, attempting to wait for device idle..." << std::endl;
+                    vkDeviceWaitIdle(device);
+                    // 重置fence
+                    vkResetFences(device, 1, &computeFence);
+                } else {
+                    // 其他错误，尝试重新创建fence
+                    std::cerr << "Recreating compute fence due to error..." << std::endl;
+                    vkDestroyFence(device, computeFence, nullptr);
+                    computeFence = VK_NULL_HANDLE;
+                }
+            }
+        }
+
+        // 如果fence无效，创建一个新的
+        if (computeFence == VK_NULL_HANDLE) {
+            VkFenceCreateInfo fenceInfo = vks::initializers::fenceCreateInfo();
+            VkResult fenceResult = vkCreateFence(device, &fenceInfo, nullptr, &computeFence);
+            if (fenceResult != VK_SUCCESS) {
+                std::cerr << "Critical error: Failed to create compute fence: " << fenceResult << std::endl;
+                // 尝试等待设备空闲作为最后的恢复手段
+                vkDeviceWaitIdle(device);
+                return; // 不抛出异常，而是返回
+            }
+        } else {
+            // 确保fence处于重置状态
+            vkResetFences(device, 1, &computeFence);
+        }
+
+        // 1. 重置命令缓冲区
+        VkResult resetResult = vkResetCommandBuffer(computeCmdBuffer, 0);
+        if (resetResult != VK_SUCCESS) {
+            // 尝试重新分配命令缓冲区
+            vkFreeCommandBuffers(device, cmdPool, 1, &computeCmdBuffer);
+            VkCommandBufferAllocateInfo cmdBufAllocateInfo = vks::initializers::commandBufferAllocateInfo(cmdPool, VK_COMMAND_BUFFER_LEVEL_PRIMARY, 1);
+            resetResult = vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &computeCmdBuffer);
+            if (resetResult != VK_SUCCESS) {
+                std::cerr << "Error: Failed to reallocate compute command buffer: " << resetResult << std::endl;
+                return; // 不抛出异常，而是返回
+            }
+        }
+
+        // 2. 开始录制命令
+        VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
+        cmdBufInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT; // 确保使用一次性提交标志
+        VkResult beginResult = vkBeginCommandBuffer(computeCmdBuffer, &cmdBufInfo);
+        if (beginResult != VK_SUCCESS) {
+            std::cerr << "Error: Failed to begin compute command buffer: " << beginResult << std::endl;
+            return; // 不抛出异常，而是返回
+        }
+
+        // 3. 绑定计算管线与描述符集
         vkCmdBindPipeline(computeCmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline);
-        vkCmdBindDescriptorSets(computeCmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
+        vkCmdBindDescriptorSets(computeCmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelineLayout,
+            0, 1, &descriptorSet, 0, nullptr);
+
+        // 4. 派发计算工作组（每个灯光一个线程）
         vkCmdDispatch(computeCmdBuffer, maxnumLights, 1, 1);
 
-        // 添加内存屏障
+        // 添加更全面的内存屏障，确保计算着色器的写入对后续渲染可见
         VkMemoryBarrier memoryBarrier = {};
         memoryBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
         memoryBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        memoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        vkCmdPipelineBarrier(computeCmdBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 1, &memoryBarrier, 0, nullptr, 0, nullptr);
+        memoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_UNIFORM_READ_BIT | VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
+        
+        // 添加缓冲区内存屏障，专门针对光照索引列表和集群数据
+        VkBufferMemoryBarrier bufferBarriers[2] = {};
+        
+        // 光照索引列表屏障
+        bufferBarriers[0].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+        bufferBarriers[0].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        bufferBarriers[0].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        bufferBarriers[0].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        bufferBarriers[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        bufferBarriers[0].buffer = uniformBuffers.clusterIndexList.buffer;
+        bufferBarriers[0].offset = 0;
+        bufferBarriers[0].size = VK_WHOLE_SIZE;
+        
+        // 集群数据屏障
+        bufferBarriers[1].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+        bufferBarriers[1].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        bufferBarriers[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        bufferBarriers[1].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        bufferBarriers[1].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        bufferBarriers[1].buffer = uniformBuffers.clusterData.buffer;
+        bufferBarriers[1].offset = 0;
+        bufferBarriers[1].size = VK_WHOLE_SIZE;
+        
+        // 全面的管线屏障，确保计算结果对图形管线可见
+        vkCmdPipelineBarrier(
+            computeCmdBuffer,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
+            0,
+            1, &memoryBarrier,
+            2, bufferBarriers,
+            0, nullptr
+        );
 
-        VK_CHECK_RESULT(vkEndCommandBuffer(computeCmdBuffer));
+        // 5. 结束命令缓冲区录制
+        VkResult endResult = vkEndCommandBuffer(computeCmdBuffer);
+        if (endResult != VK_SUCCESS) {
+            std::cerr << "Error: Failed to end compute command buffer: " << endResult << std::endl;
+            return; // 不抛出异常，而是返回
+        }
 
+        // 6. 提交命令缓冲区到计算队列
         VkSubmitInfo submitInfo = vks::initializers::submitInfo();
         submitInfo.commandBufferCount = 1;
         submitInfo.pCommandBuffers = &computeCmdBuffer;
-        VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE));
-        vkQueueWaitIdle(queue);
+
+        // 添加信号量以实现更精确的同步
+        VkSemaphoreCreateInfo semaphoreCreateInfo = vks::initializers::semaphoreCreateInfo();
+        VkSemaphore computeCompleteSemaphore = VK_NULL_HANDLE;
+        VkResult semaphoreResult = vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &computeCompleteSemaphore);
+        
+        if (semaphoreResult == VK_SUCCESS) {
+            // 使用信号量和栅栏进行双重同步
+            submitInfo.signalSemaphoreCount = 1;
+            submitInfo.pSignalSemaphores = &computeCompleteSemaphore;
+            
+            // 提交计算队列
+            VkResult submitResult = vkQueueSubmit(computeQueue, 1, &submitInfo, computeFence);
+            if (submitResult != VK_SUCCESS) {
+                std::cerr << "Error: Failed to submit compute queue: " << submitResult << std::endl;
+                
+                // 等待设备空闲后重试一次
+                vkDeviceWaitIdle(device);
+                vkResetFences(device, 1, &computeFence); // 确保fence重置
+                
+                submitResult = vkQueueSubmit(computeQueue, 1, &submitInfo, computeFence);
+                if (submitResult != VK_SUCCESS) {
+                    std::cerr << "Error: Failed to submit compute queue after retry: " << submitResult << std::endl;
+                    vkDestroySemaphore(device, computeCompleteSemaphore, nullptr);
+                    return;
+                }
+            }
+            
+            // 创建一个命令缓冲区来执行队列所有权转移
+            VkCommandBuffer transferCmdBuffer = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
+            
+            // 添加缓冲区内存屏障，专门针对光照索引列表和集群数据
+            VkBufferMemoryBarrier queueTransferBarriers[2] = {};
+            
+            // 光照索引列表屏障
+            queueTransferBarriers[0].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+            queueTransferBarriers[0].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+            queueTransferBarriers[0].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+            queueTransferBarriers[0].srcQueueFamilyIndex = vulkanDevice->queueFamilyIndices.compute;
+            queueTransferBarriers[0].dstQueueFamilyIndex = vulkanDevice->queueFamilyIndices.graphics;
+            queueTransferBarriers[0].buffer = uniformBuffers.clusterIndexList.buffer;
+            queueTransferBarriers[0].offset = 0;
+            queueTransferBarriers[0].size = VK_WHOLE_SIZE;
+            
+            // 集群数据屏障
+            queueTransferBarriers[1].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+            queueTransferBarriers[1].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+            queueTransferBarriers[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+            queueTransferBarriers[1].srcQueueFamilyIndex = vulkanDevice->queueFamilyIndices.compute;
+            queueTransferBarriers[1].dstQueueFamilyIndex = vulkanDevice->queueFamilyIndices.graphics;
+            queueTransferBarriers[1].buffer = uniformBuffers.clusterData.buffer;
+            queueTransferBarriers[1].offset = 0;
+            queueTransferBarriers[1].size = VK_WHOLE_SIZE;
+            
+            vkCmdPipelineBarrier(
+                transferCmdBuffer,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                0,
+                0, nullptr,
+                2, queueTransferBarriers,
+                0, nullptr
+            );
+            
+            vulkanDevice->flushCommandBuffer(transferCmdBuffer, queue, true);
+            
+            // 销毁信号量
+            vkDestroySemaphore(device, computeCompleteSemaphore, nullptr);
+        } else {
+            // 如果创建信号量失败，回退到只使用栅栏
+            std::cerr << "Warning: Failed to create compute semaphore, falling back to fence-only synchronization" << std::endl;
+            
+            // 提交计算队列
+            VkResult submitResult = vkQueueSubmit(computeQueue, 1, &submitInfo, computeFence);
+            if (submitResult != VK_SUCCESS) {
+                std::cerr << "Error: Failed to submit compute queue: " << submitResult << std::endl;
+                
+                // 等待设备空闲后重试一次
+                vkDeviceWaitIdle(device);
+                vkResetFences(device, 1, &computeFence); // 确保fence重置
+                
+                submitResult = vkQueueSubmit(computeQueue, 1, &submitInfo, computeFence);
+                if (submitResult != VK_SUCCESS) {
+                    std::cerr << "Error: Failed to submit compute queue after retry: " << submitResult << std::endl;
+                    return;
+                }
+            }
+        }
+        
+        // 不在这里等待fence完成，让render函数处理同步
+       
+
+
+
+
+
+
+
+
+
+
+
+            //7.20
+        //vkResetCommandBuffer(computeCmdBuffer, 0);
+        //VkCommandBufferBeginInfo beginInfo = {};
+        //beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        //beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        //vkBeginCommandBuffer(computeCmdBuffer, &beginInfo);
+        //VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
+        //VK_CHECK_RESULT(vkBeginCommandBuffer(computeCmdBuffer, &cmdBufInfo));
+        //vkCmdBindPipeline(computeCmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline);
+        //vkCmdBindDescriptorSets(computeCmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
+        //vkCmdDispatch(computeCmdBuffer, maxnumLights, 1, 1);
+        //VK_CHECK_RESULT(vkEndCommandBuffer(computeCmdBuffer));
+        //VkSubmitInfo submitInfo = vks::initializers::submitInfo();
+        //submitInfo.commandBufferCount = 1;
+        //submitInfo.pCommandBuffers = &computeCmdBuffer;
+
     }
 
     void loadAssets() {
@@ -449,7 +752,7 @@ public:
         VkPhysicalDeviceProperties properties;
         vkGetPhysicalDeviceProperties(physicalDevice, &properties);
         VkDeviceSize minAlignment = properties.limits.minUniformBufferOffsetAlignment;
-        VkDeviceSize alignedSizeClusterIndexList = ((sizeof(clusterIndexList) + minAlignment - 1) / minAlignment) * minAlignment;
+        VkDeviceSize alignedSizeClusterIndexList = (sizeof(clusterIndexList) + minAlignment - 1) & ~(minAlignment - 1);
 
         VK_CHECK_RESULT(vulkanDevice->createBuffer(
             VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
@@ -496,14 +799,10 @@ public:
         float rotationAngle = -90.0f + (models.objectIndex == 1 ? 45.0f : 0.0f);
         uboMatrices.model = glm::rotate(glm::mat4(1.0f), glm::radians(rotationAngle), glm::vec3(0.0f, 1.0f, 0.0f));
         uboMatrices.camPos = camera.position * -1.0f;
+        // 设置最大光源索引数量
+        uboMatrices.maxlightindexnum = lightIndexListnum;
         memcpy(uniformBuffers.object.mapped, &uboMatrices, sizeof(uboMatrices));
-        uniformBuffers.object.flush();
-        //在 prepareUniformBuffers 中，所有缓冲区都被映射为 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT，但未检查是否在 GPU 内存中正确更新。在 render 函数中，globalCounter 被重置为零，但可能未及时同步到 GPU。
-
-        //解决方案：
-
-        //    确保 updateUniformBuffers 和 updateLights 的 memcpy 操作后，调用 vkFlushMappedBufferMemory：
-    
+        uniformBuffers.object.flush(); // 确保同步
     }
 
     void updateLights() {
@@ -542,12 +841,41 @@ public:
             }
         }
 
+        // 确保光照数据正确同步到GPU
         memcpy(uniformBuffers.params.mapped, &uboParams, sizeof(uboParams));
-        uniformBuffers.params.flush();
-
-        //在 prepareUniformBuffers 中，所有缓冲区都被映射为 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT，但未检查是否在 GPU 内存中正确更新。在 render 函数中，globalCounter 被重置为零，但可能未及时同步到 GPU。
-
-//解决方案：
+        
+        // 使用内存屏障确保数据对GPU可见
+        VkMappedMemoryRange memoryRange = {};
+        memoryRange.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+        memoryRange.memory = uniformBuffers.params.memory;
+        memoryRange.offset = 0;
+        memoryRange.size = sizeof(uboParams);
+        vkFlushMappedMemoryRanges(device, 1, &memoryRange);
+        
+        // 添加命令缓冲区来执行内存屏障
+        VkCommandBuffer cmdBuffer = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
+        
+        VkBufferMemoryBarrier bufferBarrier = {};
+        bufferBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+        bufferBarrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
+        bufferBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        bufferBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        bufferBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        bufferBarrier.buffer = uniformBuffers.params.buffer;
+        bufferBarrier.offset = 0;
+        bufferBarrier.size = VK_WHOLE_SIZE;
+        
+        vkCmdPipelineBarrier(
+            cmdBuffer,
+            VK_PIPELINE_STAGE_HOST_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            0,
+            0, nullptr,
+            1, &bufferBarrier,
+            0, nullptr
+        );
+        
+        vulkanDevice->flushCommandBuffer(cmdBuffer, queue, true);
 
 //    确保 updateUniformBuffers 和 updateLights 的 memcpy 操作后，调用 vkFlushMappedBufferMemory：
     }
@@ -559,7 +887,31 @@ public:
 
         // Allocate compute command buffer
         VkCommandBufferAllocateInfo cmdBufAllocateInfo = vks::initializers::commandBufferAllocateInfo(cmdPool, VK_COMMAND_BUFFER_LEVEL_PRIMARY, 1);
-        VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &computeCmdBuffer));
+        VkResult cmdResult = vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &computeCmdBuffer);
+        if (cmdResult != VK_SUCCESS) {
+            std::cerr << "Error: Failed to allocate compute command buffer: " << cmdResult << std::endl;
+            computeCmdBuffer = VK_NULL_HANDLE;
+        }
+
+        // Get compute queue
+        vkGetDeviceQueue(device, vulkanDevice->queueFamilyIndices.compute, 0, &computeQueue);
+        if (computeQueue == VK_NULL_HANDLE) {
+            std::cerr << "Error: Failed to get compute queue" << std::endl;
+        }
+
+        // Create compute fence
+        VkFenceCreateInfo fenceInfo = vks::initializers::fenceCreateInfo();
+        VkResult fenceResult = vkCreateFence(device, &fenceInfo, nullptr, &computeFence);
+        if (fenceResult != VK_SUCCESS) {
+            std::cerr << "Warning: Failed to create compute fence: " << fenceResult << std::endl;
+            computeFence = VK_NULL_HANDLE;
+            // 尝试重新创建
+            fenceResult = vkCreateFence(device, &fenceInfo, nullptr, &computeFence);
+            if (fenceResult != VK_SUCCESS) {
+                std::cerr << "Error: Failed to recreate compute fence: " << fenceResult << std::endl;
+                computeFence = VK_NULL_HANDLE;
+            }
+        }
 
         setupDescriptors();
         preparePipelines();
@@ -568,42 +920,171 @@ public:
     }
 
     void draw() {
+        // 使用基类的标准绘制流程
         VulkanExampleBase::prepareFrame();
+
+        // 检查命令缓冲区是否有效
+        if (drawCmdBuffers[currentBuffer] == VK_NULL_HANDLE) {
+            std::cerr << "Error: Command buffer is null" << std::endl;
+            return;
+        }
+
+        // 创建一个fence用于同步
+        VkFence fence;
+        VkFenceCreateInfo fenceInfo = vks::initializers::fenceCreateInfo(VK_FLAGS_NONE);
+        VkResult fenceResult = vkCreateFence(device, &fenceInfo, nullptr, &fence);
+        if (fenceResult != VK_SUCCESS) {
+            std::cerr << "Error: Failed to create fence: " << fenceResult << std::endl;
+            return;
+        }
+
+        // 直接使用基类的提交机制
+        VkSubmitInfo submitInfo = { VK_STRUCTURE_TYPE_SUBMIT_INFO };
         submitInfo.commandBufferCount = 1;
         submitInfo.pCommandBuffers = &drawCmdBuffers[currentBuffer];
-        VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE));
+
+        // 使用基类的信号量机制
+        submitInfo.waitSemaphoreCount = 1;
+        submitInfo.pWaitSemaphores = &semaphores.presentComplete;
+
+        // 创建本地变量以避免类型转换问题
+        VkPipelineStageFlags waitStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        submitInfo.pWaitDstStageMask = &waitStageMask;
+
+        submitInfo.signalSemaphoreCount = 1;
+        submitInfo.pSignalSemaphores = &semaphores.renderComplete;
+
+        // 提交到队列
+        VkResult result = vkQueueSubmit(queue, 1, &submitInfo, fence);
+        if (result != VK_SUCCESS) {
+            std::cerr << "Error: Failed to submit draw command buffer: " << result << std::endl;
+            vkDestroyFence(device, fence, nullptr);
+            
+            // 等待设备空闲后重试
+            vkDeviceWaitIdle(device);
+            
+            // 尝试使用VK_NULL_HANDLE作为fence参数重新提交
+            result = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+            if (result != VK_SUCCESS) {
+                std::cerr << "Error: Failed to submit draw command buffer without fence: " << result << std::endl;
+                return;
+            }
+        }
+
+        // 等待队列完成
+        if (fence != VK_NULL_HANDLE) {
+            // 使用定义的超时常量
+            result = vkWaitForFences(device, 1, &fence, VK_TRUE, DEFAULT_FENCE_TIMEOUT);
+            if (result != VK_SUCCESS) {
+                std::cerr << "Warning: Failed to wait for fence: " << result << std::endl;
+                // 记录错误但不终止程序，可能在下一帧会完成
+                // 尝试重置fence以避免资源泄漏
+                vkResetFences(device, 1, &fence);
+            } else {
+                // 成功完成，销毁fence
+                vkDestroyFence(device, fence, nullptr);
+            }
+        }
+
         VulkanExampleBase::submitFrame();
     }
 
+    // 2. 修复render函数
     void render() {
         if (!prepared) return;
         updateUniformBuffers();
-        // ... 调试信息..
+
+        // 调试信息
         uint32_t* counter = (uint32_t*)uniformBuffers.globalCounter.mapped;
-        printf("Global counter: %u\n", *counter);
-        ClusterCountsandOffsets* clusterData = (ClusterCountsandOffsets*)uniformBuffers.clusterData.mapped;
-
-
-        for (uint32_t i = 0; i < TOTAL_CLUSTERS; i++) {
-            printf("Cluster %u: count=%u, offset=%u\n", i, clusterData->cluster[i].count, clusterData->cluster[i].offset);
-        }
+        printf("Global counter before: %u\n", *counter);
 
         if (!paused) {
             updateLights();
+
+            // 重置全局计数器
             uint32_t zero = 0;
-            memcpy(uniformBuffers.globalCounter.mapped, &zero, sizeof(uint32_t)); // Reset global counter
-            dispatchCompute(); // Run Compute Shader
+            memcpy(uniformBuffers.globalCounter.mapped, &zero, sizeof(uint32_t));
+            uniformBuffers.globalCounter.flush(); // 确保数据同步到GPU
 
-            // 等待计算完成
-            VkFence fence;
-            VkFenceCreateInfo fenceInfo = vks::initializers::fenceCreateInfo();
-            vkCreateFence(device, &fenceInfo, nullptr, &fence);
-            vkQueueSubmit(queue, 1, &submitInfo, fence);
-            vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);
-            vkDestroyFence(device, fence, nullptr);
+            // 执行计算着色器
+            dispatchCompute(); // 不需要try-catch，函数内部已处理错误
 
+            // 调试：检查计算结果
+            counter = (uint32_t*)uniformBuffers.globalCounter.mapped;
+            printf("Global counter after compute: %u\n", *counter);
 
+            // 使用栅栏而不是队列空闲来确保计算完成
+            // 这样可以更精确地控制同步，避免不必要的等待
+            if (computeFence != VK_NULL_HANDLE) {
+                // 使用更长的超时时间等待计算完成
+                VkResult fenceResult = vkWaitForFences(device, 1, &computeFence, VK_TRUE, UINT64_MAX);
+                
+                if (fenceResult == VK_SUCCESS) {
+                    // 重置fence以备下次使用
+                    vkResetFences(device, 1, &computeFence);
+                    
+                    // 调试：验证计算结果
+                    counter = (uint32_t*)uniformBuffers.globalCounter.mapped;
+                    printf("Global counter after fence wait: %u\n", *counter);
+                    
+                    // 确保缓冲区数据对GPU可见
+                    uniformBuffers.clusterData.flush();
+                    uniformBuffers.clusterIndexList.flush();
+                    
+                    // 添加内存屏障，确保计算结果对图形管线可见
+                    VkCommandBuffer cmdBuffer = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
+                    
+                    VkBufferMemoryBarrier bufferBarriers[2] = {};
+                    
+                    // 光照索引列表屏障
+                    bufferBarriers[0].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+                    bufferBarriers[0].srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
+                    bufferBarriers[0].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+                    bufferBarriers[0].srcQueueFamilyIndex = vulkanDevice->queueFamilyIndices.compute;
+                    bufferBarriers[0].dstQueueFamilyIndex = vulkanDevice->queueFamilyIndices.graphics;
+                    bufferBarriers[0].buffer = uniformBuffers.clusterIndexList.buffer;
+                    bufferBarriers[0].offset = 0;
+                    bufferBarriers[0].size = VK_WHOLE_SIZE;
+                    
+                    // 集群数据屏障
+                    bufferBarriers[1].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+                    bufferBarriers[1].srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
+                    bufferBarriers[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+                    bufferBarriers[1].srcQueueFamilyIndex = vulkanDevice->queueFamilyIndices.compute;
+                    bufferBarriers[1].dstQueueFamilyIndex = vulkanDevice->queueFamilyIndices.graphics;
+                    bufferBarriers[1].buffer = uniformBuffers.clusterData.buffer;
+                    bufferBarriers[1].offset = 0;
+                    bufferBarriers[1].size = VK_WHOLE_SIZE;
+                    
+                    vkCmdPipelineBarrier(
+                        cmdBuffer,
+                        VK_PIPELINE_STAGE_HOST_BIT,
+                        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                        0,
+                        0, nullptr,
+                        2, bufferBarriers,
+                        0, nullptr
+                    );
+                    
+                    vulkanDevice->flushCommandBuffer(cmdBuffer, queue, true);
+                } else {
+                    std::cerr << "Warning: Compute fence wait failed with error: " << fenceResult << std::endl;
+                    
+                    // 如果等待失败，尝试等待设备空闲作为后备方案
+                    if (computeQueue != VK_NULL_HANDLE) {
+                        std::cerr << "Attempting to wait for compute queue idle as fallback..." << std::endl;
+                        VkResult queueIdleResult = vkQueueWaitIdle(computeQueue);
+                        if (queueIdleResult != VK_SUCCESS) {
+                            std::cerr << "Critical error: Failed to wait for compute queue idle: " << queueIdleResult << std::endl;
+                        } else {
+                            // 队列空闲成功，重置fence
+                            vkResetFences(device, 1, &computeFence);
+                        }
+                    }
+                }
+            }
         }
+
         draw();
     }
 
