@@ -128,7 +128,7 @@ public:
 		materialIndex = 9;
 		skyboxNames = {"NO Skybox", "Pisa", "Grand Canyon"};
 
-		skyboxIndex = 2;
+		skyboxIndex = 1;
 	}
 
 	~VulkanExample()
@@ -1418,22 +1418,23 @@ public:
 	}
 
 	virtual void loadSkyboxTexture() {
-		// 根据 skyboxIndex 选择正确的环境贴图和描述符集
+		// 根据 skyboxIndex 选择正确的环境贴图
+		VkDescriptorImageInfo* currentSkyboxDescriptor = nullptr;
 		if (skyboxIndex == 1) {
-			// 使用 Pisa 天空盒
-			textures.environmentCube.descriptor = textures.environmentCube.descriptor;
+			currentSkyboxDescriptor = &textures.environmentCube.descriptor;
 		} else if (skyboxIndex == 2) {
-			// 使用 Grand Canyon 天空盒
-			textures.environmentCube.descriptor = textures.environmentCube2.descriptor;
+			currentSkyboxDescriptor = &textures.environmentCube2.descriptor;
 		}
 		
-		// 更新描述符集
-		VkWriteDescriptorSet writeDescriptorSet = vks::initializers::writeDescriptorSet(
-			descriptorSets.skybox,
-			VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-			2,  // 绑定点
-			&textures.environmentCube.descriptor);
-		vkUpdateDescriptorSets(device, 1, &writeDescriptorSet, 0, nullptr);
+		if (currentSkyboxDescriptor) {
+			// 更新描述符集
+			VkWriteDescriptorSet writeDescriptorSet = vks::initializers::writeDescriptorSet(
+				descriptorSets.skybox,
+				VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+				2,  // 绑定点
+				currentSkyboxDescriptor);
+			vkUpdateDescriptorSets(device, 1, &writeDescriptorSet, 0, nullptr);
+		}
 		
 		// 更新 uniform buffer 并重建命令缓冲区
 		updateUniformBuffers();
