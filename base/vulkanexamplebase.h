@@ -90,7 +90,7 @@ private:
 	void createSwapChain();
 	void createCommandBuffers();
 	void destroyCommandBuffers();
-	std::string shaderDir = "hlsl";
+	std::string shaderDir = "glsl";
 protected:
 	// Returns the path to the root of the glsl, hlsl or slang shader directory.
 	std::string getShadersPath() const;
@@ -104,7 +104,7 @@ protected:
 	std::vector<std::string> supportedInstanceExtensions;
 	// Physical device (GPU) that Vulkan will use
 	VkPhysicalDevice physicalDevice{ VK_NULL_HANDLE };
-	//ÎïÀíGPU ×Ô¶¯»ñµÃ
+	//ï¿½ï¿½ï¿½ï¿½GPU ï¿½Ô¶ï¿½ï¿½ï¿½ï¿½
 	// Stores physical device properties (for e.g. checking device limits)
 	VkPhysicalDeviceProperties deviceProperties{};
 	// Stores the features available on the selected physical device (for e.g. checking if a feature is available)
@@ -120,7 +120,7 @@ protected:
 	void* deviceCreatepNextChain = nullptr;
 	/** @brief Logical device, application's view of the physical device (GPU) */
 	VkDevice device{ VK_NULL_HANDLE };
-	// ¼¸ºõ¿ÉÒÔµÈÍ¬ÓÚphysicalDevice
+	// ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ôµï¿½Í¬ï¿½ï¿½physicalDevice
 	// Handle to the device graphics queue that command buffers are submitted to
 	VkQueue queue{ VK_NULL_HANDLE };
 	// Depth buffer format (selected during Vulkan initialization)
