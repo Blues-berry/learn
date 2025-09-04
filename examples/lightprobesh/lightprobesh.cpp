@@ -204,20 +204,11 @@ public:
 
 			// Skybox
 			if (skyboxIndex > 0) {
-				// 浣跨敤褰撳墠璁剧疆鐨勭幆澧冪珛鏂逛綋璐村浘
+				// 使用当前设置的环境立方体贴图
 				vkCmdBindDescriptorSets(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets.skybox, 0, NULL);
 				vkCmdBindPipeline(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.skybox);
 				models.skybox.draw(drawCmdBuffers[i]);
 			}
-if (skyboxIndex > 0) {
-    // 鏍规嵁 skyboxIndex 閫夋嫨澶╃┖鐩掓弿杩扮闆?
-    VkDescriptorSet currentSkyboxSet = (skyboxIndex == 1) 
-        ? descriptorSets.skybox 
-        : descriptorSets.skybox2;
-    vkCmdBindDescriptorSets(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &currentSkyboxSet, 0, NULL);
-    vkCmdBindPipeline(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.skybox);
-    models.skybox.draw(drawCmdBuffers[i]);
-}
 
 			// Objects
 			vkCmdBindDescriptorSets(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets.object, 0, NULL);
@@ -1379,7 +1370,7 @@ if (skyboxIndex > 0) {
 		uboMatrices.camPos = camera.position * -1.0f;
 		memcpy(uniformBuffers.object.mapped, &uboMatrices, sizeof(uboMatrices));
 
-		// Skybox
+		// Skybo-x
 		uboMatrices.model = glm::mat4(glm::mat3(camera.matrices.view));
 		memcpy(uniformBuffers.skybox.mapped, &uboMatrices, sizeof(uboMatrices));
 	}
@@ -1427,13 +1418,24 @@ if (skyboxIndex > 0) {
 	}
 
 	virtual void loadSkyboxTexture() {
+		// 根据 skyboxIndex 选择正确的环境贴图和描述符集
 		if (skyboxIndex == 1) {
+			// 使用 Pisa 天空盒
 			textures.environmentCube.descriptor = textures.environmentCube.descriptor;
-			descriptorSets.skybox = descriptorSets.skybox;
 		} else if (skyboxIndex == 2) {
+			// 使用 Grand Canyon 天空盒
 			textures.environmentCube.descriptor = textures.environmentCube2.descriptor;
-			descriptorSets.skybox = descriptorSets.skybox2;
 		}
+		
+		// 更新描述符集
+		VkWriteDescriptorSet writeDescriptorSet = vks::initializers::writeDescriptorSet(
+			descriptorSets.skybox,
+			VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+			2,  // 绑定点
+			&textures.environmentCube.descriptor);
+		vkUpdateDescriptorSets(device, 1, &writeDescriptorSet, 0, nullptr);
+		
+		// 更新 uniform buffer 并重建命令缓冲区
 		updateUniformBuffers();
 		buildCommandBuffers();
 	}
