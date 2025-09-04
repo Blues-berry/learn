@@ -38,6 +38,9 @@ public:
 	struct Textures {
 		vks::TextureCubeMap environmentCube;
 		vks::TextureCubeMap environmentCube2; // 绗簩涓ぉ绌虹洅
+        vks::TextureCubeMap environmentCube3; // 绗簩涓ぉ绌虹洅
+        // vks::TextureCubeMap environmentCube4; // 绗簩涓ぉ绌虹洅
+        // vks::TextureCubeMap environmentCube5; // 绗簩涓ぉ绌虹洅
 		// Generated at runtime
 		vks::Texture2D lutBrdf;
 		vks::TextureCubeMap irradianceCube;
@@ -126,8 +129,8 @@ public:
 		objectNames = { "Sphere", "Teapot", "Torusknot", "Venus" };
 
 		materialIndex = 9;
-		skyboxNames = {"NO Skybox", "Pisa", "Grand Canyon"};
-
+		// skyboxNames = {"NO Skybox", "Pisa", "Grand Canyon","uffizi_cube","grace_cross","rnl_cross"};
+		skyboxNames = {"NO Skybox", "Pisa", "Grand Canyon","uffizi_cube"};
 		skyboxIndex = 1;
 	}
 
@@ -143,6 +146,9 @@ public:
 			uniformBuffers.params.destroy();
 			textures.environmentCube.destroy();
 			textures.environmentCube2.destroy();
+            textures.environmentCube3.destroy();
+            // textures.environmentCube4.destroy();
+            // textures.environmentCube5.destroy();
 			textures.irradianceCube.destroy();
 			textures.prefilteredCube.destroy();
 			textures.lutBrdf.destroy();
@@ -248,6 +254,10 @@ public:
 		// HDR cubemap
 		textures.environmentCube.loadFromFile(getAssetPath() + "textures/hdr/pisa_cube.ktx", VK_FORMAT_R16G16B16A16_SFLOAT, vulkanDevice, queue);
 		textures.environmentCube2.loadFromFile(getAssetPath() + "textures/hdr/gcanyon_cube.ktx", VK_FORMAT_R16G16B16A16_SFLOAT, vulkanDevice, queue);
+        textures.environmentCube3.loadFromFile(getAssetPath() + "textures/hdr/uffizi_cube.ktx", VK_FORMAT_R16G16B16A16_SFLOAT, vulkanDevice, queue);
+		// textures.environmentCube4.loadFromFile(getAssetPath() + "textures/hdr/grace_cross.ktx", VK_FORMAT_R16G16B16A16_SFLOAT, vulkanDevice, queue);
+		// textures.environmentCube5.loadFromFile(getAssetPath() + "textures/hdr/rnl_cross.ktx", VK_FORMAT_R16G16B16A16_SFLOAT, vulkanDevice, queue);
+
 	}
 
 	void setupDescriptors()
@@ -1420,12 +1430,25 @@ public:
 	virtual void loadSkyboxTexture() {
 		// 根据 skyboxIndex 选择正确的环境贴图
 		VkDescriptorImageInfo* currentSkyboxDescriptor = nullptr;
-		if (skyboxIndex == 1) {
-			currentSkyboxDescriptor = &textures.environmentCube.descriptor;
-		} else if (skyboxIndex == 2) {
-			currentSkyboxDescriptor = &textures.environmentCube2.descriptor;
-		}
-		
+		// if (skyboxIndex == 0) {
+		// 	// 无天空盒
+		// 	currentSkyboxDescriptor = nullptr;
+		// } else if (skyboxIndex == 1) {
+		// 	// Pisa天空盒
+		// 	currentSkyboxDescriptor = &textures.environmentCube.descriptor;
+		// } else if (skyboxIndex == 2) {
+		// 	// Grand Canyon天空盒
+		// 	currentSkyboxDescriptor = &textures.environmentCube2.descriptor;
+		// } else if (skyboxIndex == 3) {
+		// 	// 第三个天空盒
+		// 	currentSkyboxDescriptor = &textures.environmentCube3.descriptor;
+		// }
+		switch(skyboxIndex) {
+        case 0: currentSkyboxDescriptor = nullptr; break;
+        case 1: currentSkyboxDescriptor = &textures.environmentCube.descriptor; break;
+        case 2: currentSkyboxDescriptor = &textures.environmentCube2.descriptor; break;
+        case 3: currentSkyboxDescriptor = &textures.environmentCube3.descriptor; break;
+    }
 		if (currentSkyboxDescriptor) {
 			// 更新描述符集
 			VkWriteDescriptorSet writeDescriptorSet = vks::initializers::writeDescriptorSet(
@@ -1434,6 +1457,20 @@ public:
 				2,  // 绑定点
 				currentSkyboxDescriptor);
 			vkUpdateDescriptorSets(device, 1, &writeDescriptorSet, 0, nullptr);
+		}
+
+	
+		if (currentSkyboxDescriptor) {
+			// 更新描述符集
+			VkWriteDescriptorSet writeDescriptorSet = vks::initializers::writeDescriptorSet(
+				descriptorSets.skybox,
+				VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+				2,  // 绑定点
+				currentSkyboxDescriptor);
+			vkUpdateDescriptorSets(device, 1, &writeDescriptorSet, 0, nullptr);
+
+
+            
 		}
 		
 		// 更新 uniform buffer 并重建命令缓冲区
