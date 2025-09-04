@@ -125,6 +125,7 @@ set(EXAMPLES
 	inlineuniformblocks
 	inputattachments
 	instancing
+	lightprobesh
 	meshshader
 	multisampling
 	multithreading
