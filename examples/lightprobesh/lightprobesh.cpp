@@ -1,19 +1,9 @@
-/*
-* Vulkan Example - Physical based rendering with image based lighting
-*
-* This sample adds imaged based lighting from an environment map to the PBR equation
-* 
-* Copyright (C) 2016-2023 by Sascha Willems - www.saschawillems.de
-*
-* This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
-*/
 
-// For reference see http://blog.selfshadow.com/publications/s2013-shading-course/karis/s2013_pbs_epic_notes_v2.pdf
 
 #include "vulkanexamplebase.h"
 #include "VulkanglTFModel.h"
 struct Material {
-	// Parameter block used as push constant block
+	
 	struct PushBlock {
 		float roughness = 0.0f;
 		float metallic = 0.0f;
@@ -37,11 +27,11 @@ public:
 
 	struct Textures {
 		vks::TextureCubeMap environmentCube;
-		vks::TextureCubeMap environmentCube2; // 绗簩涓ぉ绌虹洅
-        vks::TextureCubeMap environmentCube3; // 绗簩涓ぉ绌虹洅
-        // vks::TextureCubeMap environmentCube4; // 绗簩涓ぉ绌虹洅
-        // vks::TextureCubeMap environmentCube5; // 绗簩涓ぉ绌虹洅
-		// Generated at runtime
+		vks::TextureCubeMap environmentCube2; 
+        vks::TextureCubeMap environmentCube3; 
+        vks::TextureCubeMap environmentCube4; 
+        vks::TextureCubeMap environmentCube5; 
+		
 		vks::Texture2D lutBrdf;
 		vks::TextureCubeMap irradianceCube;
 		vks::TextureCubeMap prefilteredCube;
@@ -81,14 +71,14 @@ public:
 	struct {
 		VkDescriptorSet object{ VK_NULL_HANDLE };
 		VkDescriptorSet skybox{ VK_NULL_HANDLE };
-		VkDescriptorSet skybox2{ VK_NULL_HANDLE }; // 
+		VkDescriptorSet skybox2{ VK_NULL_HANDLE }; 
 	
 	} descriptorSets;
 
 	VkPipelineLayout pipelineLayout{ VK_NULL_HANDLE };
 	VkDescriptorSetLayout descriptorSetLayout{ VK_NULL_HANDLE };
 
-	// Default materials to select from
+	
 	std::vector<Material> materials;
 	int32_t materialIndex = 0;
 
@@ -108,7 +98,7 @@ public:
 		camera.setRotation({ -3.75f, 180.0f, 0.0f });
 		camera.setPosition({ 0.55f, 0.85f, 12.0f });
 
-		// Setup some default materials (source: https://seblagarde.wordpress.com/2011/08/17/feeding-a-physical-based-lighting-mode/)
+		
 		materials.push_back(Material("Gold", glm::vec3(1.0f, 0.765557f, 0.336057f)));
 		materials.push_back(Material("Copper", glm::vec3(0.955008f, 0.637427f, 0.538163f)));
 		materials.push_back(Material("Chromium", glm::vec3(0.549585f, 0.556114f, 0.554256f)));
@@ -116,7 +106,7 @@ public:
 		materials.push_back(Material("Titanium", glm::vec3(0.541931f, 0.496791f, 0.449419f)));
 		materials.push_back(Material("Cobalt", glm::vec3(0.662124f, 0.654864f, 0.633732f)));
 		materials.push_back(Material("Platinum", glm::vec3(0.672411f, 0.637331f, 0.585456f)));
-		// Testing materials
+		
 		materials.push_back(Material("White", glm::vec3(1.0f)));
 		materials.push_back(Material("Dark", glm::vec3(0.1f)));
 		materials.push_back(Material("Black", glm::vec3(0.0f)));
@@ -129,7 +119,7 @@ public:
 		objectNames = { "Sphere", "Teapot", "Torusknot", "Venus" };
 
 		materialIndex = 9;
-		// skyboxNames = {"NO Skybox", "Pisa", "Grand Canyon","uffizi_cube","grace_cross","rnl_cross"};
+		
 		skyboxNames = {"NO Skybox", "Pisa", "Grand Canyon","uffizi_cube"};
 		skyboxIndex = 1;
 	}
@@ -147,8 +137,8 @@ public:
 			textures.environmentCube.destroy();
 			textures.environmentCube2.destroy();
             textures.environmentCube3.destroy();
-            // textures.environmentCube4.destroy();
-            // textures.environmentCube5.destroy();
+            
+            
 			textures.irradianceCube.destroy();
 			textures.prefilteredCube.destroy();
 			textures.lutBrdf.destroy();
@@ -162,40 +152,30 @@ public:
 		}
 	}
 
-/**
- * @brief 鏋勫缓鍛戒护缂撳啿鍖?
- * 璇ュ嚱鏁扮敤浜庝负姣忎竴甯у垱寤哄拰璁板綍鍛戒护缂撳啿鍖猴紝鍖呮嫭娓叉煋閫氶亾璁剧疆銆佽鍙ｅ拰鍓垁璁剧疆銆?
- * 澶╃┖鐩掓覆鏌撱€丳BR鐗╀綋娓叉煋浠ュ強UI缁樺埗绛夋搷浣?
- */
-/**
- * @brief 鏋勫缓鍛戒护缂撳啿鍖?
- * 璇ュ嚱鏁拌礋璐ｄ负姣忎竴甯у垱寤哄拰褰曞埗鍛戒护缂撳啿鍖猴紝鍖呮嫭璁剧疆娓呴櫎鍊笺€佹覆鏌撻€氶亾銆佽鍙ｅ拰鍓垁娴嬭瘯绛夛紝
- * 骞剁粯鍒跺ぉ绌虹洅鍜?D瀵硅薄
- */
 	void buildCommandBuffers()
 	{
-    // 鍒濆鍖栧懡浠ょ紦鍐插尯寮€濮嬩俊鎭?
+    
 		VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
 
-    // 璁剧疆娓呴櫎鍊硷紝鍖呮嫭棰滆壊鍜屾繁搴︽ā鏉垮€?
+    
 		VkClearValue clearValues[2];
-		clearValues[0].color = { { 0.1f, 0.1f, 0.1f, 1.0f } };  // 娣辩伆鑹茶儗鏅?
-		clearValues[1].depthStencil = { 1.0f, 0 };            // 娣卞害鍊艰涓?.0锛屾ā鏉垮€艰涓?
+		clearValues[0].color = { { 0.1f, 0.1f, 0.1f, 1.0f } };  
+		clearValues[1].depthStencil = { 1.0f, 0 };            
 
-    // 鍒濆鍖栨覆鏌撻€氶亾寮€濮嬩俊鎭?
+    
 		VkRenderPassBeginInfo renderPassBeginInfo = vks::initializers::renderPassBeginInfo();
-		renderPassBeginInfo.renderPass = renderPass;              // 璁剧疆娓叉煋閫氶亾
-		renderPassBeginInfo.renderArea.offset.x = 0;            // 娓叉煋鍖哄煙X鍋忕Щ
-		renderPassBeginInfo.renderArea.offset.y = 0;            // 娓叉煋鍖哄煙Y鍋忕Щ
-		renderPassBeginInfo.renderArea.extent.width = width;    // 娓叉煋鍖哄煙瀹藉害
-		renderPassBeginInfo.renderArea.extent.height = height;  // 娓叉煋鍖哄煙楂樺害
-		renderPassBeginInfo.clearValueCount = 2;                // 娓呴櫎鍊兼暟閲?
-		renderPassBeginInfo.pClearValues = clearValues;         // 娓呴櫎鍊兼寚閽?
+		renderPassBeginInfo.renderPass = renderPass;              
+		renderPassBeginInfo.renderArea.offset.x = 0;            
+		renderPassBeginInfo.renderArea.offset.y = 0;            
+		renderPassBeginInfo.renderArea.extent.width = width;    
+		renderPassBeginInfo.renderArea.extent.height = height;  
+		renderPassBeginInfo.clearValueCount = 2;                
+		renderPassBeginInfo.pClearValues = clearValues;         
 
-    // 閬嶅巻鎵€鏈夊懡浠ょ紦鍐插尯杩涜褰曞埗
+    
 		for (size_t i = 0; i < drawCmdBuffers.size(); ++i)
 		{
-			// Set target frame buffer
+			
 			renderPassBeginInfo.framebuffer = frameBuffers[i];
 
 			VK_CHECK_RESULT(vkBeginCommandBuffer(drawCmdBuffers[i], &cmdBufInfo));
@@ -208,15 +188,15 @@ public:
 			VkRect2D scissor = vks::initializers::rect2D(width,	height,	0, 0);
 			vkCmdSetScissor(drawCmdBuffers[i], 0, 1, &scissor);
 
-			// Skybox
+			// Skybox rendering
 			if (skyboxIndex > 0) {
-				// 使用当前设置的环境立方体贴图
+				// Bind descriptor sets and pipeline for skybox
 				vkCmdBindDescriptorSets(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets.skybox, 0, NULL);
 				vkCmdBindPipeline(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.skybox);
 				models.skybox.draw(drawCmdBuffers[i]);
 			}
 
-			// Objects
+			// Objects rendering
 			vkCmdBindDescriptorSets(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets.object, 0, NULL);
 			vkCmdBindPipeline(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.pbr);
 
