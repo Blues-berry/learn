@@ -1,4 +1,5 @@
-﻿#define NUM_LIGHTS 64
+﻿// pbr.frag.hlsl
+#define NUM_LIGHTS 64
 #define CLUSTER_SIZE_X 8
 #define CLUSTER_SIZE_Y 8
 #define CLUSTER_SIZE_Z 8
@@ -6,9 +7,9 @@
 #define LIGHT_INDEX_LIST_SIZE (NUM_LIGHTS * TOTAL_CLUSTERS)
 // 定义常量，与 C++ 代码一致：
 // - NUM_LIGHTS：光源数量，64。
-// - CLUSTER_SIZE_X/Y/Z：集群网格尺寸，8x8x1。
-// - TOTAL_CLUSTERS：总集群数，64。
-// - LIGHT_INDEX_LIST_SIZE：光源索引列表大小，4096。
+// - CLUSTER_SIZE_X/Y/Z：集群网格尺寸，8x8x8。
+// - TOTAL_CLUSTERS：总集群数，512。
+// - LIGHT_INDEX_LIST_SIZE：光源索引列表大小，32768。
 
 struct VSOutput {
     [[vk::location(0)]] float3 WorldPos : POSITION0;
@@ -56,10 +57,8 @@ cbuffer uboParams : register(b1) {
 
 struct ClusterIndexList {
     struct Indices {
-        uint32_t clusterIndexList; // 4 字节
-        float padding1;          // 12 字节，确保 16 字节对齐
-        float padding2;          // 12 字节，确保 16 字节对齐
-        float padding3;          // 12 字节，确保 16 字节对齐
+        uint clusterIndexList; // 光源索引
+        float padding[3];      // 填充，确保 16 字节对齐
     };
     Indices indices[LIGHT_INDEX_LIST_SIZE]; // 全局光源索引列表
 };
@@ -67,11 +66,9 @@ struct ClusterIndexList {
 // - clusterIndexList：光源索引。
 // - padding：填充 12 字节，确保 16 字节对齐。
 
-cbuffer clusterIndexList : register(b2) {
-    ClusterIndexList clusterIndexList;
-};
+cbuffer clusterIndexList : register(b2) { ClusterIndexList clusterIndexList; }
 // 声明光源索引列表缓冲区：
-// - 包含 LIGHT_INDEX_LIST_SIZE（4096）个 Indices。
+// - 包含 LIGHT_INDEX_LIST_SIZE（32768）个 Indices。
 // - 寄存器 b2（对应 uniformBuffers.clusterIndexList）。
 
 struct Cluster {
@@ -88,7 +85,7 @@ cbuffer clusterCountsandOffsets : register(b3) {
     Cluster clusterCountsandOffsets[TOTAL_CLUSTERS];
 };
 // 声明集群计数和偏移缓冲区：
-// - 包含 TOTAL_CLUSTERS（64）个 Cluster。
+// - 包含 TOTAL_CLUSTERS（512）个 Cluster。
 // - 寄存器 b3（对应 uniformBuffers.clusterData）。
 
 struct PushConsts {
@@ -139,8 +136,6 @@ float G_SchlicksmithGGX(float dotNL, float dotNV, float roughness) {
     float GV = dotNV / (dotNV * (1.0 - k) + k);
     // 计算视线遮挡项：N·V / (N·V * (1 - k) + k)。
     return GL * GV;
-        // 继续计算几何遮挡函数，返回光线和视线遮挡的乘积。
-    return GL * GV;
     // 返回几何遮挡项：GL（光线遮挡） * GV（视线遮挡）。
 }
 
@@ -173,7 +168,7 @@ float3 BRDF(float3 L, float3 V, float3 N, float metallic, float roughness) {
     float dotNH = clamp(dot(N, H), 0.0, 1.0);
     // 计算 N·H（法线与半角向量的点积），限制在 [0, 1]。
 
-    float3 color = float3(0.0, 0.0, 0.0);
+    float3 color = float3(0, 0, 0);
     // 初始化输出颜色为黑色。
 
     if (dotNL > 0.0) {
@@ -186,20 +181,18 @@ float3 BRDF(float3 L, float3 V, float3 N, float metallic, float roughness) {
         // 计算几何遮挡函数（Schlick-Smith GGX）。
         float3 F = F_Schlick(dotNV, metallic);
         // 计算菲涅尔项（Schlick）。
-        float3 spec = D * F * G / (4.0 * dotNL * dotNV);
+        float3 spec = D * F * G / (4.0 * dotNL * dotNV + 0.001);
         // 计算镜面 BRDF：
         // - 公式：D * F * G / (4 * N·L * N·V)。
         // - 表示镜面反射贡献。
+        // - 添加小 epsilon (0.001) 避免除零。
 
-        float3 diffuse = (1.0 - F) * (1.0 - metallic) * materialcolor() / PI;
-                // 计算镜面 漫反射：
-        color = spec + diffuse * dotNL;
-        // 将镜面反射累加到颜色（注释表明这是修复后的逻辑，仅累加镜面项）。
+        color += spec;
+        // 将镜面反射累加到颜色。
     }
     return color;
     // 返回 BRDF 计算结果（镜面反射贡献）。
 }
-
 
 float radiance(float radius, float3 lightVec, float3 N, float3 L) {
     // 函数计算光源的辐射强度（考虑距离衰减和角度）。
@@ -210,9 +203,9 @@ float radiance(float radius, float3 lightVec, float3 N, float3 L) {
     // 如果距离超过光源半径，返回 0（无贡献）。
     
     // 使用平滑的衰减函数
-    float attenuation = 1.0 / (distance * distance + 1.0);
+    float attenuation = 1.0 / (distance * 0.1 + 1.0);
     // 平滑过渡到边界
-    float fade = smoothstep(0.8, 1.0, normalizedDistance);
+    float fade = smoothstep(0.9, 1.0, normalizedDistance);
     attenuation *= (1.0 - fade);
     
     float dotNL = max(dot(N, L), 0.0);
@@ -236,14 +229,8 @@ float4 main(VSOutput input) : SV_TARGET {
     // 变换到视图空间：view * worldPos。
     float4 clipPos = mul(ubo.projection, viewPos);
     // 变换到裁剪空间：projection * viewPos。
-/*
-    // 检查透视除法是否有效
-    if (clipPos.w <= 0.0 || any(abs(clipPos.xy) > clipPos.w)) {
-        float3 color = materialcolor() * 0.02;
-        color = pow(color, float3(0.4545, 0.4545, 0.4545));
-        return float4(color, 1.0);
-    }
-*/
+
+    float ndcZ = clipPos.z / clipPos.w;
     clipPos /= clipPos.w;
     // 转换为 NDC 坐标，除以 w 分量。
     float2 screenPos = clipPos.xy * 0.5 + 0.5;
@@ -254,65 +241,57 @@ float4 main(VSOutput input) : SV_TARGET {
     float zNear = 0.1;
     float zFar = 256.0;
     // 定义近裁剪面和远裁剪面，与 C++ 相机设置一致。
-    // 计算 Z 方向集群索引
+
+    // 计算 Z 方向集群索引（使用对数深度）
     float normalizedZ = (log(viewZ / zNear) / log(zFar / zNear));
-    uint clusterZ = uint(normalizedZ * CLUSTER_SIZE_Z);
+    uint clusterZ = uint(normalizedZ * float(CLUSTER_SIZE_Z));
     clusterZ = clamp(clusterZ, 0u, CLUSTER_SIZE_Z - 1);
 
     // 计算 X/Y 方向集群索引
-    uint clusterX = uint(screenPos.x * CLUSTER_SIZE_X);
-    uint clusterY = uint(screenPos.y * CLUSTER_SIZE_Y);
+    uint clusterX = uint(screenPos.x * float(CLUSTER_SIZE_X));
+    uint clusterY = uint(screenPos.y * float(CLUSTER_SIZE_Y));
     clusterX = clamp(clusterX, 0u, CLUSTER_SIZE_X - 1);
     clusterY = clamp(clusterY, 0u, CLUSTER_SIZE_Y - 1);
 
     // 计算集群索引
     uint clusterIdx = clusterZ * CLUSTER_SIZE_X * CLUSTER_SIZE_Y + clusterY * CLUSTER_SIZE_X + clusterX;
-    // 计算集群索引：
-    // - 公式：z * 8 * 8 + y * 8 + x。
-    // - 由于 CLUSTER_SIZE_Z = 1，实际为 y * 8 + x。
 
+    // 获取该集群的光源数量和偏移
     uint lightCount = clusterCountsandOffsets[clusterIdx].counts;
-    // 获取当前集群的光源数量。
-    uint lightOffset = clusterCountsandOffsets[clusterIdx].offsets;
-    // 获取当前集群的索引列表偏移。
+    uint offset = clusterCountsandOffsets[clusterIdx].offsets;
 
+    // 初始化直接光照贡献
     float3 Lo = float3(0.0, 0.0, 0.0);
-    // 初始化直接光照贡献（积分项）。
-    if (lightCount > 0) {
-        // 如果集群有光源，计算光照。
-        for (int i = lightOffset; i < lightOffset + lightCount; i++) {
-            // 遍历集群的光源索引。
-            if (i >= LIGHT_INDEX_LIST_SIZE) continue;
-            uint lightIndex = clusterIndexList.indices[i].clusterIndexList;
-            if (lightIndex >= NUM_LIGHTS) continue;
-            
-            float3 lightVec = lights[lightIndex].position.xyz - input.WorldPos;
-            // 计算光源向量：光源位置 - 片段位置。
-            float3 L = normalize(lightVec);
-            // 归一化光源方向。
-            float radianceFactor = radiance(lights[lightIndex].colorAndRadius.w, lightVec, N, L);
-            // 计算辐射强度：
-            // - 半径：light.colorAndRadius.w。
-            // - 光源向量、N、L 传入 radiance 函数。
-            float3 lightColor = lights[lightIndex].colorAndRadius.xyz;
-            // 获取光源颜色（RGB）。
-            Lo += BRDF(L, V, N, material.metallic, roughness) * lightColor * radianceFactor;
-            // 累加光照贡献：
-            // - BRDF：镜面反射。
-            // - lightColor：光源颜色。
-            // - radianceFactor：辐射强度（衰减和 N·L）。
-        }
+
+    // 只遍历该集群中的光源
+    for (uint i = 0; i < lightCount; i++) {
+        uint lightIdx = clusterIndexList.indices[offset + i].clusterIndexList;
+        if (lightIdx >= NUM_LIGHTS) continue; // 安全检查
+
+        float3 lightVec = lights[lightIdx].position.xyz - input.WorldPos;
+        // 计算光源向量：光源位置 - 片段位置。
+        float3 L = normalize(lightVec);
+        // 归一化光源方向。
+        float radianceFactor = radiance(lights[lightIdx].colorAndRadius.w, lightVec, N, L);
+        // 计算辐射强度：
+        // - 半径：light.colorAndRadius.w。
+        // - 光源向量、N、L 传入 radiance 函数。
+        float3 lightColor = lights[lightIdx].colorAndRadius.xyz;
+        // 获取光源颜色（RGB）。
+        Lo += BRDF(L, V, N, material.metallic, roughness) * lightColor * radianceFactor;
+        // 累加光照贡献：
+        // - BRDF：镜面反射。
+        // - lightColor：光源颜色。
+        // - radianceFactor：辐射强度（衰减和 N·L）。
     }
 
-    float3 color = materialcolor() * 0.02;
-    // 计算基础颜色：
-    // - 材质颜色 * 0.02（模拟环境光或漫反射，系数较小）。
-    color += Lo;
-    // 累加直接光照贡献。
-
-    color = pow(color, float3(0.4545, 0.4545, 0.4545));
-    // 应用 Gamma 校正：
-    // - 幂 0.4545 ≈ 1/2.2，将线性颜色转换为 sRGB。
+    // 只使用直接光照，移除材质颜色和环境光
+    float3 color = Lo;
+    
+    // 增强光源颜色效果
+    color = saturate(color * 2.0);
+    
+    // 简化颜色处理
     return float4(color, 1.0);
     // 返回最终颜色：(R, G, B, 1.0)。
 }

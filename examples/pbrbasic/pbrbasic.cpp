@@ -24,9 +24,9 @@ const uint32_t CLUSTER_SIZE_Z = 8;  // 深度方向集群数
 const uint32_t TOTAL_CLUSTERS = CLUSTER_SIZE_X * CLUSTER_SIZE_Y * CLUSTER_SIZE_Z;
 const uint32_t lightIndexListnum = maxnumLights * TOTAL_CLUSTERS;
 // 定义集群光照（Clustered Shading）的网格划分参数：
-// - CLUSTER_SIZE_X/Y/Z：屏幕空间划分为 8x8x1 的集群网格。
-// - TOTAL_CLUSTERS：总集群数 = 8 * 8 * 1 = 64。
-// - lightIndexListnum：光源索引列表大小 = 64 光源 * 64 集群 = 4096，用于存储每个集群影响的光源索引。
+// - CLUSTER_SIZE_X/Y/Z：屏幕空间划分为 8x8x8 的集群网格。
+// - TOTAL_CLUSTERS：总集群数 = 8 * 8 * 8 = 512。
+// - lightIndexListnum：光源索引列表大小 = 64 光源 * 512 集群 = 32768，用于存储每个集群影响的光源索引。
 
 // 材质定义
 struct Material {
@@ -65,12 +65,6 @@ struct Light {
 // - direction：光源方向 (x, y, z, w)，用于聚光灯。
 // - cutOff：截止角度等参数 (innerAngle, outerAngle, 0, 0)，用于聚光灯的衰减。
 
-// 全局计数器结构体，用于计算着色器中的原子操作
-struct GlobalCounter {
-    uint32_t counter;
-    uint32_t padding[3]; // 12 字节，确保 16 字节对齐
-};
-
 // 修正后的集群数据结构
 struct ClusterCountsandOffsets {
     struct Cluster {
@@ -85,7 +79,7 @@ struct ClusterCountsandOffsets {
 //   - count：该集群影响的光源数量。
 //   - offset：该集群在全局光源索引列表中的起始偏移。
 //   - padding[2]：填充 8 字节，确保结构体大小为 16 字节，满足 Vulkan 的内存对齐要求（std140 布局）。
-// - cluster 数组：存储 TOTAL_CLUSTERS（64）个集群的计数和偏移。
+// - cluster 数组：存储 TOTAL_CLUSTERS（512）个集群的计数和偏移。
 
 // 分离后的 uniform buffer 数据结构
 struct UBOParams {
@@ -93,6 +87,11 @@ struct UBOParams {
 };
 // 定义 Uniform Buffer 对象 UBOParams，用于存储所有光源数据：
 // - lights：包含 maxnumLights（64）个 Light 结构体，传递给着色器。
+
+struct GlobalCounter {
+    uint32_t counter;
+    uint32_t padding[3];
+};
 
 struct ClusterIndexList {
     struct Indices {
@@ -105,7 +104,7 @@ struct ClusterIndexList {
 // - Indices 子结构体：
 //   - clusterIndexList：存储单个光源索引（指向 lights 数组）。
 //   - padding[3]：填充 12 字节，确保 16 字节对齐（std140 布局）。
-// - indices 数组：大小为 maxnumLights * TOTAL_CLUSTERS（4096），存储每个集群的光源索引。
+// - indices 数组：大小为 maxnumLights * TOTAL_CLUSTERS（32768），存储每个集群的光源索引。
 
 class VulkanExample : public VulkanExampleBase {
 public:
@@ -131,7 +130,7 @@ public:
         vks::Buffer sphereVertex;   // 光源球体顶点缓冲区
         vks::Buffer sphereIndex;    // 光源球体索引缓冲区
         vks::Buffer sphereNormal;   // 光源球体法线缓冲区
-        vks::Buffer globalCounter;  // 全局计数器，用于计算着色器的原子操作
+        vks::Buffer globalCounter;  // 全局计数器（用于计算着色器）
     } uniformBuffers;
     // 定义 uniformBuffers 结构体，存储 Vulkan 缓冲区对象：
     // - object：存储投影、模型、视图矩阵和相机位置。
@@ -139,6 +138,7 @@ public:
     // - clusterData：存储集群计数和偏移（ClusterCountsandOffsets）。
     // - clusterIndexList：存储光源索引列表（ClusterIndexList）。
     // - sphereVertex/Index/Normal：存储光源球体的顶点、索引和法线缓冲区，用于可视化光源。
+    // - globalCounter：全局计数器缓冲区。
 
     struct UBOMatrices {
         glm::mat4 projection; // 投影矩阵
@@ -157,7 +157,7 @@ public:
     UBOParams uboParams;
     ClusterCountsandOffsets clusterData;
     ClusterIndexList clusterIndexList;
-    GlobalCounter globalCounter;
+    
     // 声明 Uniform Buffer 数据实例：
     // - uboParams：存储光源数据。
     // - clusterData：存储集群计数和偏移。
@@ -188,7 +188,7 @@ public:
     int32_t materialIndex = 0;
     std::vector<std::string> materialNames;
     std::vector<std::string> objectNames;
-    // 声明材质和模型选择相关变量：  std::vector<Material>模板类
+    // 声明材质和模型选择相关变量：  
     // - materials：存储所有材质（如金、铜等）。
     // - materialIndex：当前选中的材质索引，默认为 0（金）。
     // - materialNames：材质名称列表，用于 UI 显示。
@@ -215,7 +215,7 @@ public:
         // - Yaw=90.0°：向右旋转 90°。
         // - Roll=0.0°：无滚转。
         camera.movementSpeed = 8.0f;
-        // 设置相机移动速度为 4.0 单位/秒。
+        // 设置相机移动速度为 8.0 单位/秒。
         camera.setPerspective(60.0f, (float)width / (float)height, 0.1f, 256.0f);
         // 设置透视投影：
         // - FOV：60°。
@@ -292,8 +292,8 @@ public:
         // - vertices：存储顶点位置。
         // - normals：存储顶点法线。
         // - indices：存储三角形索引。
-        // - sectors：经度细分数，默认 32。
-        // - stacks：纬度细分数，默认 32。
+        // - sectors：经度细分数，默认 64。
+        // - stacks：纬度细分数，默认 64。
         vertices.clear();
         normals.clear();
         indices.clear();
@@ -329,7 +329,7 @@ public:
                 vertices.push_back(vertex);
                 // 添加顶点到 vertices。
                 normals.push_back(glm::normalize(vertex));
-                // 法线为归一化的顶点位置（球体半径为 1，说明已经归一化了，不使用归一化也是可以的）。
+                // 法线为归一化的顶点位置（球体半径为 1）。
             }
         }
 
@@ -369,13 +369,13 @@ public:
         generateSphereGeometry(vertices, normals, indices);
         // 调用 generateSphereGeometry 生成球体数据。
         sphereIndexCount = static_cast<uint32_t>(indices.size());
-        // 存储索引数量，用于绘制。static_cast<uint32_t>为强制类型转换
+        // 存储索引数量，用于绘制。
 
         // 创建顶点缓冲区（位置）
         VkDeviceSize vertexBufferSize = vertices.size() * sizeof(glm::vec3);
         // 计算顶点缓冲区大小：顶点数 * 每个顶点大小。
         vks::Buffer stagingVertexBuffer;
-        // 创建临时暂存缓冲区，用于 CPU 到 GPU 数据传输。是CPU内存到GPU显存的中间通道，增加传输效率
+        // 创建临时暂存缓冲区，用于 CPU 到 GPU 数据传输。
         VK_CHECK_RESULT(vulkanDevice->createBuffer(
             VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
@@ -383,72 +383,54 @@ public:
             vertexBufferSize,
             vertices.data()));
         // 创建暂存缓冲区：
-        // - 用法：VK_BUFFER_USAGE_TRANSFER_SRC_BIT 传输源。
-        // - 内存属性：VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT  主机可见
-        //             VK_MEMORY_PROPERTY_HOST_COHERENT_BIT 可一致性映射、缓存一致。
-        // - 缓冲区大小：vertexBufferSize。
-        // - 数据来源：vertices 的指针。
+        // - 用法：传输源。
+        // - 内存属性：主机可见、可一致性映射。
         VK_CHECK_RESULT(vulkanDevice->createBuffer(
             VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
             &uniformBuffers.sphereVertex,
             vertexBufferSize));
         // 创建目标顶点缓冲区：
-        // - 用法：VK_BUFFER_USAGE_VERTEX_BUFFER_BIT           顶点缓冲区
-        //         VK_BUFFER_USAGE_TRANSFER_DST_BIT            传输目标。
-        // - 内存属性：VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT     设备本地（GPU 优化）。
-        // - 大小：vertexBufferSize                            缓冲区大小       
+        // - 用法：顶点缓冲区、传输目标。
+        // - 内存属性：设备本地。
         vulkanDevice->copyBuffer(&stagingVertexBuffer, &uniformBuffers.sphereVertex, queue);
-        // 将数据从暂存缓冲区复制到目标缓冲区，使用命令队列。
+        // 复制数据。
         stagingVertexBuffer.destroy();
-        // 销毁暂存缓冲区，释放内存。
+        // 销毁暂存缓冲区。
 
         // 创建法线缓冲区
         VkDeviceSize normalBufferSize = normals.size() * sizeof(glm::vec3);
-        // 计算法线缓冲区大小。
         vks::Buffer stagingNormalBuffer;
-        // 创建法线暂存缓冲区。
         VK_CHECK_RESULT(vulkanDevice->createBuffer(
             VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
             &stagingNormalBuffer,
             normalBufferSize,
             normals.data()));
-        // 创建法线暂存缓冲区，类似顶点缓冲区。
         VK_CHECK_RESULT(vulkanDevice->createBuffer(
             VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
             &uniformBuffers.sphereNormal,
             normalBufferSize));
-        // 创建法线目标缓冲区。
         vulkanDevice->copyBuffer(&stagingNormalBuffer, &uniformBuffers.sphereNormal, queue);
-        // 复制法线数据。
         stagingNormalBuffer.destroy();
-        // 销毁法线暂存缓冲区。
 
         // 创建索引缓冲区
         VkDeviceSize indexBufferSize = indices.size() * sizeof(uint32_t);
-        // 计算索引缓冲区大小。
         vks::Buffer stagingIndexBuffer;
-        // 创建索引暂存缓冲区。
         VK_CHECK_RESULT(vulkanDevice->createBuffer(
             VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
             &stagingIndexBuffer,
             indexBufferSize,
             indices.data()));
-        // 创建索引暂存缓冲区。
         VK_CHECK_RESULT(vulkanDevice->createBuffer(
             VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
             &uniformBuffers.sphereIndex,
             indexBufferSize));
-        // 创建索引目标缓冲区：
-        // - 用法：索引缓冲区、传输目标。
         vulkanDevice->copyBuffer(&stagingIndexBuffer, &uniformBuffers.sphereIndex, queue);
-        // 复制索引数据。
         stagingIndexBuffer.destroy();
-        // 销毁索引暂存缓冲区。
     }
 
     void buildCommandBuffers() {
@@ -561,11 +543,6 @@ public:
 
                 vkCmdPushConstants(drawCmdBuffers[i], pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(glm::vec3), sizeof(Material::PushBlock), &dummyMat);
                 // 推送虚拟材质到片段着色器（可能用于禁用 PBR 着色）。
-
-
-                models.objects[models.objectIndex].draw(drawCmdBuffers[i]);
-                // 绘制当前选中的模型（由 objectIndex 指定）
-
 
                 vkCmdDrawIndexed(drawCmdBuffers[i], sphereIndexCount, 1, 0, 0, j);
                 // 绘制光源球体：
@@ -819,7 +796,9 @@ public:
             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
             &uniformBuffers.globalCounter,
             sizeof(GlobalCounter)));
+        // 创建全局计数器缓冲区
 
+        // 映射缓冲区内存
         VK_CHECK_RESULT(uniformBuffers.object.map());
         VK_CHECK_RESULT(uniformBuffers.params.map());
         VK_CHECK_RESULT(uniformBuffers.clusterData.map());
@@ -845,11 +824,6 @@ public:
         // 设置模型矩阵为绕 Y 轴旋转的矩阵。
         uboMatrices.camPos = camera.position * -1.0f;
         // 设置相机位置为相反值（可能是坐标系调整）。
-        
-        // 更新计算着色器的输出数据
-        memcpy(uniformBuffers.globalCounter.mapped, &globalCounter, sizeof(GlobalCounter));
-        memcpy(uniformBuffers.clusterData.mapped, &clusterData, sizeof(ClusterCountsandOffsets));
-        memcpy(uniformBuffers.clusterIndexList.mapped, &clusterIndexList, sizeof(ClusterIndexList));
         
         memcpy(uniformBuffers.object.mapped, &uboMatrices, sizeof(uboMatrices));
         // 将 uboMatrices 数据复制到映射的缓冲区。
@@ -913,7 +887,6 @@ public:
             for (int i = 0; i < maxnumLights; i++) {
                 uboParams.lights[i].position.x += sin(glm::radians(timer * 360.0f)) * 0.1f;
                 uboParams.lights[i].position.z += cos(glm::radians(timer * 360.0f)) * 0.1f;
-
                 // 使光源沿椭圆路径移动：
                 // - X：增加 sin(时间 * 360°) * 0.1。
                 // - Z：增加 cos(时间 * 360°) * 0.1。
@@ -925,169 +898,17 @@ public:
     }
 
     void updateLightsCluster() {
-        // 函数更新集群光照数据。
-        memset(clusterIndexList.indices, 0, sizeof(clusterIndexList.indices));
-        // 清空光源索引列表。
-        memset(clusterData.cluster, 0, sizeof(clusterData.cluster));
-        // 清空集群计数和偏移。
-        glm::mat4 viewProj = uboMatrices.projection * uboMatrices.view;
-        // 计算视图投影矩阵：投影 * 视图。
-        float zNear = 0.1f;
-        float zFar = 256.0f;
-        // 定义近裁剪面和远裁剪面。
+        // 此函数已迁移到计算着色器 clusterlight.comp
+        // 只需确保计算着色器已正确执行并同步
 
-        std::vector<std::vector<bool>> assignedLights(TOTAL_CLUSTERS, std::vector<bool>(maxnumLights, false));
-        // 创建布尔数组，记录每个集群已分配的光源：
-        // - 尺寸：64 集群 x 64 光源。
-        // - 初始值：false。
-
-        for (int lightIdx = 0; lightIdx < maxnumLights; lightIdx++) {
-            // 遍历所有光源。
-            Light& light = uboParams.lights[lightIdx];
-            // 获取当前光源。
-            float radius = light.colorAndRadius.w;
-            // 获取光源影响半径。
-
-            glm::vec4 clipPos = viewProj * light.position;
-            // 将光源位置变换到裁剪空间。
-            float ndcX = clipPos.x / clipPos.w;
-            float ndcY = clipPos.y / clipPos.w;
-            float ndcZ = clipPos.z / clipPos.w;
-            // 转换为 NDC 坐标（[-1, 1]）。
-
-            float radiusNDC = radius / clipPos.w;
-            // 计算 NDC 空间中的半径。
-
-            float minX = glm::clamp(ndcX - radiusNDC, -1.0f, 1.0f);
-            float maxX = glm::clamp(ndcX + radiusNDC, -1.0f, 1.0f);
-            float minY = glm::clamp(ndcY - radiusNDC, -1.0f, 1.0f);
-            float maxY = glm::clamp(ndcY + radiusNDC, -1.0f, 1.0f);
-            float minZ = glm::clamp(ndcZ - radiusNDC, 0.0f, 1.0f);
-            float maxZ = glm::clamp(ndcZ + radiusNDC, 0.0f, 1.0f);
-            // 计算光源影响的 NDC 范围：
-            // - X/Y：中心 ± 半径，限制在 [-1, 1]。
-            // - Z：中心 ± 半径，限制在 [0, 1]。
-
-            uint32_t minClusterX = static_cast<uint32_t>((minX * 0.5f + 0.5f) * CLUSTER_SIZE_X);
-            uint32_t maxClusterX = static_cast<uint32_t>((maxX * 0.5f + 0.5f) * CLUSTER_SIZE_X);
-            uint32_t minClusterY = static_cast<uint32_t>((minY * 0.5f + 0.5f) * CLUSTER_SIZE_Y);
-            uint32_t maxClusterY = static_cast<uint32_t>((maxY * 0.5f + 0.5f) * CLUSTER_SIZE_Y);
-            uint32_t minClusterZ = static_cast<uint32_t>((log(minZ * (zFar - zNear) + zNear) / log(zFar / zNear)) * CLUSTER_SIZE_Z);
-            uint32_t maxClusterZ = static_cast<uint32_t>((log(maxZ * (zFar - zNear) + zNear) / log(zFar / zNear)) * CLUSTER_SIZE_Z);
-            // 映射 NDC 范围到集群索引：
-            // - X/Y：将 [-1, 1] 映射到 [0, 1]，再乘以 CLUSTER_SIZE_X/Y。
-            // - Z：使用对数深度公式映射到 [0, CLUSTER_SIZE_Z]。
-
-            minClusterX = glm::clamp(minClusterX, 0u, CLUSTER_SIZE_X - 1);
-            maxClusterX = glm::clamp(maxClusterX, 0u, CLUSTER_SIZE_X - 1);
-            minClusterY = glm::clamp(minClusterY, 0u, CLUSTER_SIZE_Y - 1);
-            maxClusterY = glm::clamp(maxClusterY, 0u, CLUSTER_SIZE_Y - 1);
-            minClusterZ = glm::clamp(minClusterZ, 0u, CLUSTER_SIZE_Z - 1);
-            maxClusterZ = glm::clamp(maxClusterZ, 0u, CLUSTER_SIZE_Z - 1);
-            // 限制集群索引在有效范围内：[0, CLUSTER_SIZE_X/Y/Z - 1]。
-
-            for (uint32_t z = minClusterZ; z <= maxClusterZ; ++z) {
-                // 遍历 Z 方向集群。
-                for (uint32_t y = minClusterY; y <= maxClusterY; ++y) {
-                    // 遍历 Y 方向集群。
-                    for (uint32_t x = minClusterX; x <= maxClusterX; ++x) {
-                        // 遍历 X 方向集群。
-                        uint32_t clusterIdx = z * CLUSTER_SIZE_X * CLUSTER_SIZE_Y + y * CLUSTER_SIZE_X + x;
-                        // 计算集群索引：z * 8 * 8 + y * 8 + x。
-                        if (!assignedLights[clusterIdx][lightIdx] && clusterData.cluster[clusterIdx].count < maxnumLights) {
-                            // 检查条件：
-                            // - 该光源未分配到此集群。
-                            // - 集群的光源计数未达上限（64）。
-                            clusterData.cluster[clusterIdx].count++;
-                            // 增加集群的光源计数。
-                            assignedLights[clusterIdx][lightIdx] = true;
-                            // 标记光源已分配。
-                        }
-                    }
-                }
-            }
-        }
-
-        uint32_t runningSum = 0;
-        // 初始化偏移累加器。
-        for (uint32_t i = 0; i < TOTAL_CLUSTERS; i++) {
-            // 遍历所有集群。
-            clusterData.cluster[i].offset = runningSum;
-            // 设置当前集群的偏移为累加值。
-            runningSum += clusterData.cluster[i].count;
-            // 累加光源计数，更新下个偏移。
-        }
-
-        std::vector<uint32_t> tempOffsets(TOTAL_CLUSTERS, 0);
-        // 创建临时偏移数组，初始化为 0，记录每个集群已分配的光源数。
-        for (int lightIdx = 0; lightIdx < maxnumLights; lightIdx++) {
-            // 再次遍历所有光源，填充索引列表。
-            Light& light = uboParams.lights[lightIdx];
-            float radius = light.colorAndRadius.w;
-
-            glm::vec4 clipPos = viewProj * light.position;
-            float ndcX = clipPos.x / clipPos.w;
-            float ndcY = clipPos.y / clipPos.w;
-            float ndcZ = clipPos.z / clipPos.w;
-
-            float radiusNDC = radius / clipPos.w;
-
-            float minX = glm::clamp(ndcX - radiusNDC, -1.0f, 1.0f);
-            float maxX = glm::clamp(ndcX + radiusNDC, -1.0f, 1.0f);
-            float minY = glm::clamp(ndcY - radiusNDC, -1.0f, 1.0f);
-            float maxY = glm::clamp(ndcY + radiusNDC, -1.0f, 1.0f);
-            float minZ = glm::clamp(ndcZ - radiusNDC, 0.0f, 1.0f);
-            float maxZ = glm::clamp(ndcZ + radiusNDC, 0.0f, 1.0f);
-            // 重复计算光源的 NDC 范围（与之前相同）。
-            //minZ = glm::max(minZ, 0.0001f); // 避免 log(0)
-            //maxZ = glm::max(maxZ, 0.0001f);
-            uint32_t minClusterX = static_cast<uint32_t>((minX * 0.5f + 0.5f) * CLUSTER_SIZE_X);
-            uint32_t maxClusterX = static_cast<uint32_t>((maxX * 0.5f + 0.5f) * CLUSTER_SIZE_X);
-            uint32_t minClusterY = static_cast<uint32_t>((minY * 0.5f + 0.5f) * CLUSTER_SIZE_Y);
-            uint32_t maxClusterY = static_cast<uint32_t>((maxY * 0.5f + 0.5f) * CLUSTER_SIZE_Y);
-            uint32_t minClusterZ = static_cast<uint32_t>((log(minZ * (zFar - zNear) + zNear) / log(zFar / zNear)) * CLUSTER_SIZE_Z);
-            uint32_t maxClusterZ = static_cast<uint32_t>((log(maxZ * (zFar - zNear) + zNear) / log(zFar / zNear)) * CLUSTER_SIZE_Z);
-            // 重复映射到集群索引。
-
-            minClusterX = glm::clamp(minClusterX, 0u, CLUSTER_SIZE_X - 1);
-            maxClusterX = glm::clamp(maxClusterX, 0u, CLUSTER_SIZE_X - 1);
-            minClusterY = glm::clamp(minClusterY, 0u, CLUSTER_SIZE_Y - 1);
-            maxClusterY = glm::clamp(maxClusterY, 0u, CLUSTER_SIZE_Y - 1);
-            minClusterZ = glm::clamp(minClusterZ, 0u, CLUSTER_SIZE_Z - 1);
-            maxClusterZ = glm::clamp(maxClusterZ, 0u, CLUSTER_SIZE_Z - 1);
-            // 重复限制索引范围。
-
-            for (uint32_t z = minClusterZ; z <= maxClusterZ; ++z) {
-                for (uint32_t y = minClusterY; y <= maxClusterY; ++y) {
-                    for (uint32_t x = minClusterX; x <= maxClusterX; ++x) {
-                        uint32_t clusterIdx = z * CLUSTER_SIZE_X * CLUSTER_SIZE_Y + y * CLUSTER_SIZE_X + x;
-                        // 计算集群索引。
-                        uint32_t offset = clusterData.cluster[clusterIdx].offset + tempOffsets[clusterIdx];
-                        // 计算索引列表中的偏移：集群偏移 + 已分配光源数。
-                        if (offset < lightIndexListnum && tempOffsets[clusterIdx] < clusterData.cluster[clusterIdx].count) {
-                            // 检查条件：
-                            // - 偏移未超出索引列表大小（4096）。
-                            // - 集群未分配满。
-                            clusterIndexList.indices[offset].clusterIndexList = lightIdx;
-                            // 将光源索引存储到索引列表。
-                            tempOffsets[clusterIdx]++;
-                            // 增加集群的已分配光源计数。
-                        }
-                    }
-                }
-            }
-        }
-
-        //memcpy(uniformBuffers.params.mapped, &uboParams, sizeof(uboParams));
-        //// 更新光源数据缓冲区（可能是多余的，因为 updateLights 已更新）。
-        memcpy(uniformBuffers.clusterData.mapped, &clusterData, sizeof(clusterData));
-        // 更新集群计数和偏移缓冲区。
-        memcpy(uniformBuffers.clusterIndexList.mapped, &clusterIndexList, sizeof(clusterIndexList));
-        // 更新光源索引列表缓冲区。
+        // 更新集群数据缓冲区
+        memcpy(uniformBuffers.clusterData.mapped, &clusterData, sizeof(ClusterCountsandOffsets));
+        memcpy(uniformBuffers.clusterIndexList.mapped, &clusterIndexList, sizeof(ClusterIndexList));
     }
 
     void runCompute() {
         // 重置全局计数器
+        GlobalCounter globalCounter;
         globalCounter.counter = 0;
         memcpy(uniformBuffers.globalCounter.mapped, &globalCounter, sizeof(GlobalCounter));
         
@@ -1105,7 +926,7 @@ public:
         vkCmdBindDescriptorSets(computeCmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelineLayout, 0, 1, &computeDescriptorSet, 0, nullptr);
         
         // 调度计算着色器
-        vkCmdDispatch(computeCmdBuffer, CLUSTER_SIZE_X, CLUSTER_SIZE_Y, CLUSTER_SIZE_Z);
+        vkCmdDispatch(computeCmdBuffer, 1, 1, 1); // 由于[numthreads(NUM_LIGHTS,1,1)], 分派1组即可覆盖所有光源
         
         // 结束命令缓冲区记录
         VK_CHECK_RESULT(vkEndCommandBuffer(computeCmdBuffer));
@@ -1159,11 +980,11 @@ public:
         
         // 创建计算描述符集布局
         std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {
-            vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT, 0),
-            vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT, 1),
-            vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT, 2),
-            vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT, 3),
-            vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT, 4)
+            vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT, 0), // globalCounter
+            vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT, 1), // lights (uboParams)
+            vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT, 2), // clusterData
+            vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT, 3), // clusterIndexList
+            vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT, 4)  // ubo (matrices)
         };
         
         VkDescriptorSetLayoutCreateInfo descriptorLayout = vks::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings.data(), static_cast<uint32_t>(setLayoutBindings.size()));
@@ -1185,9 +1006,9 @@ public:
         // 更新计算描述符集
         std::vector<VkWriteDescriptorSet> computeWriteDescriptorSets = {
             vks::initializers::writeDescriptorSet(computeDescriptorSet, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 0, &uniformBuffers.globalCounter.descriptor),
-            vks::initializers::writeDescriptorSet(computeDescriptorSet, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, &uniformBuffers.clusterData.descriptor),
-            vks::initializers::writeDescriptorSet(computeDescriptorSet, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2, &uniformBuffers.clusterIndexList.descriptor),
-            vks::initializers::writeDescriptorSet(computeDescriptorSet, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 3, &uniformBuffers.params.descriptor),
+            vks::initializers::writeDescriptorSet(computeDescriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, &uniformBuffers.params.descriptor),
+            vks::initializers::writeDescriptorSet(computeDescriptorSet, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2, &uniformBuffers.clusterData.descriptor),
+            vks::initializers::writeDescriptorSet(computeDescriptorSet, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 3, &uniformBuffers.clusterIndexList.descriptor),
             vks::initializers::writeDescriptorSet(computeDescriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 4, &uniformBuffers.object.descriptor)
         };
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(computeWriteDescriptorSets.size()), computeWriteDescriptorSets.data(), 0, nullptr);
@@ -1233,8 +1054,8 @@ public:
         if (!paused) {
             // 如果未暂停，更新光源和集群数据。
             updateLights();
-            updateLightsCluster();
         }
+        runCompute(); // 执行计算着色器更新集群
         draw();
         // 执行绘制。
     }
