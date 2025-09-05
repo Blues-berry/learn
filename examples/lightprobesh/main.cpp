@@ -1,108 +1,145 @@
 
+#include "vulkanexamplebase.h"  // 引入Vulkan基础示例类
+#include "VulkanglTFModel.h"    // 引入glTF模型加载类
 
-#include "vulkanexamplebase.h"
-#include "VulkanglTFModel.h"
+// SH 系数 (2阶 SH, 9 个 vec3 系数，对应 RGB 通道)
+struct SHCoefficients {
+    glm::vec3 l00, l1m1, l10, l1p1, l2m2, l2m1, l20, l2p1, l2p2;
+} shCoeffs;
+
+// UI 新增：对比模式开关
+bool compareMode = false;  // 默认关闭
+
+// 材质定义结构体
 struct Material {
-	
-	struct PushBlock {
-		float roughness = 0.0f;
-		float metallic = 0.0f;
-		float specular = 0.0f;
-		float r, g, b;
-	} params;
-	std::string name;
-	Material() {};
-	Material(std::string n, glm::vec3 c) : name(n) {
-		params.r = c.r;
-		params.g = c.g;
-		params.b = c.b;
-	};
+    // 材质参数块
+    struct PushBlock {
+        float roughness = 0.0f;  // 粗糙度
+        float metallic = 0.0f;   // 金属度
+        float specular = 0.0f;   // 镜面反射强度
+        float r, g, b;           // RGB颜色分量
+    } params;
+    
+    std::string name;  // 材质名称
+    
+    Material() {};  // 默认构造函数
+    
+    // 带参数的构造函数
+    Material(std::string n, glm::vec3 c) : name(n) {
+        params.r = c.r;  // 设置红色分量
+        params.g = c.g;  // 设置绿色分量
+        params.b = c.b;  // 设置蓝色分量
+    };
 };
 
+/**
+ * 基于图像的物理渲染(PBR)示例类
+ * 实现了基于图像的照明(IBL)和球谐函数渲染
+ */
 class VulkanExample : public VulkanExampleBase
 {
 public:
-	std::vector<std::string> skyboxNames;
-	int32_t skyboxIndex = 0;
+
+    // 天空盒相关成员
+	std::vector<std::string> skyboxNames;  // 天空盒名称列表
+	int32_t skyboxIndex = 0;              // 当前选中的天空盒索引
 	
 	// 渲染模式：0=IBL, 1=球谐函数
-	int32_t renderMode = 0;
+	int32_t renderMode = 1;
 	std::vector<std::string> renderModeNames = {"IBL", "harmonics"};
 
+    // 纹理资源结构体
 	struct Textures {
-		vks::TextureCubeMap environmentCube;
-		vks::TextureCubeMap environmentCube2; 
-        vks::TextureCubeMap environmentCube3; 
-        vks::TextureCubeMap environmentCube4; 
-        vks::TextureCubeMap environmentCube5; 
+		vks::TextureCubeMap environmentCube;     // 环境贴图
+		vks::TextureCubeMap environmentCube2;     // 第二环境贴图
+        vks::TextureCubeMap environmentCube3;     // 第三环境贴图
+        vks::TextureCubeMap environmentCube4;     // 第四环境贴图
+        vks::TextureCubeMap environmentCube5;     // 第五环境贴图
 		
-		vks::Texture2D lutBrdf;
-		vks::TextureCubeMap irradianceCube;
-		vks::TextureCubeMap prefilteredCube;
+		vks::Texture2D lutBrdf;                  // BRDF查找表
+		vks::TextureCubeMap irradianceCube;      // 辐射度贴图
+		vks::TextureCubeMap prefilteredCube;     // 预过滤贴图
 	} textures;
 
+    // 模型资源结构体
 	struct Meshes {
-		vkglTF::Model skybox;
-		std::vector<vkglTF::Model> objects;
-		int32_t objectIndex = 0;
+		vkglTF::Model skybox;                    // 天空盒模型
+		std::vector<vkglTF::Model> objects;     // 物体模型列表
+		int32_t objectIndex = 0;                // 当前选中的物体索引
 	} models;
 
+    // Uniform缓冲区
 	struct {
 
-		vks::Buffer object;
-		vks::Buffer skybox;
-		vks::Buffer params;
+		vks::Buffer object;      // 物体uniform缓冲区
+		vks::Buffer skybox;      // 天空盒uniform缓冲区
+		vks::Buffer params;      // 参数uniform缓冲区
+		vks::Buffer sh;			// Uniform buffer for SH
 	} uniformBuffers;
 
+    // 矩阵uniform结构体
 	struct UBOMatrices {
-		glm::mat4 projection;
-		glm::mat4 model;
-		glm::mat4 view;
-		glm::vec3 camPos;
+		glm::mat4 projection;    // 投影矩阵
+		glm::mat4 model;        // 模型矩阵
+		glm::mat4 view;         // 视图矩阵
+		glm::vec3 camPos;       // 相机位置
 	} uboMatrices;
 
+    // 参数uniform结构体 定义 UBOParams 结构体，存储四个光源位置、曝光度和伽马值。
 	struct UBOParams {
-		glm::vec4 lights[4];
-		float exposure = 4.5f;
-		float gamma = 2.2f;
+		glm::vec4 lights[4];    // 光源参数
+		float exposure = 4.5f;   // 曝光度
+		float gamma = 2.2f;     // 伽马值
 	} uboParams;
 
+    // 管道对象 定义渲染管线结构体，包含天空盒和 PBR 对象的管线。
 	struct {
-		VkPipeline skybox{ VK_NULL_HANDLE };
-		VkPipeline pbr{ VK_NULL_HANDLE };
+		VkPipeline skybox{ VK_NULL_HANDLE };    // 天空盒渲染管道
+		VkPipeline pbr{ VK_NULL_HANDLE };      // PBR渲染管道
+		VkPipeline sh{ VK_NULL_HANDLE };      // 球谐函数（SH）渲染管道
 	} pipelines;
 
+    // 描述符集 定义描述符集结构体，包含对象和天空盒的描述符集
 	struct {
-		VkDescriptorSet object{ VK_NULL_HANDLE };
-		VkDescriptorSet skybox{ VK_NULL_HANDLE };
-		VkDescriptorSet skybox2{ VK_NULL_HANDLE }; 
+		VkDescriptorSet object{ VK_NULL_HANDLE };     // 物体描述符集
+		VkDescriptorSet skybox{ VK_NULL_HANDLE };    // 天空盒描述符集
 	
 	} descriptorSets;
-
-	VkPipelineLayout pipelineLayout{ VK_NULL_HANDLE };
-	VkDescriptorSetLayout descriptorSetLayout{ VK_NULL_HANDLE };
+	// 定义管线布局和描述符集布局，用于管理着色器资源绑定
+	VkPipelineLayout pipelineLayout{ VK_NULL_HANDLE };         // 管道布局
+	VkDescriptorSetLayout descriptorSetLayout{ VK_NULL_HANDLE }; // 描述符集布局
 
 	
-	std::vector<Material> materials;
-	int32_t materialIndex = 0;
 
 
-	std::vector<std::string> materialNames;
-	std::vector<std::string> objectNames;
+    // 材质相关成员
+	std::vector<Material> materials;           // 材质列表
+	int32_t materialIndex = 0;                 // 当前选中的材质索引
 
+	// 定义材质名称和对象名称列表，用于 UI 显示。
+	std::vector<std::string> materialNames;     // 材质名称列表
+	std::vector<std::string> objectNames;      // 物体名称列表
+
+    /**
+     * 构造函数
+     * 初始化示例的基本设置
+     */
 	VulkanExample() : VulkanExampleBase()
 	{
-		title = "PBR with image based lighting";
+		title = "IBL and SH lighting";  // 设置窗口标题
 
+        // 设置相机参数
 		camera.type = Camera::CameraType::firstperson;
 		camera.movementSpeed = 4.0f;
 		camera.setPerspective(60.0f, (float)width / (float)height, 0.1f, 256.0f);
 		camera.rotationSpeed = 0.25f;
 
+        // 设置相机初始位置和朝向
 		camera.setRotation({ -3.75f, 180.0f, 0.0f });
 		camera.setPosition({ 0.55f, 0.85f, 12.0f });
 
 		
+        // 添加预定义的金属材质
 		materials.push_back(Material("Gold", glm::vec3(1.0f, 0.765557f, 0.336057f)));
 		materials.push_back(Material("Copper", glm::vec3(0.955008f, 0.637427f, 0.538163f)));
 		materials.push_back(Material("Chromium", glm::vec3(0.549585f, 0.556114f, 0.554256f)));
@@ -121,23 +158,25 @@ public:
 			materialNames.push_back(material.name);
 		}
 		objectNames = { "Sphere", "Teapot", "Torusknot", "Venus" };
-
+		// 设置默认材质索引为 9（对应“Black”材质）。
 		materialIndex = 9;
-		
+		// 初始化天空盒名称列表（无天空盒、Pisa、Grand Canyon、Uffizi），默认选择索引 1（Pisa）。
 		skyboxNames = {"NO Skybox", "Pisa", "Grand Canyon","uffizi_cube"};
 		skyboxIndex = 1;
 	}
-
+		// 析构函数，释放 Vulkan 资源，包括管线、管线布局、描述符集布局、统一缓冲区和纹理。
 	~VulkanExample()
 	{
 		if (device) {
 			vkDestroyPipeline(device, pipelines.skybox, nullptr);
 			vkDestroyPipeline(device, pipelines.pbr, nullptr);
+			vkDestroyPipeline(device, pipelines.sh, nullptr);
 			vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
 			vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 			uniformBuffers.object.destroy();
 			uniformBuffers.skybox.destroy();
 			uniformBuffers.params.destroy();
+			uniformBuffers.sh.destroy();
 			textures.environmentCube.destroy();
 			textures.environmentCube2.destroy();
             textures.environmentCube3.destroy();
@@ -148,25 +187,23 @@ public:
 			textures.lutBrdf.destroy();
 		}
 	}
-
+	// 获取启用的功能，检查设备是否支持采样器各向异性。
 	virtual void getEnabledFeatures()
 	{
 		if (deviceFeatures.samplerAnisotropy) {
 			enabledFeatures.samplerAnisotropy = VK_TRUE;
 		}
 	}
-
+	// 定义命令缓冲区开始信息，用于初始化命令缓冲区录制。
 	void buildCommandBuffers()
 	{
     
 		VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
-
-    
 		VkClearValue clearValues[2];
-		clearValues[0].color = { { 0.1f, 0.1f, 0.1f, 1.0f } };  
-		clearValues[1].depthStencil = { 1.0f, 0 };            
+		clearValues[0].color = { { 0.1f, 0.1f, 0.1f, 1.0f } };  // 颜色缓冲区清除为深灰色（0.1, 0.1, 0.1, 1.0）
+		clearValues[1].depthStencil = { 1.0f, 0 };             	// 深度缓冲区清除为 1.0，模板缓冲区清除为 0
 
-    
+		// 配置渲染通道开始信息，指定渲染通道、渲染区域（全屏）、清除值等。
 		VkRenderPassBeginInfo renderPassBeginInfo = vks::initializers::renderPassBeginInfo();
 		renderPassBeginInfo.renderPass = renderPass;              
 		renderPassBeginInfo.renderArea.offset.x = 0;            
@@ -176,56 +213,62 @@ public:
 		renderPassBeginInfo.clearValueCount = 2;                
 		renderPassBeginInfo.pClearValues = clearValues;         
 
-    
+		
 		for (size_t i = 0; i < drawCmdBuffers.size(); ++i)
 		{
-			
+			// 遍历所有绘制命令缓冲区，设置当前帧缓冲区。
+			// 将当前帧的渲染目标绑定到渲染通道 drawCmdBuffers[i] 是录制渲染指令的容器，与 frameBuffers[i] 一一绑定
 			renderPassBeginInfo.framebuffer = frameBuffers[i];
-
+			// 开始录制命令缓冲区，检查 Vulkan API 调用是否成功。
 			VK_CHECK_RESULT(vkBeginCommandBuffer(drawCmdBuffers[i], &cmdBufInfo));
-
+			// 开始渲染通道，指定渲染命令内联执行
 			vkCmdBeginRenderPass(drawCmdBuffers[i], &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
-
+			// 设置设置视口，覆盖整个窗口，指定宽度、高度和深度范围（0.0 到 1.0）
 			VkViewport viewport = vks::initializers::viewport((float)width,	(float)height, 0.0f, 1.0f);
 			vkCmdSetViewport(drawCmdBuffers[i], 0, 1, &viewport);
-
+			// 设置裁剪矩形，覆盖整个窗口 
 			VkRect2D scissor = vks::initializers::rect2D(width,	height,	0, 0);
 			vkCmdSetScissor(drawCmdBuffers[i], 0, 1, &scissor);
 
-			// Skybox rendering
+			// 如果选择了天空盒（skyboxIndex > 0），绑定天空盒描述符集和管线，绘制天空盒模型
 			if (skyboxIndex > 0) {
-				// Bind descriptor sets and pipeline for skybox
+				// 绑定对象的描述符集，用于渲染 3D 对象
 				vkCmdBindDescriptorSets(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets.skybox, 0, NULL);
 				vkCmdBindPipeline(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.skybox);
 				models.skybox.draw(drawCmdBuffers[i]);
 			}
 
-			// Objects rendering
 			vkCmdBindDescriptorSets(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets.object, 0, NULL);
-			// 根据渲染模式选择不同的渲染逻辑
+			// 根据渲染模式（IBL 或球谐函数）绑定 PBR 管线（当前代码中两种模式都使用相同的 PBR 管线，是待实现的逻辑）。
 			if (renderMode == 0) {
 				// IBL渲染模式
 				vkCmdBindPipeline(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.pbr);
 			} else {
 				// 球谐函数渲染模式
-				vkCmdBindPipeline(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.pbr); // 暂时使用相同的pipeline，后续可以添加专门的球谐函数pipeline
+				vkCmdBindPipeline(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.sh); // 暂时使用相同的pipeline，后续可以添加专门的球谐函数pipeline
 			}
-			vkCmdBindPipeline(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.pbr);
+			// vkCmdBindPipeline(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.pbr);
 
-			// Render a line of objects with the selected material and vary roughness/metallic material parameters
+			// 循环渲染 10 个对象，沿 X 轴排列，动态调整粗糙度和金属度（从左到右逐渐变化）。
 			Material mat = materials[materialIndex];
 			const uint32_t objcount = 10;
 			for (uint32_t x = 0; x < objcount; x++) {
 				glm::vec3 pos = glm::vec3(float(x - (objcount / 2.0f)) * 2.15f, 0.0f, 0.0f);
 				mat.params.roughness = 1.0f-glm::clamp((float)x / (float)objcount, 0.005f, 1.0f);
 				mat.params.metallic = glm::clamp((float)x / (float)objcount, 0.005f, 1.0f);
+				// 通过推送常量将对象位置传递给顶点着色器，材质参数传递给片段着色器。
+				// 推送常量（Push Constants）机制
+				// 作用：高效传递小块数据到着色器，无需描述符集（Descriptor Sets）或 Uniform 缓冲区。
+				// 优势：低开销，适合每帧频繁更新的数据（如模型位置、材质参数）。
 				vkCmdPushConstants(drawCmdBuffers[i], pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::vec3), &pos);
 				vkCmdPushConstants(drawCmdBuffers[i], pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(glm::vec3), sizeof(Material::PushBlock), &mat);
+				// 绘制当前选中的对象模型。
 				models.objects[models.objectIndex].draw(drawCmdBuffers[i]);
 
 			}
+			// 绘制用户界面（UI），包含材质选择、对象选择等控件。
 			drawUI(drawCmdBuffers[i]);
-
+			// 结束渲染通道
 			vkCmdEndRenderPass(drawCmdBuffers[i]);
 
 			VK_CHECK_RESULT(vkEndCommandBuffer(drawCmdBuffers[i]));
@@ -234,16 +277,17 @@ public:
 
 	void loadAssets()
 	{
+		// 定义 glTF 模型加载标志，预变换顶点并翻转 Y 轴（适配 Vulkan 坐标系）。
 		uint32_t glTFLoadingFlags = vkglTF::FileLoadingFlags::PreTransformVertices | vkglTF::FileLoadingFlags::FlipY;
-		// Skybox
+		// 加载天空盒模型（立方体 glTF 文件）。
 		models.skybox.loadFromFile(getAssetPath() + "models/cube.gltf", vulkanDevice, queue, glTFLoadingFlags);
-		// Objects
+		// 加载对象模型（球体、茶壶、环面结、金星雕像）。
 		std::vector<std::string> filenames = { "sphere.gltf", "teapot.gltf", "torusknot.gltf", "venus.gltf" };
 		models.objects.resize(filenames.size());
 		for (size_t i = 0; i < filenames.size(); i++) {
 			models.objects[i].loadFromFile(getAssetPath() + "models/" + filenames[i], vulkanDevice, queue, glTFLoadingFlags);
 		}
-		// HDR cubemap
+		// HDR cubemap 加载环境立方体贴图（Pisa、Grand Canyon、Uffizi），使用 16 位浮点格式
 		textures.environmentCube.loadFromFile(getAssetPath() + "textures/hdr/pisa_cube.ktx", VK_FORMAT_R16G16B16A16_SFLOAT, vulkanDevice, queue);
 		textures.environmentCube2.loadFromFile(getAssetPath() + "textures/hdr/gcanyon_cube.ktx", VK_FORMAT_R16G16B16A16_SFLOAT, vulkanDevice, queue);
         textures.environmentCube3.loadFromFile(getAssetPath() + "textures/hdr/uffizi_cube.ktx", VK_FORMAT_R16G16B16A16_SFLOAT, vulkanDevice, queue);
@@ -254,29 +298,36 @@ public:
 
 	void setupDescriptors()
 	{
-		// Descriptor Pool
+		// Descriptor Pool 定义描述符池大小，分配 4 个统一缓冲区和 6 个组合图像采样器。
 		std::vector<VkDescriptorPoolSize> poolSizes = {
 			vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 4),
 			vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 6)
 		};
-		VkDescriptorPoolCreateInfo descriptorPoolInfo =	vks::initializers::descriptorPoolCreateInfo(poolSizes, 2);
+		// 创建描述符池，分配 2 个描述符集。
+		// 4 个统一缓冲区和 6 个组合图像采样器被分配给下面两个符集
+		// 物体渲染描述符集 ( descriptorSets.object )
+		// 绑定天空盒纹理和采样器。
+		VkDescriptorPoolCreateInfo descriptorPoolInfo =	vks::initializers::descriptorPoolCreateInfo(poolSizes, 3);
 		VK_CHECK_RESULT(vkCreateDescriptorPool(device, &descriptorPoolInfo, nullptr, &descriptorPool));
 
-		// Descriptor set layout
+		// Descriptor set layout 
+		// 定义描述符集布局绑定，包括 2 个统一缓冲区（矩阵和参数）和 3 个图像采样器（辐照度、BRDF、预过滤贴图）。
 		std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {
 			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0),
 			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT, 1),
 			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 2),
 			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 3),
 			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 4),
+			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT, 5),  // SH coefficients
 		};
+		// 创建描述符集布局
 		VkDescriptorSetLayoutCreateInfo descriptorLayout = 	vks::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings);
 		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &descriptorSetLayout));
 
-		// Descriptor sets
+		// Descriptor sets 为对象分配描述符集。
 		VkDescriptorSetAllocateInfo allocInfo = vks::initializers::descriptorSetAllocateInfo(descriptorPool, &descriptorSetLayout, 1);
 
-		// Objects
+		// Objects 配置对象描述符集，绑定统一缓冲区和纹理资源，并更新描述符集
 		VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSets.object));
 		std::vector<VkWriteDescriptorSet> writeDescriptorSets = {
 			vks::initializers::writeDescriptorSet(descriptorSets.object, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &uniformBuffers.object.descriptor),
@@ -284,10 +335,11 @@ public:
 			vks::initializers::writeDescriptorSet(descriptorSets.object, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2, &textures.irradianceCube.descriptor),
 			vks::initializers::writeDescriptorSet(descriptorSets.object, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 3, &textures.lutBrdf.descriptor),
 			vks::initializers::writeDescriptorSet(descriptorSets.object, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4, &textures.prefilteredCube.descriptor),
+			vks::initializers::writeDescriptorSet(descriptorSets.object, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 5, &uniformBuffers.sh.descriptor),
 		};
 		vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, NULL);
 
-		// Sky box
+		// Sky box 为天空盒分配描述符集，绑定天空盒统一缓冲区和环境贴图，并更新描述符集。
 		VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSets.skybox));
 		writeDescriptorSets = {
 			vks::initializers::writeDescriptorSet(descriptorSets.skybox, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &uniformBuffers.skybox.descriptor),
@@ -299,24 +351,25 @@ public:
 
 	void preparePipelines()
 	{
+		// 配置输入组装状态，使用三角形列表拓扑。
 		VkPipelineInputAssemblyStateCreateInfo inputAssemblyState =
 			vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
-
+		// 配置光栅化状态，填充模式，无背面剔除，逆时针为正面。
 		VkPipelineRasterizationStateCreateInfo rasterizationState =
 			vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE);
-
+		// 配置颜色混合状态，禁用混合	
 		VkPipelineColorBlendAttachmentState blendAttachmentState =
 			vks::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE);
-
+		// 配置颜色混合状态，指定一个附件。
 		VkPipelineColorBlendStateCreateInfo colorBlendState =
 			vks::initializers::pipelineColorBlendStateCreateInfo(1, &blendAttachmentState);
-
+		// 配置深度和模板状态，初始禁用深度测试和写入。
 		VkPipelineDepthStencilStateCreateInfo depthStencilState =
 			vks::initializers::pipelineDepthStencilStateCreateInfo(VK_FALSE, VK_FALSE, VK_COMPARE_OP_LESS_OR_EQUAL);
-
+		// 配置视口状态，指定一个视口和裁剪矩形。
 		VkPipelineViewportStateCreateInfo viewportState =
 			vks::initializers::pipelineViewportStateCreateInfo(1, 1);
-
+		// 配置多重采样状态，禁用多重采样（单采样）。
 		VkPipelineMultisampleStateCreateInfo multisampleState =
 			vks::initializers::pipelineMultisampleStateCreateInfo(VK_SAMPLE_COUNT_1_BIT);
 
@@ -365,6 +418,15 @@ public:
 		depthStencilState.depthWriteEnable = VK_TRUE;
 		depthStencilState.depthTestEnable = VK_TRUE;
 		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipelines.pbr));
+		// SH pipeline
+		shaderStages[0] = loadShader(getShadersPath() + "lightprobesh/lightprobesh.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
+		shaderStages[1] = loadShader(getShadersPath() + "lightprobesh/lightprobesh_sh.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
+		// Enable depth test and write
+		depthStencilState.depthWriteEnable = VK_TRUE;
+		depthStencilState.depthTestEnable = VK_TRUE;
+		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipelines.sh));
+			
+			
 	}
 
 	// Generate a BRDF integration map used as a look-up-table (stores roughness / NdotV)
@@ -1353,12 +1415,18 @@ public:
 			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
 			&uniformBuffers.params,
 			sizeof(uboParams)));
-
+		// SH uniform buffer
+		VK_CHECK_RESULT(vulkanDevice->createBuffer(
+			VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+			&uniformBuffers.sh,
+			sizeof(SHCoefficients)));
+		
 		// Map persistent
 		VK_CHECK_RESULT(uniformBuffers.object.map());
 		VK_CHECK_RESULT(uniformBuffers.skybox.map());
 		VK_CHECK_RESULT(uniformBuffers.params.map());
-
+		VK_CHECK_RESULT(uniformBuffers.sh.map());
 		updateUniformBuffers();
 		updateParams();
 	}
@@ -1371,9 +1439,9 @@ public:
 		uboMatrices.model = glm::rotate(glm::mat4(1.0f), glm::radians(90.0f + (models.objectIndex == 1 ? 45.0f : 0.0f)), glm::vec3(0.0f, 1.0f, 0.0f));
 		uboMatrices.camPos = camera.position * -1.0f;
 		memcpy(uniformBuffers.object.mapped, &uboMatrices, sizeof(uboMatrices));
-
 		// Skybo-x
 		uboMatrices.model = glm::mat4(glm::mat3(camera.matrices.view));
+
 		memcpy(uniformBuffers.skybox.mapped, &uboMatrices, sizeof(uboMatrices));
 	}
 
@@ -1422,19 +1490,6 @@ public:
 	virtual void loadSkyboxTexture() {
 		// 根据 skyboxIndex 选择正确的环境贴图
 		VkDescriptorImageInfo* currentSkyboxDescriptor = nullptr;
-		// if (skyboxIndex == 0) {
-		// 	// 无天空盒
-		// 	currentSkyboxDescriptor = nullptr;
-		// } else if (skyboxIndex == 1) {
-		// 	// Pisa天空盒
-		// 	currentSkyboxDescriptor = &textures.environmentCube.descriptor;
-		// } else if (skyboxIndex == 2) {
-		// 	// Grand Canyon天空盒
-		// 	currentSkyboxDescriptor = &textures.environmentCube2.descriptor;
-		// } else if (skyboxIndex == 3) {
-		// 	// 第三个天空盒
-		// 	currentSkyboxDescriptor = &textures.environmentCube3.descriptor;
-		// }
 		switch(skyboxIndex) {
         case 0: currentSkyboxDescriptor = nullptr; break;
         case 1: currentSkyboxDescriptor = &textures.environmentCube.descriptor; break;
@@ -1467,6 +1522,7 @@ public:
 		
 		// 更新 uniform buffer 并重建命令缓冲区
 		updateUniformBuffers();
+		generateSHCoefficients();  // 更新 SH 系数
 		buildCommandBuffers();
 	}
 
@@ -1496,6 +1552,218 @@ public:
 			}
 		}
 	}
+	// 辅助函数：获取 SH basis (包含 normalization，常量匹配 LearnOpenGL)
+	std::vector<float> getSHBasis(const glm::vec3& dir) {
+		float x = dir.x, y = dir.y, z = dir.z;
+		float x2 = x * x, y2 = y * y, z2 = z * z;
+		return {
+			0.282095f,                  // l00
+			0.488603f * y,              // l1m1
+			0.488603f * z,              // l10
+			0.488603f * x,              // l1p1
+			1.092548f * x * y,          // l2m2
+			1.092548f * y * z,          // l2m1
+			0.315392f * (3.0f * z2 - 1.0f), // l20
+			1.092548f * x * z,          // l2p1
+			0.546274f * (x2 - y2)       // l2p2
+		};
+	}
+glm::vec3 sampleCubemap(float* data, uint32_t width, uint32_t height, const glm::vec3& dir) {
+	glm::vec3 abs_dir = glm::abs(dir);
+	float max_axis = glm::max(glm::max(abs_dir.x, abs_dir.y), abs_dir.z);
+	glm::vec3 norm_dir = dir / max_axis;
+
+	int face = 0;
+	float u, v;
+
+	if (max_axis == abs_dir.x) {
+		if (dir.x > 0) { // POS_X
+			face = 0;
+			u = 1.0f - (norm_dir.z + 1.0f) * 0.5f;
+			v = (norm_dir.y + 1.0f) * 0.5f;
+		}
+		else { // NEG_X
+			face = 1;
+			u = (norm_dir.z + 1.0f) * 0.5f;
+			v = (norm_dir.y + 1.0f) * 0.5f;
+		}
+	}
+	else if (max_axis == abs_dir.y) {
+		if (dir.y > 0) { // POS_Y
+			face = 2;
+			u = (norm_dir.x + 1.0f) * 0.5f;
+			v = 1.0f - (norm_dir.z + 1.0f) * 0.5f;
+		}
+		else { // NEG_Y
+			face = 3;
+			u = (norm_dir.x + 1.0f) * 0.5f;
+			v = (norm_dir.z + 1.0f) * 0.5f;
+		}
+	}
+	else {
+		if (dir.z > 0) { // POS_Z
+			face = 4;
+			u = (norm_dir.x + 1.0f) * 0.5f;
+			v = (norm_dir.y + 1.0f) * 0.5f;
+		}
+		else { // NEG_Z
+			face = 5;
+			u = 1.0f - (norm_dir.x + 1.0f) * 0.5f;
+			v = (norm_dir.y + 1.0f) * 0.5f;
+		}
+	}
+
+	int ix = static_cast<int>(u * (width - 1));
+	int iy = static_cast<int>(v * (height - 1));
+	ix = glm::clamp(ix, 0, static_cast<int>(width - 1));
+	iy = glm::clamp(iy, 0, static_cast<int>(height - 1));
+
+	size_t offset = face * width * height * 4;
+	size_t idx = offset + (iy * width + ix) * 4;
+
+	return glm::vec3(data[idx], data[idx + 1], data[idx + 2]);
+}
+
+void generateSHCoefficients() {}
+// 	void generateSHCoefficients() {
+// 		vks::TextureCubeMap* currentCube = nullptr;
+// 		switch (skyboxIndex) {
+// 		case 1: currentCube = &textures.environmentCube; break;
+// 		case 2: currentCube = &textures.environmentCube2; break;
+// 		case 3: currentCube = &textures.environmentCube3; break;
+// 		default:
+// 			// 无天空盒，设置系数为零
+// 			shCoeffs = SHCoefficients{};
+// 			memcpy(uniformBuffers.sh.mapped, &shCoeffs, sizeof(SHCoefficients));
+// 			return;
+// 		}
+
+// 		if (!currentCube) return;
+
+// 		uint32_t width = currentCube->width;
+// 		uint32_t height = currentCube->height;
+// 		VkDeviceSize imageSize = width * height * 6 * sizeof(float) * 4;  // R16G16B16A16_SFLOAT = 8 bytes/pixel, but float* for mapping
+
+// 		// 创建 staging buffer 用于复制图像数据
+// 		vks::Buffer stagingBuffer;
+// 		VK_CHECK_RESULT(vulkanDevice->createBuffer(
+// 			VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+// 			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+// 			&stagingBuffer,
+// 			imageSize));
+
+// 		// 过渡图像布局到 TRANSFER_SRC
+// 		VkCommandBuffer cmdBuf = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
+// 		VkImageSubresourceRange subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 6 };
+// 		vks::tools::setImageLayout(
+// 			cmdBuf,
+// 			currentCube->image,
+// 			currentCube->descriptor.imageLayout,
+// 			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+// 			subresourceRange);
+// 		vulkanDevice->flushCommandBuffer(cmdBuf, queue);
+
+// 		// 复制图像到 buffer
+// 		cmdBuf = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
+// 		VkBufferImageCopy copyRegion = {};
+// 		copyRegion.bufferOffset = 0;
+// 		copyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+// 		copyRegion.imageSubresource.mipLevel = 0;
+// 		copyRegion.imageSubresource.baseArrayLayer = 0;
+// 		copyRegion.imageSubresource.layerCount = 6;
+// 		copyRegion.imageExtent = { width, height, 1 };
+// 		vkCmdCopyImageToBuffer(cmdBuf, currentCube->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, stagingBuffer.buffer, 1, &copyRegion);
+// 		vulkanDevice->flushCommandBuffer(cmdBuf, queue);
+
+// 		// 过渡回原布局
+// 		cmdBuf = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
+// 		vks::tools::setImageLayout(
+// 			cmdBuf,
+// 			currentCube->image,
+// 			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+// 			currentCube->descriptor.imageLayout,
+// 			subresourceRange);
+// 		vulkanDevice->flushCommandBuffer(cmdBuf, queue);
+
+// 		// Map staging buffer 并读取数据
+// 		VK_CHECK_RESULT(stagingBuffer.map());
+// 		float* data = (float*)stagingBuffer.mapped;
+
+// 		// 定义采样分辨率（降低以提高性能）
+// 		const int theta_res = 128;
+// 		const int phi_res = 256;
+// 		const float hf = glm::pi<float>() / theta_res;
+// 		const float wf = 2.0f * glm::pi<float>() / phi_res;
+
+// 		// 初始化系数
+// 		std::vector<glm::vec3> coeffs(9, glm::vec3(0.0f));
+
+// 		// 采样循环
+// 		for (int j = 0; j < theta_res; ++j) {
+// 			float theta = hf * (j + 0.5f);  // 极角 [0, pi]
+// 			float sin_theta = sin(theta);
+// 			float weight = sin_theta * hf * wf;  // domega = sin(theta) dtheta dphi
+
+// 			for (int i = 0; i < phi_res; ++i) {
+// 				float phi = wf * (i + 0.5f);  // 方位角 [0, 2pi]
+
+// 				// 计算方向向量
+// 				glm::vec3 dir(sin_theta * cos(phi), sin_theta * sin(phi), cos(theta));
+
+// 				// 获取 SH basis (包含 normalization 和 sign)
+// 				std::vector<float> basis = getSHBasis(dir);
+
+// 				// 采样颜色
+// 				glm::vec3 color = sampleCubemap(data, width, height, dir);
+
+// 				// 累加到系数
+// 				for (int k = 0; k < 9; ++k) {
+// 					coeffs[k] += color * basis[k] * weight;
+// 				}
+// 			}
+// 		}
+
+// 		// 赋值到 shCoeffs
+// 		shCoeffs.l00 = coeffs[0];
+// 		shCoeffs.l1m1 = coeffs[1];
+// 		shCoeffs.l10 = coeffs[2];
+// 		shCoeffs.l1p1 = coeffs[3];
+// 		shCoeffs.l2m2 = coeffs[4];
+// 		shCoeffs.l2m1 = coeffs[5];
+// 		shCoeffs.l20 = coeffs[6];
+// 		shCoeffs.l2p1 = coeffs[7];
+// 		shCoeffs.l2p2 = coeffs[8];
+
+// 		// 更新 uniform buffer
+// 		memcpy(uniformBuffers.sh.mapped, &shCoeffs, sizeof(SHCoefficients));
+
+// 		// 清理 staging buffer
+// 		stagingBuffer.unmap();
+// 		stagingBuffer.destroy();
+// 	}
+//     // 从当前 environmentCube 计算 SH 系数
+//     // 使用 9 个基础函数投影（基于 LearnOpenGL 和 jMonkeyEngine 的思路）
+//     // 这里简化实现：实际需采样 cubemap（CPU 或 GPU compute shader）
+//     // 示例公式：每个系数 = ∫ L(ω) * Y_lm(ω) dω (Y_lm 是 SH basis)
+//     // 为简化，用伪代码；实际可参考 https://cseweb.ucsd.edu/~ravir/papers/envmap/envmap.pdf
+//     shCoeffs = SHCoefficients{};
+    
+//     // 示例：计算 l00 (常数项) = (1 / 4π) * ∫ L(ω) dω
+//     // 假设从 cubemap 采样积分（需实现采样循环，类似 generateIrradianceCube 中的采样）
+//     const float pi = glm::pi<float>();
+//     glm::vec3 basis[9] = { /* SH basis constants */ };  // 预定义 basis 值
+//     for (int face = 0; face < 6; ++face) {
+//         // 采样每个面，积分...
+//         // shCoeffs.l00 += sample * basis[0] * weight;
+//     }
+//     // 归一化
+//     shCoeffs.l00 *= 4.0f * pi / numSamples;
+
+    
+//     memcpy(uniformBuffers.sh.mapped, &shCoeffs, sizeof(SHCoefficients));
+// }
+
+
 
 };
 
