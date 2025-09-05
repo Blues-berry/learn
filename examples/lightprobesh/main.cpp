@@ -24,6 +24,10 @@ class VulkanExample : public VulkanExampleBase
 public:
 	std::vector<std::string> skyboxNames;
 	int32_t skyboxIndex = 0;
+	
+	// 渲染模式：0=IBL, 1=球谐函数
+	int32_t renderMode = 0;
+	std::vector<std::string> renderModeNames = {"IBL", "harmonics"};
 
 	struct Textures {
 		vks::TextureCubeMap environmentCube;
@@ -198,6 +202,14 @@ public:
 
 			// Objects rendering
 			vkCmdBindDescriptorSets(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets.object, 0, NULL);
+			// 根据渲染模式选择不同的渲染逻辑
+			if (renderMode == 0) {
+				// IBL渲染模式
+				vkCmdBindPipeline(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.pbr);
+			} else {
+				// 球谐函数渲染模式
+				vkCmdBindPipeline(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.pbr); // 暂时使用相同的pipeline，后续可以添加专门的球谐函数pipeline
+			}
 			vkCmdBindPipeline(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.pbr);
 
 			// Render a line of objects with the selected material and vary roughness/metallic material parameters
@@ -1476,6 +1488,11 @@ public:
 			}
 			if (overlay->comboBox("Skybox", &skyboxIndex, skyboxNames)) {
 				loadSkyboxTexture(); // 已包含buildCommandBuffers调用
+			}
+			// 添加渲染模式选择
+			if (overlay->comboBox("Render Mode", &renderMode, renderModeNames)) {
+				// 切换渲染模式时重建命令缓冲区
+				buildCommandBuffers();
 			}
 		}
 	}
