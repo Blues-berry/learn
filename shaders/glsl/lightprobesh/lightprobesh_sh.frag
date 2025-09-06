@@ -35,32 +35,24 @@ layout (location = 0) out vec4 outColor;
 #define PI 3.1415926535897932384626433832795
 #define ALBEDO vec3(material.r, material.g, material.b)
 
-// Uncharted2 色调映射
-vec3 Uncharted2Tonemap(vec3 x)
-{
-    float A = 0.15;
-    float B = 0.50;
-    float C = 0.10;
-    float D = 0.20;
-    float E = 0.02;
-    float F = 0.30;
+vec3 Uncharted2Tonemap(vec3 x) {
+    float A = 0.15, B = 0.50, C = 0.10, D = 0.20, E = 0.02, F = 0.30;
     return ((x*(A*x+C*B)+D*E)/(x*(A*x+B)+D*F))-E/F;
 }
 
-// SH 基函数，与 getSHBasis 一致
 vec3 evaluateSH(vec3 N) {
     float x = N.x, y = N.y, z = N.z;
     float x2 = x * x, y2 = y * y, z2 = z * z;
     vec3 shBasis[9] = vec3[](
-        vec3(0.282095),                     // l=0, m=0
-        vec3(0.488603 * y),                 // l=1, m=-1
-        vec3(0.488603 * z),                 // l=1, m=0
-        vec3(0.488603 * x),                 // l=1, m=1
-        vec3(1.092548 * x * y),             // l=2, m=-2
-        vec3(1.092548 * y * z),             // l=2, m=-1
-        vec3(0.315392 * (3.0 * z2 - 1.0)), // l=2, m=0
-        vec3(1.092548 * x * z),             // l=2, m=1
-        vec3(0.546274 * (x2 - y2))          // l=2, m=2
+        vec3(0.282095),
+        vec3(0.488603 * y),
+        vec3(0.488603 * z),
+        vec3(0.488603 * x),
+        vec3(1.092548 * x * y),
+        vec3(1.092548 * y * z),
+        vec3(0.315392 * (3.0 * z2 - 1.0)),
+        vec3(1.092548 * x * z),
+        vec3(0.546274 * (x2 - y2))
     );
     return sh.l00 * shBasis[0] +
            sh.l1m1 * shBasis[1] +
@@ -73,35 +65,30 @@ vec3 evaluateSH(vec3 N) {
            sh.l2p2 * shBasis[8];
 }
 
-// 简单的 PBR 模型，使用 SH 漫反射
 vec3 simplePBR(vec3 N, vec3 V, vec3 albedo, float metallic) {
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
-    vec3 irradiance = evaluateSH(N); // SH 漫反射光照
+    vec3 irradiance = evaluateSH(N);
     vec3 diffuse = irradiance * albedo * (1.0 - metallic) / PI;
-    return diffuse; // SH 仅用于漫反射，忽略镜面
+    return diffuse;
 }
 
 void main() {
     vec3 N = normalize(inNormal);
     vec3 V = normalize(ubo.camPos - inWorldPos);
-
-    // 计算 SH 漫反射光照
     vec3 color = simplePBR(N, V, ALBEDO, material.metallic);
 
-    // 添加点光源贡献
     vec3 Lo = vec3(0.0);
     for (int i = 0; i < uboParams.lights.length(); ++i) {
         vec3 L = normalize(uboParams.lights[i].xyz - inWorldPos);
         float dotNL = clamp(dot(N, L), 0.0, 1.0);
         if (dotNL > 0.0) {
-            vec3 lightColor = vec3(1.0); // 可从 lights[i].w 获取强度
+            vec3 lightColor = vec3(1.0);
             Lo += ALBEDO * lightColor * dotNL / PI;
         }
     }
 
     color += Lo;
 
-    // 色调映射和伽马校正
     color = Uncharted2Tonemap(color * uboParams.exposure);
     color = color * (1.0f / Uncharted2Tonemap(vec3(11.2f)));
     color = pow(color, vec3(1.0f / uboParams.gamma));

@@ -1566,65 +1566,61 @@ public:
 			0.546274f * (x2 - y2)       // l2p2
 		};
 	}
-glm::vec3 sampleCubemap(float* data, uint32_t width, uint32_t height, const glm::vec3& dir) {
-	glm::vec3 abs_dir = glm::abs(dir);
-	float max_axis = glm::max(glm::max(abs_dir.x, abs_dir.y), abs_dir.z);
-	glm::vec3 norm_dir = dir / max_axis;
+glm::vec3 sampleCubemap(float* data, uint32_t width, uint32_t height, glm::vec3 dir) {
+    // 将方向向量转换为立方体贴图的 face 和 UV
+    float absX = fabs(dir.x), absY = fabs(dir.y), absZ = fabs(dir.z);
+    float maxAxis = std::max(std::max(absX, absY), absZ);
+    int face;
+    float u, v;
 
-	int face = 0;
-	float u, v;
+    if (maxAxis == absX) {
+        face = dir.x > 0 ? 0 : 1; // +X or -X
+        u = dir.x > 0 ? -dir.z : dir.z;
+        v = -dir.y;
+    } else if (maxAxis == absY) {
+        face = dir.y > 0 ? 2 : 3; // +Y or -Y
+        u = dir.x;
+        v = dir.y > 0 ? dir.z : -dir.z;
+    } else {
+        face = dir.z > 0 ? 4 : 5; // +Z or -Z
+        u = dir.z > 0 ? dir.x : -dir.x;
+        v = -dir.y;
+    }
 
-	if (max_axis == abs_dir.x) {
-		if (dir.x > 0) { // POS_X
-			face = 0;
-			u = 1.0f - (norm_dir.z + 1.0f) * 0.5f;
-			v = (norm_dir.y + 1.0f) * 0.5f;
-		}
-		else { // NEG_X
-			face = 1;
-			u = (norm_dir.z + 1.0f) * 0.5f;
-			v = (norm_dir.y + 1.0f) * 0.5f;
-		}
-	}
-	else if (max_axis == abs_dir.y) {
-		if (dir.y > 0) { // POS_Y
-			face = 2;
-			u = (norm_dir.x + 1.0f) * 0.5f;
-			v = 1.0f - (norm_dir.z + 1.0f) * 0.5f;
-		}
-		else { // NEG_Y
-			face = 3;
-			u = (norm_dir.x + 1.0f) * 0.5f;
-			v = (norm_dir.z + 1.0f) * 0.5f;
-		}
-	}
-	else {
-		if (dir.z > 0) { // POS_Z
-			face = 4;
-			u = (norm_dir.x + 1.0f) * 0.5f;
-			v = (norm_dir.y + 1.0f) * 0.5f;
-		}
-		else { // NEG_Z
-			face = 5;
-			u = 1.0f - (norm_dir.x + 1.0f) * 0.5f;
-			v = (norm_dir.y + 1.0f) * 0.5f;
-		}
-	}
+    u = (u / maxAxis + 1.0f) * 0.5f; // [-1,1] -> [0,1]
+    v = (v / maxAxis + 1.0f) * 0.5f;
+    
+    // 确保 u 和 v 在 [0,1] 范围内
+    u = std::max(0.0f, std::min(u, 1.0f));
+    v = std::max(0.0f, std::min(v, 1.0f));
+    
+    uint32_t x = std::min((uint32_t)(u * width), width - 1);
+    uint32_t y = std::min((uint32_t)(v * height), height - 1);
 
-	int ix = static_cast<int>(u * (width - 1));
-	int iy = static_cast<int>(v * (height - 1));
-	ix = glm::clamp(ix, 0, static_cast<int>(width - 1));
-	iy = glm::clamp(iy, 0, static_cast<int>(height - 1));
-
-	size_t offset = face * width * height * 4;
-	size_t idx = offset + (iy * width + ix) * 4;
-
-	return glm::vec3(data[idx], data[idx + 1], data[idx + 2]);
+    // 计算像素偏移（假设 R16G16B16A16_SFLOAT）
+    uint32_t pixelCount = width * height;
+    uint32_t faceOffset = face * pixelCount;
+    
+    // 确保不会越界
+    if (faceOffset >= 6 * pixelCount) {
+        return glm::vec3(0.0f); // 返回黑色
+    }
+    
+    uint32_t pixelOffset = faceOffset + y * width + x;
+    if (pixelOffset >= 6 * pixelCount) {
+        return glm::vec3(0.0f); // 返回黑色
+    }
+    
+    uint32_t offset = pixelOffset * 4;
+    // 确保不会越界访问
+    if (offset + 2 >= 6 * pixelCount * 4) {
+        return glm::vec3(0.0f); // 返回黑色
+    }
+    
+    return glm::vec3(data[offset], data[offset + 1], data[offset + 2]);
 }
-
-
 void generateSHCoefficients() {
-    std::ofstream logFile("sh_coefficients.log", std::ios::app);
+    std::ofstream logFile("../../examples/lightprobesh/lightprobeshsh_coefficients.log", std::ios::app);
     logFile << "Starting SH coefficient generation\n";
 
     // 验证 skyboxIndex
@@ -1766,7 +1762,7 @@ void generateSHCoefficients() {
 	shCoeffs.l2m1 = glm::vec4(coeffs[5], 0.0f);
 	shCoeffs.l20 = glm::vec4(coeffs[6], 0.0f);
 	shCoeffs.l2p1 = glm::vec4(coeffs[7], 0.0f);
-	shCoeffs.l2p2 = glm::vec4(coeffs[8], 0.0f);
+	shCoeffs.l2p2 = glm::vec4(coeffs[8], 1.0f);
 
 
     // 输出 SH 系数
