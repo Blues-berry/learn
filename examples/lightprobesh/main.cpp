@@ -1,4 +1,6 @@
-
+#include <cstdint>
+#include <glm/glm.hpp>
+#include <glm/gtc/constants.hpp>
 #include "vulkanexamplebase.h"  // 引入Vulkan基础示例类
 #include "VulkanglTFModel.h"    // 引入glTF模型加载类
 #include <fstream>
@@ -1566,69 +1568,77 @@ public:
 			0.546274f * (x2 - y2)       // l2p2
 		};
 	}
-glm::vec3 sampleCubemap(float* data, uint32_t width, uint32_t height, glm::vec3 dir) {
-    // 将方向向量转换为立方体贴图的 face 和 UV
-    float absX = fabs(dir.x), absY = fabs(dir.y), absZ = fabs(dir.z);
-    float maxAxis = std::max(std::max(absX, absY), absZ);
-    int face;
-    float u, v;
 
-    if (maxAxis == absX) {
+
+// half_to_float 实现
+float half_to_float(uint16_t half) {
+    uint32_t sign = (half >> 15) & 0x1;
+    uint32_t exp = (half >> 10) & 0x1F;
+    uint32_t mant = half & 0x3FF;
+
+    if (exp == 0x1F) { // Inf or NaN
+        if (mant == 0) return sign ? -INFINITY : INFINITY;
+        return NAN;
+    }
+    if (exp == 0) { // Zero or subnormal
+        if (mant == 0) return sign ? -0.0f : 0.0f;
+        float val = mant / 1024.0f * powf(2.0f, -14.0f);
+        return sign ? -val : val;
+    }
+    exp = exp - 15 + 127; // Convert exponent to 32-bit float bias
+    uint32_t result = (sign << 31) | (exp << 23) | (mant << 13);
+    return *reinterpret_cast<float*>(&result);
+}
+
+glm::vec3 sampleCubemap(uint16_t* data, uint32_t width, uint32_t height, glm::vec3 dir) {
+    float maxAxis, u, v;
+    uint32_t face;
+    if (std::abs(dir.x) >= std::abs(dir.y) && std::abs(dir.x) >= std::abs(dir.z)) {
+        maxAxis = std::abs(dir.x);
         face = dir.x > 0 ? 0 : 1; // +X or -X
         u = dir.x > 0 ? -dir.z : dir.z;
         v = -dir.y;
-    } else if (maxAxis == absY) {
+    } else if (std::abs(dir.y) >= std::abs(dir.x) && std::abs(dir.y) >= std::abs(dir.z)) {
+        maxAxis = std::abs(dir.y);
         face = dir.y > 0 ? 2 : 3; // +Y or -Y
         u = dir.x;
         v = dir.y > 0 ? dir.z : -dir.z;
     } else {
+        maxAxis = std::abs(dir.z);
         face = dir.z > 0 ? 4 : 5; // +Z or -Z
         u = dir.z > 0 ? dir.x : -dir.x;
         v = -dir.y;
     }
 
-    u = (u / maxAxis + 1.0f) * 0.5f; // [-1,1] -> [0,1]
+    u = (u / maxAxis + 1.0f) * 0.5f;
     v = (v / maxAxis + 1.0f) * 0.5f;
-    
-    // 确保 u 和 v 在 [0,1] 范围内
-    u = std::max(0.0f, std::min(u, 1.0f));
-    v = std::max(0.0f, std::min(v, 1.0f));
-    
+
     uint32_t x = std::min((uint32_t)(u * width), width - 1);
     uint32_t y = std::min((uint32_t)(v * height), height - 1);
-
-    // 计算像素偏移（假设 R16G16B16A16_SFLOAT）
     uint32_t pixelCount = width * height;
     uint32_t faceOffset = face * pixelCount;
-    
-    // 确保不会越界
-    if (faceOffset >= 6 * pixelCount) {
-        return glm::vec3(0.0f); // 返回黑色
-    }
-    
     uint32_t pixelOffset = faceOffset + y * width + x;
-    if (pixelOffset >= 6 * pixelCount) {
-        return glm::vec3(0.0f); // 返回黑色
-    }
-    
     uint32_t offset = pixelOffset * 4;
-    // 确保不会越界访问
-    if (offset + 2 >= 6 * pixelCount * 4) {
-        return glm::vec3(0.0f); // 返回黑色
+
+    if (offset + 3 >= 6 * pixelCount * 4) {
+        return glm::vec3(0.0f);
     }
-    
-    return glm::vec3(data[offset], data[offset + 1], data[offset + 2]);
+
+    float r = half_to_float(data[offset]);
+    float g = half_to_float(data[offset + 1]);
+    float b = half_to_float(data[offset + 2]);
+    return glm::vec3(r, g, b);
 }
+
 void generateSHCoefficients() {
     std::ofstream logFile("../../examples/lightprobesh/lightprobeshsh_coefficients.log", std::ios::app);
     logFile << "Starting SH coefficient generation\n";
 
-    // 验证 skyboxIndex
     logFile << "skyboxIndex: " << skyboxIndex << "\n";
     vks::TextureCubeMap* currentCube = nullptr;
     switch (skyboxIndex) {
-		case 0: currentCube = nullptr; break;
-			logFile << "Invalid skyboxIndex, setting SH coefficients to zero\n";
+        case 0: 
+            logFile << "Invalid skyboxIndex, setting SH coefficients to zero\n";
             shCoeffs = SHCoefficients{};
             memcpy(uniformBuffers.sh.mapped, &shCoeffs, sizeof(SHCoefficients));
             logFile.close();
@@ -1636,8 +1646,12 @@ void generateSHCoefficients() {
         case 1: currentCube = &textures.environmentCube; break;
         case 2: currentCube = &textures.environmentCube2; break;
         case 3: currentCube = &textures.environmentCube3; break;
-       //default:
-
+        default:
+            logFile << "Invalid skyboxIndex: " << skyboxIndex << "\n";
+            shCoeffs = SHCoefficients{};
+            memcpy(uniformBuffers.sh.mapped, &shCoeffs, sizeof(SHCoefficients));
+            logFile.close();
+            return;
     }
 
     if (!currentCube || !currentCube->image) {
@@ -1652,9 +1666,8 @@ void generateSHCoefficients() {
 
     uint32_t width = currentCube->width;
     uint32_t height = currentCube->height;
-    VkDeviceSize imageSize = width * height * 6 * 4 * sizeof(float); // R16G16B16A16_SFLOAT
+    VkDeviceSize imageSize = width * height * 6 * 4 * sizeof(uint16_t);
 
-    // 创建 staging buffer
     vks::Buffer stagingBuffer;
     VK_CHECK_RESULT(vulkanDevice->createBuffer(
         VK_BUFFER_USAGE_TRANSFER_DST_BIT,
@@ -1662,9 +1675,9 @@ void generateSHCoefficients() {
         &stagingBuffer,
         imageSize));
 
-    // 过渡图像布局到 TRANSFER_SRC
     VkCommandBuffer cmdBuf = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
     VkImageSubresourceRange subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 6 };
+    logFile << "Transitioning image layout from " << currentCube->descriptor.imageLayout << " to TRANSFER_SRC_OPTIMAL\n";
     vks::tools::setImageLayout(
         cmdBuf,
         currentCube->image,
@@ -1673,7 +1686,6 @@ void generateSHCoefficients() {
         subresourceRange);
     vulkanDevice->flushCommandBuffer(cmdBuf, queue);
 
-    // 复制图像到 buffer
     cmdBuf = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
     VkBufferImageCopy copyRegion = {};
     copyRegion.bufferOffset = 0;
@@ -1683,9 +1695,13 @@ void generateSHCoefficients() {
     copyRegion.imageSubresource.layerCount = 6;
     copyRegion.imageExtent = { width, height, 1 };
     vkCmdCopyImageToBuffer(cmdBuf, currentCube->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, stagingBuffer.buffer, 1, &copyRegion);
+    VkMemoryBarrier barrier = {};
+    barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+    vkCmdPipelineBarrier(cmdBuf, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &barrier, 0, nullptr, 0, nullptr);
     vulkanDevice->flushCommandBuffer(cmdBuf, queue);
 
-    // 过渡回原布局
     cmdBuf = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
     vks::tools::setImageLayout(
         cmdBuf,
@@ -1695,77 +1711,57 @@ void generateSHCoefficients() {
         subresourceRange);
     vulkanDevice->flushCommandBuffer(cmdBuf, queue);
 
-    // 映射 staging buffer
     VK_CHECK_RESULT(stagingBuffer.map());
-    float* data = (float*)stagingBuffer.mapped;
+    uint16_t* data = (uint16_t*)stagingBuffer.mapped;
+    logFile << "First pixel: " << half_to_float(data[0]) << ", " << half_to_float(data[1]) << ", " 
+            << half_to_float(data[2]) << ", " << half_to_float(data[3]) << "\n";
 
-    // 定义采样分辨率
-    const int theta_res = 128;
-    const int phi_res = 256;
+    const int theta_res = 256;
+    const int phi_res = 512;
     const float hf = glm::pi<float>() / theta_res;
     const float wf = 2.0f * glm::pi<float>() / phi_res;
+    float norm = 4.0f * glm::pi<float>() / (theta_res * phi_res);
+    logFile << "Normalization factor: " << norm << "\n";
 
-    // 初始化系数
     std::vector<glm::vec3> coeffs(9, glm::vec3(0.0f));
 
-    // 采样循环
     for (int j = 0; j < theta_res; ++j) {
-        float theta = hf * (j + 0.5f); // [0, pi]
+        float theta = hf * (j + 0.5f);
         float sin_theta = sinf(theta);
         float weight = sin_theta * hf * wf;
 
-        // 调试权重
-        if (j == 0) {
-            logFile << "theta: " << theta << ", sin_theta: " << sin_theta << ", weight: " << weight << "\n";
-        }
-
         for (int i = 0; i < phi_res; ++i) {
-            float phi = wf * (i + 0.5f); // [0, 2pi]
+            float phi = wf * (i + 0.5f);
             glm::vec3 dir(sin_theta * cosf(phi), sin_theta * sinf(phi), cosf(theta));
 
-            // 调试方向向量
-            if (j == 0 && i == 0) {
-                logFile << "Sample dir: " << dir.x << ", " << dir.y << ", " << dir.z 
-                        << ", length: " << glm::length(dir) << "\n";
-            }
-
-            // 获取 SH 基函数
             std::vector<float> basis = getSHBasis(dir);
-
-            // 采样颜色
             glm::vec3 color = sampleCubemap(data, width, height, dir);
 
-            // 调试颜色
-            if (j == 0 && i == 0) {
-                logFile << "Sample color: " << color.x << ", " << color.y << ", " << color.z << "\n";
+            if (j == 0 && i < 5) {
+                logFile << "Sample " << i << ": dir=" << dir.x << ", " << dir.y << ", " << dir.z 
+                        << ", color=" << color.x << ", " << color.y << ", " << color.z << "\n";
             }
 
-            // 累加系数
             for (int k = 0; k < 9; ++k) {
                 coeffs[k] += color * basis[k] * weight;
             }
         }
     }
 
-    // 归一化系数（乘以 4π / 总采样数）
-    float norm = 4.0f * glm::pi<float>() / (theta_res * phi_res);
     for (int k = 0; k < 9; ++k) {
         coeffs[k] *= norm;
     }
 
-    // 赋值到 shCoeffs
-	shCoeffs.l00 = glm::vec4(coeffs[0], 0.0f);
-	shCoeffs.l1m1 = glm::vec4(coeffs[1], 0.0f);
-	shCoeffs.l10 = glm::vec4(coeffs[2], 0.0f);
-	shCoeffs.l1p1 = glm::vec4(coeffs[3], 0.0f);
-	shCoeffs.l2m2 = glm::vec4(coeffs[4], 0.0f);
-	shCoeffs.l2m1 = glm::vec4(coeffs[5], 0.0f);
-	shCoeffs.l20 = glm::vec4(coeffs[6], 0.0f);
-	shCoeffs.l2p1 = glm::vec4(coeffs[7], 0.0f);
-	shCoeffs.l2p2 = glm::vec4(coeffs[8], 1.0f);
+    shCoeffs.l00 = glm::vec4(coeffs[0], 0.0f);
+    shCoeffs.l1m1 = glm::vec4(coeffs[1], 0.0f);
+    shCoeffs.l10 = glm::vec4(coeffs[2], 0.0f);
+    shCoeffs.l1p1 = glm::vec4(coeffs[3], 0.0f);
+    shCoeffs.l2m2 = glm::vec4(coeffs[4], 0.0f);
+    shCoeffs.l2m1 = glm::vec4(coeffs[5], 0.0f);
+    shCoeffs.l20 = glm::vec4(coeffs[6], 0.0f);
+    shCoeffs.l2p1 = glm::vec4(coeffs[7], 0.0f);
+    shCoeffs.l2p2 = glm::vec4(coeffs[8], 0.0f);
 
-
-    // 输出 SH 系数
     logFile << "SH Coefficients:\n";
     logFile << "l00: " << shCoeffs.l00.x << ", " << shCoeffs.l00.y << ", " << shCoeffs.l00.z << "\n";
     logFile << "l1m1: " << shCoeffs.l1m1.x << ", " << shCoeffs.l1m1.y << ", " << shCoeffs.l1m1.z << "\n";
@@ -1777,10 +1773,8 @@ void generateSHCoefficients() {
     logFile << "l2p1: " << shCoeffs.l2p1.x << ", " << shCoeffs.l2p1.y << ", " << shCoeffs.l2p1.z << "\n";
     logFile << "l2p2: " << shCoeffs.l2p2.x << ", " << shCoeffs.l2p2.y << ", " << shCoeffs.l2p2.z << "\n";
 
-    // 更新 uniform buffer
     memcpy(uniformBuffers.sh.mapped, &shCoeffs, sizeof(SHCoefficients));
 
-    // 清理
     stagingBuffer.unmap();
     stagingBuffer.destroy();
 
@@ -1788,7 +1782,8 @@ void generateSHCoefficients() {
     logFile.close();
 }
 
-    // 从当前 environmentCube 计算 SH 系数
+
+// 从当前 environmentCube 计算 SH 系数
     // 使用 9 个基础函数投影（基于 LearnOpenGL 和 jMonkeyEngine 的思路）
     // 这里简化实现：实际需采样 cubemap（CPU 或 GPU compute shader）
     // 示例公式：每个系数 = ∫ L(ω) * Y_lm(ω) dω (Y_lm 是 SH basis)
