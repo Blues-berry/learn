@@ -4,7 +4,7 @@
 #include <fstream>
 // SH 系数 (2阶 SH, 9 个 vec3 系数，对应 RGB 通道)
 struct SHCoefficients {
-    glm::vec3 l00, l1m1, l10, l1p1, l2m2, l2m1, l20, l2p1, l2p2;
+    glm::vec4 l00, l1m1, l10, l1p1, l2m2, l2m1, l20, l2p1, l2p2;
 } shCoeffs;
 
 // UI 新增：对比模式开关
@@ -42,7 +42,7 @@ public:
 
     // 天空盒相关成员
 	std::vector<std::string> skyboxNames;  // 天空盒名称列表
-	int32_t skyboxIndex = 0;              // 当前选中的天空盒索引
+	int32_t skyboxIndex = 3;              // 当前选中的天空盒索引
 	
 	// 渲染模式：0=IBL, 1=球谐函数
 	int32_t renderMode = 1;
@@ -157,11 +157,11 @@ public:
 			materialNames.push_back(material.name);
 		}
 		objectNames = { "Sphere", "Teapot", "Torusknot", "Venus" };
-		// 设置默认材质索引为 9（对应“Black”材质）。
-		materialIndex = 9;
+		// 设置默认材质索引为 8（对应“Black”材质）。
+		materialIndex = 8;
 		// 初始化天空盒名称列表（无天空盒、Pisa、Grand Canyon、Uffizi），默认选择索引 1（Pisa）。
 		skyboxNames = {"NO Skybox", "Pisa", "Grand Canyon","uffizi_cube"};
-		skyboxIndex = 1;
+		
 	}
 		// 析构函数，释放 Vulkan 资源，包括管线、管线布局、描述符集布局、统一缓冲区和纹理。
 	~VulkanExample()
@@ -1419,7 +1419,7 @@ public:
 			VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
 			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
 			&uniformBuffers.sh,
-			sizeof(SHCoefficients)));
+			sizeof(SHCoefficients))); // 显式指定 144 字节
 		
 		// Map persistent
 		VK_CHECK_RESULT(uniformBuffers.object.map());
@@ -1466,6 +1466,7 @@ public:
 		setupDescriptors();
 		preparePipelines();
 		buildCommandBuffers();
+		loadSkyboxTexture();
 		prepared = true;
 	}
 
@@ -1630,15 +1631,17 @@ void generateSHCoefficients() {
     logFile << "skyboxIndex: " << skyboxIndex << "\n";
     vks::TextureCubeMap* currentCube = nullptr;
     switch (skyboxIndex) {
-        case 1: currentCube = &textures.environmentCube; break;
-        case 2: currentCube = &textures.environmentCube2; break;
-        case 3: currentCube = &textures.environmentCube3; break;
-        default:
-            logFile << "Invalid skyboxIndex, setting SH coefficients to zero\n";
+		case 0: currentCube = nullptr; break;
+			logFile << "Invalid skyboxIndex, setting SH coefficients to zero\n";
             shCoeffs = SHCoefficients{};
             memcpy(uniformBuffers.sh.mapped, &shCoeffs, sizeof(SHCoefficients));
             logFile.close();
             return;
+        case 1: currentCube = &textures.environmentCube; break;
+        case 2: currentCube = &textures.environmentCube2; break;
+        case 3: currentCube = &textures.environmentCube3; break;
+       //default:
+
     }
 
     if (!currentCube || !currentCube->image) {
@@ -1755,15 +1758,16 @@ void generateSHCoefficients() {
     }
 
     // 赋值到 shCoeffs
-    shCoeffs.l00 = coeffs[0];
-    shCoeffs.l1m1 = coeffs[1];
-    shCoeffs.l10 = coeffs[2];
-    shCoeffs.l1p1 = coeffs[3];
-    shCoeffs.l2m2 = coeffs[4];
-    shCoeffs.l2m1 = coeffs[5];
-    shCoeffs.l20 = coeffs[6];
-    shCoeffs.l2p1 = coeffs[7];
-    shCoeffs.l2p2 = coeffs[8];
+	shCoeffs.l00 = glm::vec4(coeffs[0], 0.0f);
+	shCoeffs.l1m1 = glm::vec4(coeffs[1], 0.0f);
+	shCoeffs.l10 = glm::vec4(coeffs[2], 0.0f);
+	shCoeffs.l1p1 = glm::vec4(coeffs[3], 0.0f);
+	shCoeffs.l2m2 = glm::vec4(coeffs[4], 0.0f);
+	shCoeffs.l2m1 = glm::vec4(coeffs[5], 0.0f);
+	shCoeffs.l20 = glm::vec4(coeffs[6], 0.0f);
+	shCoeffs.l2p1 = glm::vec4(coeffs[7], 0.0f);
+	shCoeffs.l2p2 = glm::vec4(coeffs[8], 0.0f);
+
 
     // 输出 SH 系数
     logFile << "SH Coefficients:\n";
@@ -1787,6 +1791,7 @@ void generateSHCoefficients() {
     logFile << "SH coefficient generation completed\n";
     logFile.close();
 }
+
     // 从当前 environmentCube 计算 SH 系数
     // 使用 9 个基础函数投影（基于 LearnOpenGL 和 jMonkeyEngine 的思路）
     // 这里简化实现：实际需采样 cubemap（CPU 或 GPU compute shader）
