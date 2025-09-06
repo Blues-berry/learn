@@ -1521,8 +1521,9 @@ public:
 		}
 		
 		// 更新 uniform buffer 并重建命令缓冲区
-		updateUniformBuffers();
+		
 		generateSHCoefficients();  // 更新 SH 系数
+		updateUniformBuffers();
 		buildCommandBuffers();
 	}
 
@@ -1570,20 +1571,6 @@ public:
 	}
 
 
-void saveCubemapToPPM(const char* filename, uint16_t* data, uint32_t width, uint32_t height) {
-    std::ofstream file(filename);
-    file << "P3\n" << width << " " << height * 6 << "\n255\n";
-    for (uint32_t i = 0; i < width * height * 6 * 4; i += 4) {
-        int r = std::min(255, int(half_to_float(data[i]) * 255.0f));
-        int g = std::min(255, int(half_to_float(data[i + 1]) * 255.0f));
-        int b = std::min(255, int(half_to_float(data[i + 2]) * 255.0f));
-        file << r << " " << g << " " << b << "\n";
-    }
-    file.close();
-}
-
-
-
 float half_to_float(uint16_t half) {
     uint32_t sign = (half >> 15) & 0x1;
     uint32_t exp = (half >> 10) & 0x1F;
@@ -1602,6 +1589,17 @@ float half_to_float(uint16_t half) {
     return *reinterpret_cast<float*>(&result);
 }
 
+void saveCubemapToPPM(const char* filename, uint16_t* data, uint32_t width, uint32_t height) {
+    std::ofstream file(filename);
+    file << "P3\n" << width << " " << height * 6 << "\n255\n";
+    for (uint32_t i = 0; i < width * height * 6 * 4; i += 4) {
+        int r = std::min(255, int(half_to_float(data[i]) * 255.0f));
+        int g = std::min(255, int(half_to_float(data[i + 1]) * 255.0f));
+        int b = std::min(255, int(half_to_float(data[i + 2]) * 255.0f));
+        file << r << " " << g << " " << b << "\n";
+    }
+    file.close();
+}
 
 glm::vec3 sampleCubemap(uint16_t* data, uint32_t width, uint32_t height, glm::vec3 dir) {
     float maxAxis, u, v;
@@ -1626,17 +1624,18 @@ glm::vec3 sampleCubemap(uint16_t* data, uint32_t width, uint32_t height, glm::ve
     u = (u / maxAxis + 1.0f) * 0.5f;
     v = (v / maxAxis + 1.0f) * 0.5f;
 
+    uint32_t x = std::min((uint32_t)(u * width), width - 1);
+    uint32_t y = std::min((uint32_t)(v * height), height - 1);
+
     static int sampleCount = 0;
-    if (sampleCount < 5) {
+    if (sampleCount < 10) {
         std::ofstream logFile("../../examples/lightprobesh/lightprobeshsh_coefficients.log", std::ios::app);
         logFile << "SampleCubemap " << sampleCount << ": face=" << face << ", u=" << u << ", v=" << v 
-                << ", x=" << (uint32_t)(u * width) << ", y=" << (uint32_t)(v * height) << "\n";
+                << ", x=" << x << ", y=" << y << "\n";
         logFile.close();
         sampleCount++;
     }
 
-    uint32_t x = std::min((uint32_t)(u * width), width - 1);
-    uint32_t y = std::min((uint32_t)(v * height), height - 1);
     uint32_t pixelCount = width * height;
     uint32_t faceOffset = face * pixelCount;
     uint32_t pixelOffset = faceOffset + y * width + x;
@@ -1740,13 +1739,14 @@ void generateSHCoefficients() {
 
     VK_CHECK_RESULT(stagingBuffer.map());
     uint16_t* data = (uint16_t*)stagingBuffer.mapped;
-    logFile << "First 4 pixels:\n";
-    for (int i = 0; i < 4; ++i) {
+    logFile << "First 10 pixels:\n";
+    for (int i = 0; i < 10; ++i) {
         logFile << "Pixel " << i << ": " << half_to_float(data[i * 4]) << ", " 
                 << half_to_float(data[i * 4 + 1]) << ", " << half_to_float(data[i * 4 + 2]) << ", " 
                 << half_to_float(data[i * 4 + 3]) << "\n";
     }
-	   //输出到文件验证天空盒切换后是否准确获取图像信息
+
+   //输出到文件验证天空盒切换后是否准确获取图像信息
     // std::string ppmFile = "../../examples/lightprobesh/cubemap_skybox" + std::to_string(skyboxIndex) + ".ppm";
     // saveCubemapToPPM(ppmFile.c_str(), data, width, height);
 
@@ -1787,7 +1787,7 @@ void generateSHCoefficients() {
     }
 
     for (int k = 0; k < 9; ++k) {
-        coeffs[k] *= norm * 10.0f; // 放大系数以匹配亮度
+        coeffs[k] *= 100.0f; // 放大系数
     }
 
     shCoeffs.l00 = glm::vec4(coeffs[0], 0.0f);
@@ -1823,8 +1823,6 @@ void generateSHCoefficients() {
     logFile << "SH coefficient generation completed\n";
     logFile.close();
 }
-
-
 // 从当前 environmentCube 计算 SH 系数
     // 使用 9 个基础函数投影（基于 LearnOpenGL 和 jMonkeyEngine 的思路）
     // 这里简化实现：实际需采样 cubemap（CPU 或 GPU compute shader）
