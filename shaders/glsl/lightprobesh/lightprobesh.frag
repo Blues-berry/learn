@@ -96,7 +96,7 @@ vec3 specularContribution(vec3 L, vec3 V, vec3 N, vec3 F0, float metallic, float
 	float dotNL = clamp(dot(N, L), 0.0, 1.0);
 
 	// Light color fixed
-	vec3 lightColor = vec3(0.6784, 0.0824, 0.0824);
+	vec3 lightColor = vec3(1.0);
 
 	vec3 color = vec3(0.0);
 
@@ -158,5 +158,5 @@ void main()
 	// Gamma correction
 	color = pow(color, vec3(1.0f / uboParams.gamma));
 
-	outColor = vec4(0.6784, 0.0824, 0.0824, 1.0);
+	outColor = vec4(color, 1.0);
 }
