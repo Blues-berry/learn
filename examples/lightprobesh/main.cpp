@@ -1570,48 +1570,70 @@ public:
 	}
 
 
-// half_to_float 实现
+void saveCubemapToPPM(const char* filename, uint16_t* data, uint32_t width, uint32_t height) {
+    std::ofstream file(filename);
+    file << "P3\n" << width << " " << height * 6 << "\n255\n";
+    for (uint32_t i = 0; i < width * height * 6 * 4; i += 4) {
+        int r = std::min(255, int(half_to_float(data[i]) * 255.0f));
+        int g = std::min(255, int(half_to_float(data[i + 1]) * 255.0f));
+        int b = std::min(255, int(half_to_float(data[i + 2]) * 255.0f));
+        file << r << " " << g << " " << b << "\n";
+    }
+    file.close();
+}
+
+
+
 float half_to_float(uint16_t half) {
     uint32_t sign = (half >> 15) & 0x1;
     uint32_t exp = (half >> 10) & 0x1F;
     uint32_t mant = half & 0x3FF;
-
-    if (exp == 0x1F) { // Inf or NaN
+    if (exp == 0x1F) {
         if (mant == 0) return sign ? -INFINITY : INFINITY;
         return NAN;
     }
-    if (exp == 0) { // Zero or subnormal
+    if (exp == 0) {
         if (mant == 0) return sign ? -0.0f : 0.0f;
         float val = mant / 1024.0f * powf(2.0f, -14.0f);
         return sign ? -val : val;
     }
-    exp = exp - 15 + 127; // Convert exponent to 32-bit float bias
+    exp = exp - 15 + 127;
     uint32_t result = (sign << 31) | (exp << 23) | (mant << 13);
     return *reinterpret_cast<float*>(&result);
 }
+
 
 glm::vec3 sampleCubemap(uint16_t* data, uint32_t width, uint32_t height, glm::vec3 dir) {
     float maxAxis, u, v;
     uint32_t face;
     if (std::abs(dir.x) >= std::abs(dir.y) && std::abs(dir.x) >= std::abs(dir.z)) {
         maxAxis = std::abs(dir.x);
-        face = dir.x > 0 ? 0 : 1; // +X or -X
+        face = dir.x > 0 ? 0 : 1;
         u = dir.x > 0 ? -dir.z : dir.z;
         v = -dir.y;
     } else if (std::abs(dir.y) >= std::abs(dir.x) && std::abs(dir.y) >= std::abs(dir.z)) {
         maxAxis = std::abs(dir.y);
-        face = dir.y > 0 ? 2 : 3; // +Y or -Y
+        face = dir.y > 0 ? 2 : 3;
         u = dir.x;
         v = dir.y > 0 ? dir.z : -dir.z;
     } else {
         maxAxis = std::abs(dir.z);
-        face = dir.z > 0 ? 4 : 5; // +Z or -Z
+        face = dir.z > 0 ? 4 : 5;
         u = dir.z > 0 ? dir.x : -dir.x;
         v = -dir.y;
     }
 
     u = (u / maxAxis + 1.0f) * 0.5f;
     v = (v / maxAxis + 1.0f) * 0.5f;
+
+    static int sampleCount = 0;
+    if (sampleCount < 5) {
+        std::ofstream logFile("../../examples/lightprobesh/lightprobeshsh_coefficients.log", std::ios::app);
+        logFile << "SampleCubemap " << sampleCount << ": face=" << face << ", u=" << u << ", v=" << v 
+                << ", x=" << (uint32_t)(u * width) << ", y=" << (uint32_t)(v * height) << "\n";
+        logFile.close();
+        sampleCount++;
+    }
 
     uint32_t x = std::min((uint32_t)(u * width), width - 1);
     uint32_t y = std::min((uint32_t)(v * height), height - 1);
@@ -1635,6 +1657,11 @@ void generateSHCoefficients() {
     logFile << "Starting SH coefficient generation\n";
 
     logFile << "skyboxIndex: " << skyboxIndex << "\n";
+    logFile << "Using texture: ";
+    if (skyboxIndex == 1) logFile << "environmentCube\n";
+    else if (skyboxIndex == 2) logFile << "environmentCube2\n";
+    else if (skyboxIndex == 3) logFile << "environmentCube3\n";
+
     vks::TextureCubeMap* currentCube = nullptr;
     switch (skyboxIndex) {
         case 0: 
@@ -1713,8 +1740,15 @@ void generateSHCoefficients() {
 
     VK_CHECK_RESULT(stagingBuffer.map());
     uint16_t* data = (uint16_t*)stagingBuffer.mapped;
-    logFile << "First pixel: " << half_to_float(data[0]) << ", " << half_to_float(data[1]) << ", " 
-            << half_to_float(data[2]) << ", " << half_to_float(data[3]) << "\n";
+    logFile << "First 4 pixels:\n";
+    for (int i = 0; i < 4; ++i) {
+        logFile << "Pixel " << i << ": " << half_to_float(data[i * 4]) << ", " 
+                << half_to_float(data[i * 4 + 1]) << ", " << half_to_float(data[i * 4 + 2]) << ", " 
+                << half_to_float(data[i * 4 + 3]) << "\n";
+    }
+	   //输出到文件验证天空盒切换后是否准确获取图像信息
+    // std::string ppmFile = "../../examples/lightprobesh/cubemap_skybox" + std::to_string(skyboxIndex) + ".ppm";
+    // saveCubemapToPPM(ppmFile.c_str(), data, width, height);
 
     const int theta_res = 256;
     const int phi_res = 512;
@@ -1730,6 +1764,10 @@ void generateSHCoefficients() {
         float sin_theta = sinf(theta);
         float weight = sin_theta * hf * wf;
 
+        if (j == 0) {
+            logFile << "Weight: " << weight << ", sin_theta: " << sin_theta << ", hf: " << hf << ", wf: " << wf << "\n";
+        }
+
         for (int i = 0; i < phi_res; ++i) {
             float phi = wf * (i + 0.5f);
             glm::vec3 dir(sin_theta * cosf(phi), sin_theta * sinf(phi), cosf(theta));
@@ -1737,9 +1775,9 @@ void generateSHCoefficients() {
             std::vector<float> basis = getSHBasis(dir);
             glm::vec3 color = sampleCubemap(data, width, height, dir);
 
-            if (j == 0 && i < 5) {
-                logFile << "Sample " << i << ": dir=" << dir.x << ", " << dir.y << ", " << dir.z 
-                        << ", color=" << color.x << ", " << color.y << ", " << color.z << "\n";
+            if (j % (theta_res / 10) == 0 && i < 5) {
+                logFile << "Sample (theta=" << j << ", phi=" << i << "): dir=" << dir.x << ", " << dir.y << ", " 
+                        << dir.z << ", color=" << color.x << ", " << color.y << ", " << color.z << "\n";
             }
 
             for (int k = 0; k < 9; ++k) {
@@ -1749,7 +1787,7 @@ void generateSHCoefficients() {
     }
 
     for (int k = 0; k < 9; ++k) {
-        coeffs[k] *= norm;
+        coeffs[k] *= norm * 10.0f; // 放大系数以匹配亮度
     }
 
     shCoeffs.l00 = glm::vec4(coeffs[0], 0.0f);
@@ -1762,7 +1800,7 @@ void generateSHCoefficients() {
     shCoeffs.l2p1 = glm::vec4(coeffs[7], 0.0f);
     shCoeffs.l2p2 = glm::vec4(coeffs[8], 0.0f);
 
-    logFile << "SH Coefficients:\n";
+    logFile << "SH Coefficients for skyboxIndex " << skyboxIndex << ":\n";
     logFile << "l00: " << shCoeffs.l00.x << ", " << shCoeffs.l00.y << ", " << shCoeffs.l00.z << "\n";
     logFile << "l1m1: " << shCoeffs.l1m1.x << ", " << shCoeffs.l1m1.y << ", " << shCoeffs.l1m1.z << "\n";
     logFile << "l10: " << shCoeffs.l10.x << ", " << shCoeffs.l10.y << ", " << shCoeffs.l10.z << "\n";
@@ -1773,6 +1811,10 @@ void generateSHCoefficients() {
     logFile << "l2p1: " << shCoeffs.l2p1.x << ", " << shCoeffs.l2p1.y << ", " << shCoeffs.l2p1.z << "\n";
     logFile << "l2p2: " << shCoeffs.l2p2.x << ", " << shCoeffs.l2p2.y << ", " << shCoeffs.l2p2.z << "\n";
 
+    if (!uniformBuffers.sh.mapped) {
+        logFile << "Error: uniformBuffers.sh.mapped is null\n";
+        return;
+    }
     memcpy(uniformBuffers.sh.mapped, &shCoeffs, sizeof(SHCoefficients));
 
     stagingBuffer.unmap();
