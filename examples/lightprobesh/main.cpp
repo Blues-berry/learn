@@ -1,148 +1,148 @@
-#include <cstdint>
+﻿#include <cstdint>
 #include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
-#include "vulkanexamplebase.h"  // 引入Vulkan基础示例类
-#include "VulkanglTFModel.h"    // 引入glTF模型加载类
+#include "vulkanexamplebase.h"  // 寮曞叆Vulkan鍩虹绀轰緥绫?
+#include "VulkanglTFModel.h"    // 寮曞叆glTF妯″瀷鍔犺浇绫?
 #include <fstream>
-// SH 系数 (2阶 SH, 9 个 vec3 系数，对应 RGB 通道)
+// SH 绯绘暟 (2闃?SH, 9 涓?vec3 绯绘暟锛屽搴?RGB 閫氶亾)
 struct SHCoefficients {
     glm::vec4 l00, l1m1, l10, l1p1, l2m2, l2m1, l20, l2p1, l2p2;
 } shCoeffs;
 
-// UI 新增：对比模式开关
-bool compareMode = false;  // 默认关闭
+// UI 鏂板锛氬姣旀ā寮忓紑鍏?
+bool compareMode = false;  // 榛樿鍏抽棴
 
-// 材质定义结构体
+// 鏉愯川瀹氫箟缁撴瀯浣?
 struct Material {
-    // 材质参数块
+    // 鏉愯川鍙傛暟鍧?
     struct PushBlock {
-        float roughness = 0.0f;  // 粗糙度
-        float metallic = 0.0f;   // 金属度
-        float specular = 0.0f;   // 镜面反射强度
-        float r, g, b;           // RGB颜色分量
+        float roughness = 0.0f;  // 绮楃硻搴?
+        float metallic = 0.0f;   // 閲戝睘搴?
+        float specular = 0.0f;   // 闀滈潰鍙嶅皠寮哄害
+        float r, g, b;           // RGB棰滆壊鍒嗛噺
     } params;
     
-    std::string name;  // 材质名称
+    std::string name;  // 鏉愯川鍚嶇О
     
-    Material() {};  // 默认构造函数
+    Material() {};  // 榛樿鏋勯€犲嚱鏁?
     
-    // 带参数的构造函数
+    // 甯﹀弬鏁扮殑鏋勯€犲嚱鏁?
     Material(std::string n, glm::vec3 c) : name(n) {
-        params.r = c.r;  // 设置红色分量
-        params.g = c.g;  // 设置绿色分量
-        params.b = c.b;  // 设置蓝色分量
+        params.r = c.r;  // 璁剧疆绾㈣壊鍒嗛噺
+        params.g = c.g;  // 璁剧疆缁胯壊鍒嗛噺
+        params.b = c.b;  // 璁剧疆钃濊壊鍒嗛噺
     };
 };
 
 /**
- * 基于图像的物理渲染(PBR)示例类
- * 实现了基于图像的照明(IBL)和球谐函数渲染
+ * 鍩轰簬鍥惧儚鐨勭墿鐞嗘覆鏌?PBR)绀轰緥绫?
+ * 瀹炵幇浜嗗熀浜庡浘鍍忕殑鐓ф槑(IBL)鍜岀悆璋愬嚱鏁版覆鏌?
  */
 class VulkanExample : public VulkanExampleBase
 {
 public:
 
-    // 天空盒相关成员
-	std::vector<std::string> skyboxNames;  // 天空盒名称列表
-	int32_t skyboxIndex = 3;              // 当前选中的天空盒索引
+    // 澶╃┖鐩掔浉鍏虫垚鍛?
+	std::vector<std::string> skyboxNames;  // 澶╃┖鐩掑悕绉板垪琛?
+	int32_t skyboxIndex = 3;              // 褰撳墠閫変腑鐨勫ぉ绌虹洅绱㈠紩
 	
-	// 渲染模式：0=IBL, 1=球谐函数
+	// 娓叉煋妯″紡锛?=IBL, 1=鐞冭皭鍑芥暟
 	int32_t renderMode = 1;
 	std::vector<std::string> renderModeNames = {"IBL", "harmonics"};
 
-    // 纹理资源结构体
+    // 绾圭悊璧勬簮缁撴瀯浣?
 	struct Textures {
-		vks::TextureCubeMap environmentCube;     // 环境贴图
-		vks::TextureCubeMap environmentCube2;     // 第二环境贴图
-        vks::TextureCubeMap environmentCube3;     // 第三环境贴图
+		vks::TextureCubeMap environmentCube;     // 鐜璐村浘
+		vks::TextureCubeMap environmentCube2;     // 绗簩鐜璐村浘
+        vks::TextureCubeMap environmentCube3;     // 绗笁鐜璐村浘
 
 		
-		vks::Texture2D lutBrdf;                  // BRDF查找表
-		vks::TextureCubeMap irradianceCube;      // 辐射度贴图
-		vks::TextureCubeMap prefilteredCube;     // 预过滤贴图
+		vks::Texture2D lutBrdf;                  // BRDF鏌ユ壘琛?
+		vks::TextureCubeMap irradianceCube;      // 杈愬皠搴﹁创鍥?
+		vks::TextureCubeMap prefilteredCube;     // 棰勮繃婊よ创鍥?
 	} textures;
 
-    // 模型资源结构体
+    // 妯″瀷璧勬簮缁撴瀯浣?
 	struct Meshes {
-		vkglTF::Model skybox;                    // 天空盒模型
-		std::vector<vkglTF::Model> objects;     // 物体模型列表
-		int32_t objectIndex = 0;                // 当前选中的物体索引
-	} models;									// 声明 models 成员，存储所有模型资源。
+		vkglTF::Model skybox;                    // 澶╃┖鐩掓ā鍨?
+		std::vector<vkglTF::Model> objects;     // 鐗╀綋妯″瀷鍒楄〃
+		int32_t objectIndex = 0;                // 褰撳墠閫変腑鐨勭墿浣撶储寮?
+	} models;									// 澹版槑 models 鎴愬憳锛屽瓨鍌ㄦ墍鏈夋ā鍨嬭祫婧愩€?
 
-    // Uniform缓冲区
+    // Uniform缂撳啿鍖?
 	struct {
 
-		vks::Buffer object;      // 物体uniform缓冲区
-		vks::Buffer skybox;      // 天空盒uniform缓冲区
-		vks::Buffer params;      // 参数uniform缓冲区
-		vks::Buffer sh;			// SH系数Uniform缓冲区，存储球谐光照系数。
-	} uniformBuffers;			// 声明 uniformBuffers 成员，存储所有Uniform缓冲区
+		vks::Buffer object;      // 鐗╀綋uniform缂撳啿鍖?
+		vks::Buffer skybox;      // 澶╃┖鐩抲niform缂撳啿鍖?
+		vks::Buffer params;      // 鍙傛暟uniform缂撳啿鍖?
+		vks::Buffer sh;			// SH绯绘暟Uniform缂撳啿鍖猴紝瀛樺偍鐞冭皭鍏夌収绯绘暟銆?
+	} uniformBuffers;			// 澹版槑 uniformBuffers 鎴愬憳锛屽瓨鍌ㄦ墍鏈塙niform缂撳啿鍖?
 
-    // 矩阵uniform结构体
+    // 鐭╅樀uniform缁撴瀯浣?
 	struct UBOMatrices {
-		glm::mat4 projection;    // 投影矩阵
-		glm::mat4 model;        // 模型矩阵
-		glm::mat4 view;         // 视图矩阵
-		glm::vec3 camPos;       // 相机位置
-	} uboMatrices;				// 声明 uboMatrices 成员，存储矩阵数据。
+		glm::mat4 projection;    // 鎶曞奖鐭╅樀
+		glm::mat4 model;        // 妯″瀷鐭╅樀
+		glm::mat4 view;         // 瑙嗗浘鐭╅樀
+		glm::vec3 camPos;       // 鐩告満浣嶇疆
+	} uboMatrices;				// 澹版槑 uboMatrices 鎴愬憳锛屽瓨鍌ㄧ煩闃垫暟鎹€?
 
-    // 参数uniform结构体 定义 UBOParams 结构体，存储四个光源位置、曝光度和伽马值。
-	// 结构体作为一个独立对象时，末尾不需要额外的填充，除非它在数组或嵌套上下文中需要确保下一个元素的对齐。
-	//72 字节被认为是“满足 16 字节对齐”的，因为：所有成员的偏移量都符合 std140 的对齐规则。
+    // 鍙傛暟uniform缁撴瀯浣?瀹氫箟 UBOParams 缁撴瀯浣擄紝瀛樺偍鍥涗釜鍏夋簮浣嶇疆銆佹洕鍏夊害鍜屼冀椹€笺€?
+	// 缁撴瀯浣撲綔涓轰竴涓嫭绔嬪璞℃椂锛屾湯灏句笉闇€瑕侀澶栫殑濉厖锛岄櫎闈炲畠鍦ㄦ暟缁勬垨宓屽涓婁笅鏂囦腑闇€瑕佺‘淇濅笅涓€涓厓绱犵殑瀵归綈銆?
+	//72 瀛楄妭琚涓烘槸鈥滄弧瓒?16 瀛楄妭瀵归綈鈥濈殑锛屽洜涓猴細鎵€鏈夋垚鍛樼殑鍋忕Щ閲忛兘绗﹀悎 std140 鐨勫榻愯鍒欍€?
 	struct UBOParams {
-		glm::vec4 lights[4];    // 光源参数
-		float exposure = 4.5f;   // 曝光度
-		float gamma = 2.2f;     // 伽马值
+		glm::vec4 lights[4];    // 鍏夋簮鍙傛暟
+		float exposure = 4.5f;   // 鏇濆厜搴?
+		float gamma = 2.2f;     // 浼介┈鍊?
 	} uboParams;
 	
-    // 管道对象 定义渲染管线结构体，包含天空盒和 PBR 对象的管线。
+    // 绠￠亾瀵硅薄 瀹氫箟娓叉煋绠＄嚎缁撴瀯浣擄紝鍖呭惈澶╃┖鐩掑拰 PBR 瀵硅薄鐨勭绾裤€?
 	struct {
-		VkPipeline skybox{ VK_NULL_HANDLE };    // 天空盒渲染管道
-		VkPipeline pbr{ VK_NULL_HANDLE };      // PBR渲染管道
-		VkPipeline sh{ VK_NULL_HANDLE };      // 球谐函数（SH）渲染管道
+		VkPipeline skybox{ VK_NULL_HANDLE };    // 澶╃┖鐩掓覆鏌撶閬?
+		VkPipeline pbr{ VK_NULL_HANDLE };      // PBR娓叉煋绠￠亾
+		VkPipeline sh{ VK_NULL_HANDLE };      // 鐞冭皭鍑芥暟锛圫H锛夋覆鏌撶閬?
 	} pipelines;
 
-    // 描述符集 定义描述符集结构体，包含对象和天空盒的描述符集
+    // 鎻忚堪绗﹂泦 瀹氫箟鎻忚堪绗﹂泦缁撴瀯浣擄紝鍖呭惈瀵硅薄鍜屽ぉ绌虹洅鐨勬弿杩扮闆?
 	struct {
-		VkDescriptorSet object{ VK_NULL_HANDLE };     // 物体描述符集
-		VkDescriptorSet skybox{ VK_NULL_HANDLE };    // 天空盒描述符集
+		VkDescriptorSet object{ VK_NULL_HANDLE };     // 鐗╀綋鎻忚堪绗﹂泦
+		VkDescriptorSet skybox{ VK_NULL_HANDLE };    // 澶╃┖鐩掓弿杩扮闆?
 	
 	} descriptorSets;
-	// 定义管线布局和描述符集布局，用于管理着色器资源绑定
-	VkPipelineLayout pipelineLayout{ VK_NULL_HANDLE };         // 管道布局
-	VkDescriptorSetLayout descriptorSetLayout{ VK_NULL_HANDLE }; // 描述符集布局
+	// 瀹氫箟绠＄嚎甯冨眬鍜屾弿杩扮闆嗗竷灞€锛岀敤浜庣鐞嗙潃鑹插櫒璧勬簮缁戝畾
+	VkPipelineLayout pipelineLayout{ VK_NULL_HANDLE };         // 绠￠亾甯冨眬
+	VkDescriptorSetLayout descriptorSetLayout{ VK_NULL_HANDLE }; // 鎻忚堪绗﹂泦甯冨眬
 
 	
 
 
-    // 材质相关成员
-	std::vector<Material> materials;           // 材质列表
-	int32_t materialIndex = 0;                 // 当前选中的材质索引
+    // 鏉愯川鐩稿叧鎴愬憳
+	std::vector<Material> materials;           // 鏉愯川鍒楄〃
+	int32_t materialIndex = 0;                 // 褰撳墠閫変腑鐨勬潗璐ㄧ储寮?
 
-	// 定义材质名称和对象名称列表，用于 UI 显示。
-	std::vector<std::string> materialNames;     // 材质名称列表
-	std::vector<std::string> objectNames;      // 物体名称列表
+	// 瀹氫箟鏉愯川鍚嶇О鍜屽璞″悕绉板垪琛紝鐢ㄤ簬 UI 鏄剧ず銆?
+	std::vector<std::string> materialNames;     // 鏉愯川鍚嶇О鍒楄〃
+	std::vector<std::string> objectNames;      // 鐗╀綋鍚嶇О鍒楄〃
 
     /**
-     * 构造函数
-     * 初始化示例的基本设置
+     * 鏋勯€犲嚱鏁?
+     * 鍒濆鍖栫ず渚嬬殑鍩烘湰璁剧疆
      */
 	VulkanExample() : VulkanExampleBase()
 	{
-		title = "IBL and SH lighting";  // 设置窗口标题
+		title = "IBL and SH lighting";  // 璁剧疆绐楀彛鏍囬
 
-        // 设置相机参数
-		camera.type = Camera::CameraType::firstperson;//设置相机为第一人称模式。
-		camera.movementSpeed = 4.0f;//设置相机移动速度为4.0单位/秒。
-		camera.setPerspective(60.0f, (float)width / (float)height, 0.1f, 256.0f);//设置透视投影，视场角60度，宽高比基于窗口尺寸，近裁剪面0.1，远裁剪面256.0。
-		camera.rotationSpeed = 0.25f;//设置相机旋转速度为0.25。
+        // 璁剧疆鐩告満鍙傛暟
+		camera.type = Camera::CameraType::firstperson;//璁剧疆鐩告満涓虹涓€浜虹О妯″紡銆?
+		camera.movementSpeed = 4.0f;//璁剧疆鐩告満绉诲姩閫熷害涓?.0鍗曚綅/绉掋€?
+		camera.setPerspective(60.0f, (float)width / (float)height, 0.1f, 256.0f);//璁剧疆閫忚鎶曞奖锛岃鍦鸿60搴︼紝瀹介珮姣斿熀浜庣獥鍙ｅ昂瀵革紝杩戣鍓潰0.1锛岃繙瑁佸壀闈?56.0銆?
+		camera.rotationSpeed = 0.25f;//璁剧疆鐩告満鏃嬭浆閫熷害涓?.25銆?
 
-        // 设置相机初始位置和朝向
-		camera.setRotation({ -3.75f, 180.0f, 0.0f });//设置相机初始旋转角度（欧拉角：偏航-3.75度，
-		camera.setPosition({ 0.55f, 0.85f, 12.0f });//设置相机初始位置为(0.55, 0.85, 12.0)。
+        // 璁剧疆鐩告満鍒濆浣嶇疆鍜屾湞鍚?
+		camera.setRotation({ -3.75f, 180.0f, 0.0f });//璁剧疆鐩告満鍒濆鏃嬭浆瑙掑害锛堟鎷夎锛氬亸鑸?3.75搴︼紝
+		camera.setPosition({ 0.55f, 0.85f, 12.0f });//璁剧疆鐩告満鍒濆浣嶇疆涓?0.55, 0.85, 12.0)銆?
 
 		
-        // 添加预定义的金属材质 "push_back" 是一个编程术语，在 C++ 中特指向容器末尾添加元素的操作。
+        // 娣诲姞棰勫畾涔夌殑閲戝睘鏉愯川 "push_back" 鏄竴涓紪绋嬫湳璇紝鍦?C++ 涓壒鎸囧悜瀹瑰櫒鏈熬娣诲姞鍏冪礌鐨勬搷浣溿€?
 		materials.push_back(Material("Gold", glm::vec3(1.0f, 0.765557f, 0.336057f)));
 		materials.push_back(Material("Copper", glm::vec3(0.955008f, 0.637427f, 0.538163f)));
 		materials.push_back(Material("Chromium", glm::vec3(0.549585f, 0.556114f, 0.554256f)));
@@ -160,13 +160,13 @@ public:
 			materialNames.push_back(material.name);
 		}
 		objectNames = { "Sphere", "Teapot", "Torusknot", "Venus" };
-		// 设置默认材质索引为 8（对应“Black”材质）。
+		// 璁剧疆榛樿鏉愯川绱㈠紩涓?8锛堝搴斺€淏lack鈥濇潗璐級銆?
 		materialIndex = 8;
-		// 初始化天空盒名称列表（无天空盒、Pisa、Grand Canyon、Uffizi），默认选择索引 1（Pisa）。
+		// 鍒濆鍖栧ぉ绌虹洅鍚嶇О鍒楄〃锛堟棤澶╃┖鐩掋€丳isa銆丟rand Canyon銆乁ffizi锛夛紝榛樿閫夋嫨绱㈠紩 1锛圥isa锛夈€?
 		skyboxNames = {"NO Skybox", "Pisa", "Grand Canyon","uffizi_cube"};
 		
 	}
-		// 析构函数，释放 Vulkan 资源，包括管线、管线布局、描述符集布局、统一缓冲区和纹理。
+		// 鏋愭瀯鍑芥暟锛岄噴鏀?Vulkan 璧勬簮锛屽寘鎷绾裤€佺绾垮竷灞€銆佹弿杩扮闆嗗竷灞€銆佺粺涓€缂撳啿鍖哄拰绾圭悊銆?
 	~VulkanExample()
 	{
 		if (device) {
@@ -189,23 +189,23 @@ public:
 			textures.lutBrdf.destroy();
 		}
 	}
-	// 获取启用的功能，检查设备是否支持采样器各向异性。
+	// 鑾峰彇鍚敤鐨勫姛鑳斤紝妫€鏌ヨ澶囨槸鍚︽敮鎸侀噰鏍峰櫒鍚勫悜寮傛€с€?
 	virtual void getEnabledFeatures()
 	{
 		if (deviceFeatures.samplerAnisotropy) {
 			enabledFeatures.samplerAnisotropy = VK_TRUE;
 		}
 	}
-	// 定义命令缓冲区开始信息，用于初始化命令缓冲区录制。
+	// 瀹氫箟鍛戒护缂撳啿鍖哄紑濮嬩俊鎭紝鐢ㄤ簬鍒濆鍖栧懡浠ょ紦鍐插尯褰曞埗銆?
 	void buildCommandBuffers()
 	{
-		// 初始化命令缓冲区开始信息。
+		// 鍒濆鍖栧懡浠ょ紦鍐插尯寮€濮嬩俊鎭€?
 		VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
 		VkClearValue clearValues[2];
-		clearValues[0].color = { { 0.1f, 0.1f, 0.1f, 1.0f } };  // 颜色缓冲区清除为深灰色（0.1, 0.1, 0.1, 1.0）
-		clearValues[1].depthStencil = { 1.0f, 0 };             	// 深度缓冲区清除为 1.0，模板缓冲区清除为 0
+		clearValues[0].color = { { 0.1f, 0.1f, 0.1f, 1.0f } };  // 棰滆壊缂撳啿鍖烘竻闄や负娣辩伆鑹诧紙0.1, 0.1, 0.1, 1.0锛?
+		clearValues[1].depthStencil = { 1.0f, 0 };             	// 娣卞害缂撳啿鍖烘竻闄や负 1.0锛屾ā鏉跨紦鍐插尯娓呴櫎涓?0
 
-		// 配置渲染通道开始信息，指定渲染通道、渲染区域（全屏）、清除值等。
+		// 閰嶇疆娓叉煋閫氶亾寮€濮嬩俊鎭紝鎸囧畾娓叉煋閫氶亾銆佹覆鏌撳尯鍩燂紙鍏ㄥ睆锛夈€佹竻闄ゅ€肩瓑銆?
 		VkRenderPassBeginInfo renderPassBeginInfo = vks::initializers::renderPassBeginInfo();
 		renderPassBeginInfo.renderPass = renderPass;              
 		renderPassBeginInfo.renderArea.offset.x = 0;            
@@ -218,59 +218,59 @@ public:
 		
 		for (size_t i = 0; i < drawCmdBuffers.size(); ++i)
 		{
-			// 遍历所有绘制命令缓冲区，设置当前帧缓冲区。
-			// 将当前帧的渲染目标绑定到渲染通道 drawCmdBuffers[i] 是录制渲染指令的容器，与 frameBuffers[i] 一一绑定
+			// 閬嶅巻鎵€鏈夌粯鍒跺懡浠ょ紦鍐插尯锛岃缃綋鍓嶅抚缂撳啿鍖恒€?
+			// 灏嗗綋鍓嶅抚鐨勬覆鏌撶洰鏍囩粦瀹氬埌娓叉煋閫氶亾 drawCmdBuffers[i] 鏄綍鍒舵覆鏌撴寚浠ょ殑瀹瑰櫒锛屼笌 frameBuffers[i] 涓€涓€缁戝畾
 			renderPassBeginInfo.framebuffer = frameBuffers[i];
-			// 开始录制命令缓冲区，检查 Vulkan API 调用是否成功。
+			// 寮€濮嬪綍鍒跺懡浠ょ紦鍐插尯锛屾鏌?Vulkan API 璋冪敤鏄惁鎴愬姛銆?
 			VK_CHECK_RESULT(vkBeginCommandBuffer(drawCmdBuffers[i], &cmdBufInfo));
-			// 开始渲染通道，指定渲染命令内联执行
+			// 寮€濮嬫覆鏌撻€氶亾锛屾寚瀹氭覆鏌撳懡浠ゅ唴鑱旀墽琛?
 			vkCmdBeginRenderPass(drawCmdBuffers[i], &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
-			// 设置设置视口，覆盖整个窗口，指定宽度、高度和深度范围（0.0 到 1.0）
+			// 璁剧疆璁剧疆瑙嗗彛锛岃鐩栨暣涓獥鍙ｏ紝鎸囧畾瀹藉害銆侀珮搴﹀拰娣卞害鑼冨洿锛?.0 鍒?1.0锛?
 			VkViewport viewport = vks::initializers::viewport((float)width,	(float)height, 0.0f, 1.0f);
 			vkCmdSetViewport(drawCmdBuffers[i], 0, 1, &viewport);
-			// 设置裁剪矩形，覆盖整个窗口 
+			// 璁剧疆瑁佸壀鐭╁舰锛岃鐩栨暣涓獥鍙?
 			VkRect2D scissor = vks::initializers::rect2D(width,	height,	0, 0);
 			vkCmdSetScissor(drawCmdBuffers[i], 0, 1, &scissor);
 
-			// 如果选择了天空盒（skyboxIndex > 0），绑定天空盒描述符集和管线，绘制天空盒模型
+			// 濡傛灉閫夋嫨浜嗗ぉ绌虹洅锛坰kyboxIndex > 0锛夛紝缁戝畾澶╃┖鐩掓弿杩扮闆嗗拰绠＄嚎锛岀粯鍒跺ぉ绌虹洅妯″瀷
 			if (skyboxIndex > 0) {
-				// 绑定对象的描述符集，用于渲染 3D 对象
+				// 缁戝畾瀵硅薄鐨勬弿杩扮闆嗭紝鐢ㄤ簬娓叉煋 3D 瀵硅薄
 				vkCmdBindDescriptorSets(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets.skybox, 0, NULL);
 				vkCmdBindPipeline(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.skybox);
 				models.skybox.draw(drawCmdBuffers[i]);
 			}
 
 			vkCmdBindDescriptorSets(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets.object, 0, NULL);
-			// 根据渲染模式（IBL 或球谐函数）绑定 PBR 管线（当前代码中两种模式都使用相同的 PBR 管线，是待实现的逻辑）。
+			// 鏍规嵁娓叉煋妯″紡锛圛BL 鎴栫悆璋愬嚱鏁帮級缁戝畾 PBR 绠＄嚎锛堝綋鍓嶄唬鐮佷腑涓ょ妯″紡閮戒娇鐢ㄧ浉鍚岀殑 PBR 绠＄嚎锛屾槸寰呭疄鐜扮殑閫昏緫锛夈€?
 			if (renderMode == 0) {
-				// IBL渲染模式
+				// IBL娓叉煋妯″紡
 				vkCmdBindPipeline(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.pbr);
 			} else {
-				// 球谐函数渲染模式
+				// 鐞冭皭鍑芥暟娓叉煋妯″紡
 				vkCmdBindPipeline(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.sh); 
 			}
 			// vkCmdBindPipeline(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.pbr);
 
-			// 循环渲染 10 个对象，沿 X 轴排列，动态调整粗糙度和金属度（从左到右逐渐变化）。
+			// 寰幆娓叉煋 10 涓璞★紝娌?X 杞存帓鍒楋紝鍔ㄦ€佽皟鏁寸矖绯欏害鍜岄噾灞炲害锛堜粠宸﹀埌鍙抽€愭笎鍙樺寲锛夈€?
 			Material mat = materials[materialIndex];
 			const uint32_t objcount = 10;
 			for (uint32_t x = 0; x < objcount; x++) {
 				glm::vec3 pos = glm::vec3(float(x - (objcount / 2.0f)) * 2.15f, 0.0f, 0.0f);
 				mat.params.roughness = 1.0f-glm::clamp((float)x / (float)objcount, 0.005f, 1.0f);
 				mat.params.metallic = glm::clamp((float)x / (float)objcount, 0.005f, 1.0f);
-				// 通过推送常量将对象位置传递给顶点着色器，材质参数传递给片段着色器。
-				// 推送常量（Push Constants）机制
-				// 作用：高效传递小块数据到着色器，无需描述符集（Descriptor Sets）或 Uniform 缓冲区。
-				// 优势：低开销，适合每帧频繁更新的数据（如模型位置、材质参数）。
+				// 閫氳繃鎺ㄩ€佸父閲忓皢瀵硅薄浣嶇疆浼犻€掔粰椤剁偣鐫€鑹插櫒锛屾潗璐ㄥ弬鏁颁紶閫掔粰鐗囨鐫€鑹插櫒銆?
+				// 鎺ㄩ€佸父閲忥紙Push Constants锛夋満鍒?
+				// 浣滅敤锛氶珮鏁堜紶閫掑皬鍧楁暟鎹埌鐫€鑹插櫒锛屾棤闇€鎻忚堪绗﹂泦锛圖escriptor Sets锛夋垨 Uniform 缂撳啿鍖恒€?
+				// 浼樺娍锛氫綆寮€閿€锛岄€傚悎姣忓抚棰戠箒鏇存柊鐨勬暟鎹紙濡傛ā鍨嬩綅缃€佹潗璐ㄥ弬鏁帮級銆?
 				vkCmdPushConstants(drawCmdBuffers[i], pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::vec3), &pos);
 				vkCmdPushConstants(drawCmdBuffers[i], pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(glm::vec3), sizeof(Material::PushBlock), &mat);
-				// 绘制当前选中的对象模型。
+				// 缁樺埗褰撳墠閫変腑鐨勫璞℃ā鍨嬨€?
 				models.objects[models.objectIndex].draw(drawCmdBuffers[i]);
 
 			}
-			// 绘制用户界面（UI），包含材质选择、对象选择等控件。
+			// 缁樺埗鐢ㄦ埛鐣岄潰锛圲I锛夛紝鍖呭惈鏉愯川閫夋嫨銆佸璞￠€夋嫨绛夋帶浠躲€?
 			drawUI(drawCmdBuffers[i]);
-			// 结束渲染通道
+			// 缁撴潫娓叉煋閫氶亾
 			vkCmdEndRenderPass(drawCmdBuffers[i]);
 
 			VK_CHECK_RESULT(vkEndCommandBuffer(drawCmdBuffers[i]));
@@ -279,17 +279,17 @@ public:
 
 	void loadAssets()
 	{
-		// 定义 glTF 模型加载标志，预变换顶点并翻转 Y 轴（适配 Vulkan 坐标系）。
+		// 瀹氫箟 glTF 妯″瀷鍔犺浇鏍囧織锛岄鍙樻崲椤剁偣骞剁炕杞?Y 杞达紙閫傞厤 Vulkan 鍧愭爣绯伙級銆?
 		uint32_t glTFLoadingFlags = vkglTF::FileLoadingFlags::PreTransformVertices | vkglTF::FileLoadingFlags::FlipY;
-		// 加载天空盒模型（立方体 glTF 文件）。
+		// 鍔犺浇澶╃┖鐩掓ā鍨嬶紙绔嬫柟浣?glTF 鏂囦欢锛夈€?
 		models.skybox.loadFromFile(getAssetPath() + "models/cube.gltf", vulkanDevice, queue, glTFLoadingFlags);
-		// 加载对象模型（球体、茶壶、环面结、金星雕像）。
+		// 鍔犺浇瀵硅薄妯″瀷锛堢悆浣撱€佽尪澹躲€佺幆闈㈢粨銆侀噾鏄熼洉鍍忥級銆?
 		std::vector<std::string> filenames = { "sphere.gltf", "teapot.gltf", "torusknot.gltf", "venus.gltf" };
 		models.objects.resize(filenames.size());
 		for (size_t i = 0; i < filenames.size(); i++) {
 			models.objects[i].loadFromFile(getAssetPath() + "models/" + filenames[i], vulkanDevice, queue, glTFLoadingFlags);
 		}
-		// HDR cubemap 加载环境立方体贴图（Pisa、Grand Canyon、Uffizi），使用 16 位浮点格式
+		// HDR cubemap 鍔犺浇鐜绔嬫柟浣撹创鍥撅紙Pisa銆丟rand Canyon銆乁ffizi锛夛紝浣跨敤 16 浣嶆诞鐐规牸寮?
 		textures.environmentCube.loadFromFile(getAssetPath() + "textures/hdr/pisa_cube.ktx", VK_FORMAT_R16G16B16A16_SFLOAT, vulkanDevice, queue);
 		textures.environmentCube2.loadFromFile(getAssetPath() + "textures/hdr/gcanyon_cube.ktx", VK_FORMAT_R16G16B16A16_SFLOAT, vulkanDevice, queue);
         textures.environmentCube3.loadFromFile(getAssetPath() + "textures/hdr/uffizi_cube.ktx", VK_FORMAT_R16G16B16A16_SFLOAT, vulkanDevice, queue);
@@ -300,20 +300,20 @@ public:
 
 	void setupDescriptors()
 	{
-		// Descriptor Pool 定义描述符池大小，分配 4 个统一缓冲区和 6 个组合图像采样器。
+		// Descriptor Pool 瀹氫箟鎻忚堪绗︽睜澶у皬锛屽垎閰?4 涓粺涓€缂撳啿鍖哄拰 6 涓粍鍚堝浘鍍忛噰鏍峰櫒銆?
 		std::vector<VkDescriptorPoolSize> poolSizes = {
 			vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 4),
 			vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 6)
 		};
-		// 创建描述符池，分配 3 个描述符集。
-		// 4 个统一缓冲区和 6 个组合图像采样器被分配给下面两个符集
-		// 物体渲染描述符集 ( descriptorSets.object )
-		// 绑定天空盒纹理和采样器。
+		// 鍒涘缓鎻忚堪绗︽睜锛屽垎閰?3 涓弿杩扮闆嗐€?
+		// 4 涓粺涓€缂撳啿鍖哄拰 6 涓粍鍚堝浘鍍忛噰鏍峰櫒琚垎閰嶇粰涓嬮潰涓や釜绗﹂泦
+		// 鐗╀綋娓叉煋鎻忚堪绗﹂泦 ( descriptorSets.object )
+		// 缁戝畾澶╃┖鐩掔汗鐞嗗拰閲囨牱鍣ㄣ€?
 		VkDescriptorPoolCreateInfo descriptorPoolInfo =	vks::initializers::descriptorPoolCreateInfo(poolSizes, 3);
 		VK_CHECK_RESULT(vkCreateDescriptorPool(device, &descriptorPoolInfo, nullptr, &descriptorPool));
 
 		// Descriptor set layout 
-		// 定义描述符集布局绑定，包括 3 个统一缓冲区（矩阵和参数）和 3 个图像采样器（辐照度、BRDF、预过滤贴图）。
+		// 瀹氫箟鎻忚堪绗﹂泦甯冨眬缁戝畾锛屽寘鎷?3 涓粺涓€缂撳啿鍖猴紙鐭╅樀鍜屽弬鏁帮級鍜?3 涓浘鍍忛噰鏍峰櫒锛堣緪鐓у害銆丅RDF銆侀杩囨护璐村浘锛夈€?
 		std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {
 			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0),
 			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT, 1),
@@ -322,14 +322,14 @@ public:
 			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 4),
 			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT, 5),  // SH coefficients
 		};
-		// 创建描述符集布局
+		// 鍒涘缓鎻忚堪绗﹂泦甯冨眬
 		VkDescriptorSetLayoutCreateInfo descriptorLayout = 	vks::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings);
 		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &descriptorSetLayout));
 
-		// Descriptor sets 为对象分配描述符集。初始化描述符集分配信息，分配1个描述符集。
+		// Descriptor sets 涓哄璞″垎閰嶆弿杩扮闆嗐€傚垵濮嬪寲鎻忚堪绗﹂泦鍒嗛厤淇℃伅锛屽垎閰?涓弿杩扮闆嗐€?
 		VkDescriptorSetAllocateInfo allocInfo = vks::initializers::descriptorSetAllocateInfo(descriptorPool, &descriptorSetLayout, 1);
 
-		// Objects 配置对象描述符集，绑定统一缓冲区和纹理资源，并更新描述符集
+		// Objects 閰嶇疆瀵硅薄鎻忚堪绗﹂泦锛岀粦瀹氱粺涓€缂撳啿鍖哄拰绾圭悊璧勬簮锛屽苟鏇存柊鎻忚堪绗﹂泦
 		VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSets.object));
 		std::vector<VkWriteDescriptorSet> writeDescriptorSets = {
 			vks::initializers::writeDescriptorSet(descriptorSets.object, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &uniformBuffers.object.descriptor),
@@ -341,7 +341,7 @@ public:
 		};
 		vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, NULL);
 
-		// Sky box 为天空盒分配描述符集，绑定天空盒统一缓冲区和环境贴图，并更新描述符集。
+		// Sky box 涓哄ぉ绌虹洅鍒嗛厤鎻忚堪绗﹂泦锛岀粦瀹氬ぉ绌虹洅缁熶竴缂撳啿鍖哄拰鐜璐村浘锛屽苟鏇存柊鎻忚堪绗﹂泦銆?
 		VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSets.skybox));
 		writeDescriptorSets = {
 			vks::initializers::writeDescriptorSet(descriptorSets.skybox, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &uniformBuffers.skybox.descriptor),
@@ -353,77 +353,77 @@ public:
 
 	void preparePipelines()
 	{
-		// 配置输入组装状态，使用三角形列表拓扑。
+		// 閰嶇疆杈撳叆缁勮鐘舵€侊紝浣跨敤涓夎褰㈠垪琛ㄦ嫇鎵戙€?
 		VkPipelineInputAssemblyStateCreateInfo inputAssemblyState =
 			vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
-		// 配置光栅化状态，填充模式，无背面剔除，逆时针为正面。
+		// 閰嶇疆鍏夋爡鍖栫姸鎬侊紝濉厖妯″紡锛屾棤鑳岄潰鍓旈櫎锛岄€嗘椂閽堜负姝ｉ潰銆?
 		VkPipelineRasterizationStateCreateInfo rasterizationState =
 			vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE);
-		// 配置颜色混合状态，禁用混合	
+		// 閰嶇疆棰滆壊娣峰悎鐘舵€侊紝绂佺敤娣峰悎	
 		VkPipelineColorBlendAttachmentState blendAttachmentState =
 			vks::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE);
-		// 配置颜色混合状态，指定一个附件。
+		// 閰嶇疆棰滆壊娣峰悎鐘舵€侊紝鎸囧畾涓€涓檮浠躲€?
 		VkPipelineColorBlendStateCreateInfo colorBlendState =
 			vks::initializers::pipelineColorBlendStateCreateInfo(1, &blendAttachmentState);
-		// 配置深度和模板状态，初始禁用深度测试和写入。
+		// 閰嶇疆娣卞害鍜屾ā鏉跨姸鎬侊紝鍒濆绂佺敤娣卞害娴嬭瘯鍜屽啓鍏ャ€?
 		VkPipelineDepthStencilStateCreateInfo depthStencilState =
 			vks::initializers::pipelineDepthStencilStateCreateInfo(VK_FALSE, VK_FALSE, VK_COMPARE_OP_LESS_OR_EQUAL);
-		// 配置视口状态，指定一个视口和裁剪矩形。
+		// 閰嶇疆瑙嗗彛鐘舵€侊紝鎸囧畾涓€涓鍙ｅ拰瑁佸壀鐭╁舰銆?
 		VkPipelineViewportStateCreateInfo viewportState =
 			vks::initializers::pipelineViewportStateCreateInfo(1, 1);
-		// 配置多重采样状态，禁用多重采样（单采样）。
+		// 閰嶇疆澶氶噸閲囨牱鐘舵€侊紝绂佺敤澶氶噸閲囨牱锛堝崟閲囨牱锛夈€?
 		VkPipelineMultisampleStateCreateInfo multisampleState =
 			vks::initializers::pipelineMultisampleStateCreateInfo(VK_SAMPLE_COUNT_1_BIT);
-		// 定义动态状态，包括视口和裁剪矩形。
+		// 瀹氫箟鍔ㄦ€佺姸鎬侊紝鍖呮嫭瑙嗗彛鍜岃鍓煩褰€?
 		std::vector<VkDynamicState> dynamicStateEnables = {
 			VK_DYNAMIC_STATE_VIEWPORT,
 			VK_DYNAMIC_STATE_SCISSOR
 		};
-		// 配置动态状态。
+		// 閰嶇疆鍔ㄦ€佺姸鎬併€?
 		VkPipelineDynamicStateCreateInfo dynamicState =
 			vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables);
 
-		// Pipeline layout 初始化管线布局创建信息，指定描述符集布局。
+		// Pipeline layout 鍒濆鍖栫绾垮竷灞€鍒涘缓淇℃伅锛屾寚瀹氭弿杩扮闆嗗竷灞€銆?
 		VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayout, 1);
-		// Push constant ranges 定义推送常量范围：
+		// Push constant ranges 瀹氫箟鎺ㄩ€佸父閲忚寖鍥达細
 		std::vector<VkPushConstantRange> pushConstantRanges = {
-			// 第一个范围：顶点着色器，传输 glm::vec3（物体位置），偏移0。
+			// 绗竴涓寖鍥达細椤剁偣鐫€鑹插櫒锛屼紶杈?glm::vec3锛堢墿浣撲綅缃級锛屽亸绉?銆?
 			vks::initializers::pushConstantRange(VK_SHADER_STAGE_VERTEX_BIT, sizeof(glm::vec3), 0),
-			// 第二个范围：片段着色器，传输 Material::PushBlock（材质参数），偏移 sizeof(glm::vec3)。
+			// 绗簩涓寖鍥达細鐗囨鐫€鑹插櫒锛屼紶杈?Material::PushBlock锛堟潗璐ㄥ弬鏁帮級锛屽亸绉?sizeof(glm::vec3)銆?
 			vks::initializers::pushConstantRange(VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(Material::PushBlock), sizeof(glm::vec3)),
 
 		};
-		// 指定两个推送常量范围。
+		// 鎸囧畾涓や釜鎺ㄩ€佸父閲忚寖鍥淬€?
 		pipelineLayoutCreateInfo.pushConstantRangeCount = 2; 
-		// 设置推送常量范围。
+		// 璁剧疆鎺ㄩ€佸父閲忚寖鍥淬€?
 		pipelineLayoutCreateInfo.pPushConstantRanges = pushConstantRanges.data();
-		// 创建管线布局。
+		// 鍒涘缓绠＄嚎甯冨眬銆?
 		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout));
-		// 定义两个着色器阶段（顶点和片段）。
+		// 瀹氫箟涓や釜鐫€鑹插櫒闃舵锛堥《鐐瑰拰鐗囨锛夈€?
 		std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages;
 
 		// Pipelines
-		// 初始化图形管线创建信息，指定管线布局和渲染通道。
+		// 鍒濆鍖栧浘褰㈢绾垮垱寤轰俊鎭紝鎸囧畾绠＄嚎甯冨眬鍜屾覆鏌撻€氶亾銆?
 		VkGraphicsPipelineCreateInfo pipelineCI = vks::initializers::pipelineCreateInfo(pipelineLayout, renderPass);
-		// 设置输入组装状态。
+		// 璁剧疆杈撳叆缁勮鐘舵€併€?
 		pipelineCI.pInputAssemblyState = &inputAssemblyState;
-		// 设置光栅化状态。
+		// 璁剧疆鍏夋爡鍖栫姸鎬併€?
 		pipelineCI.pRasterizationState = &rasterizationState;
-		// 设置颜色混合状态。
+		// 璁剧疆棰滆壊娣峰悎鐘舵€併€?
 		pipelineCI.pColorBlendState = &colorBlendState;	
-		// 设置深度和模板状态。
+		// 璁剧疆娣卞害鍜屾ā鏉跨姸鎬併€?
 		pipelineCI.pMultisampleState = &multisampleState;
-		// 设置视口状态。
+		// 璁剧疆瑙嗗彛鐘舵€併€?
 		pipelineCI.pViewportState = &viewportState;
-		// 设置深度和模板状态。
+		// 璁剧疆娣卞害鍜屾ā鏉跨姸鎬併€?
 		pipelineCI.pDepthStencilState = &depthStencilState;
-		// 设置动态状态。
+		// 璁剧疆鍔ㄦ€佺姸鎬併€?
 		pipelineCI.pDynamicState = &dynamicState;
-		// 设置着色器阶段数量（2）。
+		// 璁剧疆鐫€鑹插櫒闃舵鏁伴噺锛?锛夈€?
 		pipelineCI.stageCount = static_cast<uint32_t>(shaderStages.size());
-		// 设置着色器阶段数组。
+		// 璁剧疆鐫€鑹插櫒闃舵鏁扮粍銆?
 		pipelineCI.pStages = shaderStages.data();
-		// 设置顶点输入状态，包括位置、法线和UV坐标。
+		// 璁剧疆椤剁偣杈撳叆鐘舵€侊紝鍖呮嫭浣嶇疆銆佹硶绾垮拰UV鍧愭爣銆?
 		pipelineCI.pVertexInputState = vkglTF::Vertex::getPipelineVertexInputState({ vkglTF::VertexComponent::Position, vkglTF::VertexComponent::Normal, vkglTF::VertexComponent::UV });
 
 		// Skybox pipeline (background cube)
@@ -451,86 +451,86 @@ public:
 	}
 
 	// Generate a BRDF integration map used as a look-up-table (stores roughness / NdotV)
-	// 生成BRDF查找表（LUT），用于PBR镜面反射计算。
+	// 鐢熸垚BRDF鏌ユ壘琛紙LUT锛夛紝鐢ㄤ簬PBR闀滈潰鍙嶅皠璁＄畻銆?
 	void generateBRDFLUT()
 	{
-		// 记录开始时间，用于计算生成时间。
+		// 璁板綍寮€濮嬫椂闂达紝鐢ㄤ簬璁＄畻鐢熸垚鏃堕棿銆?
 		auto tStart = std::chrono::high_resolution_clock::now();
-		// 定义BRDF LUT的格式为16位浮点RG（红绿通道）。
+		// 瀹氫箟BRDF LUT鐨勬牸寮忎负16浣嶆诞鐐筊G锛堢孩缁块€氶亾锛夈€?
 		const VkFormat format = VK_FORMAT_R16G16_SFLOAT;	// R16G16 is supported pretty much everywhere
-		// 定义BRDF LUT的尺寸为512x512像素
+		// 瀹氫箟BRDF LUT鐨勫昂瀵镐负512x512鍍忕礌
 		const int32_t dim = 512;
-		// Image 创建BRDF LUT纹理。 
-		VkImageCreateInfo imageCI = vks::initializers::imageCreateInfo();// 初始化图像创建信息。
-		imageCI.imageType = VK_IMAGE_TYPE_2D;// 设置图像类型为2D。
-		imageCI.format = format;	// 设置图像格式为R16G16_SFLOAT。
-		imageCI.extent.width = dim;	// 设置图像宽度为512。
-		imageCI.extent.height = dim;// 设置图像高度为512。
-		imageCI.extent.depth = 1;	// 设置图像深度为1。
-		imageCI.mipLevels = 1;		// 设置图像Mipmap级别为1。无MIP映射
-		imageCI.arrayLayers = 1;	// 设置图像数组层为1。
-		imageCI.samples = VK_SAMPLE_COUNT_1_BIT; // 设置单采样（无多重采样）。
-		imageCI.tiling = VK_IMAGE_TILING_OPTIMAL;// 设置图像平铺方式为最佳（GPU优化）。
-		imageCI.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;	// 设置图像用途为颜色附件和采样。
-		VK_CHECK_RESULT(vkCreateImage(device, &imageCI, nullptr, &textures.lutBrdf.image)); // 创建BRDF LUT图像。
-		VkMemoryAllocateInfo memAlloc = vks::initializers::memoryAllocateInfo(); // 初始化内存分配信息
-		VkMemoryRequirements memReqs;											 // 定义变量存储图像内存需求。
-		vkGetImageMemoryRequirements(device, textures.lutBrdf.image, &memReqs);	 // 获取图像内存需求。
-		memAlloc.allocationSize = memReqs.size;									 // 设置内存分配大小为图像内存需求大小。
-		// 选择适合的内存类型（设备本地）。
+		// Image 鍒涘缓BRDF LUT绾圭悊銆?
+		VkImageCreateInfo imageCI = vks::initializers::imageCreateInfo();// 鍒濆鍖栧浘鍍忓垱寤轰俊鎭€?
+		imageCI.imageType = VK_IMAGE_TYPE_2D;// 璁剧疆鍥惧儚绫诲瀷涓?D銆?
+		imageCI.format = format;	// 璁剧疆鍥惧儚鏍煎紡涓篟16G16_SFLOAT銆?
+		imageCI.extent.width = dim;	// 璁剧疆鍥惧儚瀹藉害涓?12銆?
+		imageCI.extent.height = dim;// 璁剧疆鍥惧儚楂樺害涓?12銆?
+		imageCI.extent.depth = 1;	// 璁剧疆鍥惧儚娣卞害涓?銆?
+		imageCI.mipLevels = 1;		// 璁剧疆鍥惧儚Mipmap绾у埆涓?銆傛棤MIP鏄犲皠
+		imageCI.arrayLayers = 1;	// 璁剧疆鍥惧儚鏁扮粍灞備负1銆?
+		imageCI.samples = VK_SAMPLE_COUNT_1_BIT; // 璁剧疆鍗曢噰鏍凤紙鏃犲閲嶉噰鏍凤級銆?
+		imageCI.tiling = VK_IMAGE_TILING_OPTIMAL;// 璁剧疆鍥惧儚骞抽摵鏂瑰紡涓烘渶浣筹紙GPU浼樺寲锛夈€?
+		imageCI.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;	// 璁剧疆鍥惧儚鐢ㄩ€斾负棰滆壊闄勪欢鍜岄噰鏍枫€?
+		VK_CHECK_RESULT(vkCreateImage(device, &imageCI, nullptr, &textures.lutBrdf.image)); // 鍒涘缓BRDF LUT鍥惧儚銆?
+		VkMemoryAllocateInfo memAlloc = vks::initializers::memoryAllocateInfo(); // 鍒濆鍖栧唴瀛樺垎閰嶄俊鎭?
+		VkMemoryRequirements memReqs;											 // 瀹氫箟鍙橀噺瀛樺偍鍥惧儚鍐呭瓨闇€姹傘€?
+		vkGetImageMemoryRequirements(device, textures.lutBrdf.image, &memReqs);	 // 鑾峰彇鍥惧儚鍐呭瓨闇€姹傘€?
+		memAlloc.allocationSize = memReqs.size;									 // 璁剧疆鍐呭瓨鍒嗛厤澶у皬涓哄浘鍍忓唴瀛橀渶姹傚ぇ灏忋€?
+		// 閫夋嫨閫傚悎鐨勫唴瀛樼被鍨嬶紙璁惧鏈湴锛夈€?
 		memAlloc.memoryTypeIndex = vulkanDevice->getMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-		// 分配内存。 
+		// 鍒嗛厤鍐呭瓨銆?
 		VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &textures.lutBrdf.deviceMemory));
-		// 将内存绑定到BRDF LUT图像。
+		// 灏嗗唴瀛樼粦瀹氬埌BRDF LUT鍥惧儚銆?
 		VK_CHECK_RESULT(vkBindImageMemory(device, textures.lutBrdf.image, textures.lutBrdf.deviceMemory, 0));
-		// Image view 初始化图像视图创建信息。
+		// Image view 鍒濆鍖栧浘鍍忚鍥惧垱寤轰俊鎭€?
 		VkImageViewCreateInfo viewCI = vks::initializers::imageViewCreateInfo();
-		viewCI.viewType = VK_IMAGE_VIEW_TYPE_2D;// 设置视图类型为2D。
-		viewCI.format = format;					// 设置视图格式为R16G16_SFLOAT。
-		viewCI.subresourceRange = {};			// 初始化子资源范围。
-		viewCI.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;// 设置子资源为颜色附件。
-		viewCI.subresourceRange.levelCount = 1;//  设置MIP级别数为1。
-		viewCI.subresourceRange.layerCount = 1;//  设置层数为1。
-		viewCI.image = textures.lutBrdf.image;//   关联BRDF LUT图像。
-		VK_CHECK_RESULT(vkCreateImageView(device, &viewCI, nullptr, &textures.lutBrdf.view));// 创建BRDF LUT图像视图。
+		viewCI.viewType = VK_IMAGE_VIEW_TYPE_2D;// 璁剧疆瑙嗗浘绫诲瀷涓?D銆?
+		viewCI.format = format;					// 璁剧疆瑙嗗浘鏍煎紡涓篟16G16_SFLOAT銆?
+		viewCI.subresourceRange = {};			// 鍒濆鍖栧瓙璧勬簮鑼冨洿銆?
+		viewCI.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;// 璁剧疆瀛愯祫婧愪负棰滆壊闄勪欢銆?
+		viewCI.subresourceRange.levelCount = 1;//  璁剧疆MIP绾у埆鏁颁负1銆?
+		viewCI.subresourceRange.layerCount = 1;//  璁剧疆灞傛暟涓?銆?
+		viewCI.image = textures.lutBrdf.image;//   鍏宠仈BRDF LUT鍥惧儚銆?
+		VK_CHECK_RESULT(vkCreateImageView(device, &viewCI, nullptr, &textures.lutBrdf.view));// 鍒涘缓BRDF LUT鍥惧儚瑙嗗浘銆?
 		// Sampler
-		VkSamplerCreateInfo samplerCI = vks::initializers::samplerCreateInfo();// 初始化采样器创建信息。
-		samplerCI.magFilter = VK_FILTER_LINEAR;// 设置放大过滤为线性。
-		samplerCI.minFilter = VK_FILTER_LINEAR;// 设置缩小过滤为线性。
-		samplerCI.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;// 设置MIP映射模式为线性。
-		samplerCI.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;// 设置U方向纹理寻址为边缘夹紧。
-		samplerCI.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;// 设置V方向纹理寻址为边缘夹紧。
-		samplerCI.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;// 设置W方向纹理寻址为边缘夹紧。
-		samplerCI.minLod = 0.0f;// 设置最小LOD为0。
-		samplerCI.maxLod = 1.0f;// 设置最大LOD为1。
-		samplerCI.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;// 设置边界颜色为不透明白色。。
-		VK_CHECK_RESULT(vkCreateSampler(device, &samplerCI, nullptr, &textures.lutBrdf.sampler));// 创建BRDF LUT采样器。
+		VkSamplerCreateInfo samplerCI = vks::initializers::samplerCreateInfo();// 鍒濆鍖栭噰鏍峰櫒鍒涘缓淇℃伅銆?
+		samplerCI.magFilter = VK_FILTER_LINEAR;// 璁剧疆鏀惧ぇ杩囨护涓虹嚎鎬с€?
+		samplerCI.minFilter = VK_FILTER_LINEAR;// 璁剧疆缂╁皬杩囨护涓虹嚎鎬с€?
+		samplerCI.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;// 璁剧疆MIP鏄犲皠妯″紡涓虹嚎鎬с€?
+		samplerCI.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;// 璁剧疆U鏂瑰悜绾圭悊瀵诲潃涓鸿竟缂樺す绱с€?
+		samplerCI.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;// 璁剧疆V鏂瑰悜绾圭悊瀵诲潃涓鸿竟缂樺す绱с€?
+		samplerCI.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;// 璁剧疆W鏂瑰悜绾圭悊瀵诲潃涓鸿竟缂樺す绱с€?
+		samplerCI.minLod = 0.0f;// 璁剧疆鏈€灏廘OD涓?銆?
+		samplerCI.maxLod = 1.0f;// 璁剧疆鏈€澶OD涓?銆?
+		samplerCI.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;// 璁剧疆杈圭晫棰滆壊涓轰笉閫忔槑鐧借壊銆傘€?
+		VK_CHECK_RESULT(vkCreateSampler(device, &samplerCI, nullptr, &textures.lutBrdf.sampler));// 鍒涘缓BRDF LUT閲囨牱鍣ㄣ€?
 
-		textures.lutBrdf.descriptor.imageView = textures.lutBrdf.view;// 设置BRDF LUT描述符的图像视图。
-		textures.lutBrdf.descriptor.sampler = textures.lutBrdf.sampler;// 设置BRDF LUT描述符的采样器。
-		textures.lutBrdf.descriptor.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;// 设置图像布局为着色器只读。
-		textures.lutBrdf.device = vulkanDevice;// 关联Vulkan设备。
+		textures.lutBrdf.descriptor.imageView = textures.lutBrdf.view;// 璁剧疆BRDF LUT鎻忚堪绗︾殑鍥惧儚瑙嗗浘銆?
+		textures.lutBrdf.descriptor.sampler = textures.lutBrdf.sampler;// 璁剧疆BRDF LUT鎻忚堪绗︾殑閲囨牱鍣ㄣ€?
+		textures.lutBrdf.descriptor.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;// 璁剧疆鍥惧儚甯冨眬涓虹潃鑹插櫒鍙銆?
+		textures.lutBrdf.device = vulkanDevice;// 鍏宠仈Vulkan璁惧銆?
 
 		// FB, Att, RP, Pipe, etc.
-		VkAttachmentDescription attDesc = {};// 初始化附件描述。
+		VkAttachmentDescription attDesc = {};// 鍒濆鍖栭檮浠舵弿杩般€?
 		// Color attachment
-		attDesc.format = format; // 设置附件格式为R16G16_SFLOAT。
-		attDesc.samples = VK_SAMPLE_COUNT_1_BIT;// 设置单采样。
-		attDesc.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;// 加载时清除附件。
-		attDesc.storeOp = VK_ATTACHMENT_STORE_OP_STORE;// 存储附件数据。
-		attDesc.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;// 忽略模板加载。
-		attDesc.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;// 忽略模板存储。
-		attDesc.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;// 初始布局为未定义。
-		attDesc.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;// 最终布局为着色器只读。
-		VkAttachmentReference colorReference = { 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL };// 定义颜色附件引用，索引0，布局为颜色附件。
+		attDesc.format = format; // 璁剧疆闄勪欢鏍煎紡涓篟16G16_SFLOAT銆?
+		attDesc.samples = VK_SAMPLE_COUNT_1_BIT;// 璁剧疆鍗曢噰鏍枫€?
+		attDesc.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;// 鍔犺浇鏃舵竻闄ら檮浠躲€?
+		attDesc.storeOp = VK_ATTACHMENT_STORE_OP_STORE;// 瀛樺偍闄勪欢鏁版嵁銆?
+		attDesc.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;// 蹇界暐妯℃澘鍔犺浇銆?
+		attDesc.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;// 蹇界暐妯℃澘瀛樺偍銆?
+		attDesc.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;// 鍒濆甯冨眬涓烘湭瀹氫箟銆?
+		attDesc.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;// 鏈€缁堝竷灞€涓虹潃鑹插櫒鍙銆?
+		VkAttachmentReference colorReference = { 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL };// 瀹氫箟棰滆壊闄勪欢寮曠敤锛岀储寮?锛屽竷灞€涓洪鑹查檮浠躲€?
 
-		VkSubpassDescription subpassDescription = {};// 初始化子通道描述
-		subpassDescription.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;// 设置子通道为图形管线。
-		subpassDescription.colorAttachmentCount = 1; // 设置一个颜色附件。
-		subpassDescription.pColorAttachments = &colorReference;// 关联颜色附件引用。
+		VkSubpassDescription subpassDescription = {};// 鍒濆鍖栧瓙閫氶亾鎻忚堪
+		subpassDescription.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;// 璁剧疆瀛愰€氶亾涓哄浘褰㈢绾裤€?
+		subpassDescription.colorAttachmentCount = 1; // 璁剧疆涓€涓鑹查檮浠躲€?
+		subpassDescription.pColorAttachments = &colorReference;// 鍏宠仈棰滆壊闄勪欢寮曠敤銆?
 
 		// Use subpass dependencies for layout transitions
-		std::array<VkSubpassDependency, 2> dependencies;// 定义两个子通道依赖。
+		std::array<VkSubpassDependency, 2> dependencies;// 瀹氫箟涓や釜瀛愰€氶亾渚濊禆銆?
 		dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
 		dependencies[0].dstSubpass = 0;
 		dependencies[0].srcStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
@@ -1446,7 +1446,7 @@ public:
 			VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
 			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
 			&uniformBuffers.sh,
-			sizeof(SHCoefficients))); // 显式指定 144 字节
+			sizeof(SHCoefficients))); // 鏄惧紡鎸囧畾 144 瀛楄妭
 		
 		// Map persistent
 		VK_CHECK_RESULT(uniformBuffers.object.map());
@@ -1515,7 +1515,7 @@ public:
 	}
 
 	virtual void loadSkyboxTexture() {
-		// 根据 skyboxIndex 选择正确的环境贴图
+		// 鏍规嵁 skyboxIndex 閫夋嫨姝ｇ‘鐨勭幆澧冭创鍥?
 		VkDescriptorImageInfo* currentSkyboxDescriptor = nullptr;
 		switch(skyboxIndex) {
         case 0: currentSkyboxDescriptor = nullptr; break;
@@ -1524,30 +1524,30 @@ public:
         case 3: currentSkyboxDescriptor = &textures.environmentCube3.descriptor; break;
     }
 		if (currentSkyboxDescriptor) {
-			// 更新描述符集
+			// 鏇存柊鎻忚堪绗﹂泦
 			VkWriteDescriptorSet writeDescriptorSet = vks::initializers::writeDescriptorSet(
 				descriptorSets.skybox,
 				VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-				2,  // 绑定点
+				2,  // 缁戝畾鐐?
 				currentSkyboxDescriptor);
 			vkUpdateDescriptorSets(device, 1, &writeDescriptorSet, 0, nullptr);
 		}
 
 	
 		if (currentSkyboxDescriptor) {
-			// 更新描述符集
+			// 鏇存柊鎻忚堪绗﹂泦
 			VkWriteDescriptorSet writeDescriptorSet = vks::initializers::writeDescriptorSet(
 				descriptorSets.skybox,
 				VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-				2,  // 绑定点
+				2,  // 缁戝畾鐐?
 				currentSkyboxDescriptor);
 			vkUpdateDescriptorSets(device, 1, &writeDescriptorSet, 0, nullptr);
 
 		}
 		
-		// 更新 uniform buffer 并重建命令缓冲区
+		// 鏇存柊 uniform buffer 骞堕噸寤哄懡浠ょ紦鍐插尯
 		
-		generateSHCoefficients();  // 更新 SH 系数
+		generateSHCoefficients();  // 鏇存柊 SH 绯绘暟
 		updateUniformBuffers();
 		buildCommandBuffers();
 	}
@@ -1569,16 +1569,16 @@ public:
 				updateParams();
 			}
 			if (overlay->comboBox("Skybox", &skyboxIndex, skyboxNames)) {
-				loadSkyboxTexture(); // 已包含buildCommandBuffers调用
+				loadSkyboxTexture(); // 宸插寘鍚玝uildCommandBuffers璋冪敤
 			}
-			// 添加渲染模式选择
+			// 娣诲姞娓叉煋妯″紡閫夋嫨
 			if (overlay->comboBox("Render Mode", &renderMode, renderModeNames)) {
-				// 切换渲染模式时重建命令缓冲区
+				// 鍒囨崲娓叉煋妯″紡鏃堕噸寤哄懡浠ょ紦鍐插尯
 				buildCommandBuffers();
 			}
 		}
 	}
-	// 辅助函数：获取 SH basis (包含 normalization，常量匹配 LearnOpenGL)
+	// 杈呭姪鍑芥暟锛氳幏鍙?SH basis (鍖呭惈 normalization锛屽父閲忓尮閰?LearnOpenGL)
 	std::vector<float> getSHBasis(const glm::vec3& dir) {
 		float x = dir.x, y = dir.y, z = dir.z;
 		float x2 = x * x, y2 = y * y, z2 = z * z;
@@ -1625,19 +1625,19 @@ void saveCubemapToPPM(const char* filename, uint16_t* data, uint32_t width, uint
     }
     file.close();
 }
-// 用途：，根据给定的 3D 方向向量从立方体贴图中采样颜色。
+// 鐢ㄩ€旓細锛屾牴鎹粰瀹氱殑 3D 鏂瑰悜鍚戦噺浠庣珛鏂逛綋璐村浘涓噰鏍烽鑹层€?
 glm::vec3 sampleCubemap(uint16_t* data, uint32_t width, uint32_t height, glm::vec3 dir) {
-	// maxAxis：存储方向向量中绝对值最大的分量，用于确定采样哪个立方体贴图面。
-	// u, v：纹理坐标（范围 [0, 1]），用于在选定面上采样。
-	// face：表示立方体贴图的六个面（0 到 5，通常对应 +X, -X, +Y, -Y, +Z, -Z）。
+	// maxAxis锛氬瓨鍌ㄦ柟鍚戝悜閲忎腑缁濆鍊兼渶澶х殑鍒嗛噺锛岀敤浜庣‘瀹氶噰鏍峰摢涓珛鏂逛綋璐村浘闈€?
+	// u, v锛氱汗鐞嗗潗鏍囷紙鑼冨洿 [0, 1]锛夛紝鐢ㄤ簬鍦ㄩ€夊畾闈笂閲囨牱銆?
+	// face锛氳〃绀虹珛鏂逛綋璐村浘鐨勫叚涓潰锛? 鍒?5锛岄€氬父瀵瑰簲 +X, -X, +Y, -Y, +Z, -Z锛夈€?
     float maxAxis, u, v;
 	uint32_t face;
-	// 检查方向向量的 x 分量是否具有最大绝对值，以确定是否采样 X 轴相关面（+X 或 -X）。
+	// 妫€鏌ユ柟鍚戝悜閲忕殑 x 鍒嗛噺鏄惁鍏锋湁鏈€澶х粷瀵瑰€硷紝浠ョ‘瀹氭槸鍚﹂噰鏍?X 杞寸浉鍏抽潰锛?X 鎴?-X锛夈€?
     if (std::abs(dir.x) >= std::abs(dir.y) && std::abs(dir.x) >= std::abs(dir.z)) {
-	// maxAxis = std::abs(dir.x)：将 x 分量的绝对值存储为最大轴。
-    // face = dir.x > 0 ? 0 : 1：如果 x 为正，选择 +X 面（face=0）；否则选择 -X 面（face=1）。
-	// u = dir.x > 0 ? -dir.z : dir.z：根据 x 的正负，计算 u 坐标（对应 z 分量，考虑立方体贴图坐标系）。
- 	// v = -dir.y：v 坐标为 y 分量的负值（考虑立方体贴图的坐标系方向）。
+	// maxAxis = std::abs(dir.x)锛氬皢 x 鍒嗛噺鐨勭粷瀵瑰€煎瓨鍌ㄤ负鏈€澶ц酱銆?
+    // face = dir.x > 0 ? 0 : 1锛氬鏋?x 涓烘锛岄€夋嫨 +X 闈紙face=0锛夛紱鍚﹀垯閫夋嫨 -X 闈紙face=1锛夈€?
+	// u = dir.x > 0 ? -dir.z : dir.z锛氭牴鎹?x 鐨勬璐燂紝璁＄畻 u 鍧愭爣锛堝搴?z 鍒嗛噺锛岃€冭檻绔嬫柟浣撹创鍥惧潗鏍囩郴锛夈€?
+ 	// v = -dir.y锛歷 鍧愭爣涓?y 鍒嗛噺鐨勮礋鍊硷紙鑰冭檻绔嬫柟浣撹创鍥剧殑鍧愭爣绯绘柟鍚戯級銆?
         maxAxis = std::abs(dir.x);
         face = dir.x > 0 ? 0 : 1;
         u = dir.x > 0 ? -dir.z : dir.z;
@@ -1653,13 +1653,13 @@ glm::vec3 sampleCubemap(uint16_t* data, uint32_t width, uint32_t height, glm::ve
         u = dir.z > 0 ? dir.x : -dir.x;
         v = -dir.y;
     }
-	// 用途：将 u 和 v 坐标归一化到 [0, 1] 范围：
+	// 鐢ㄩ€旓細灏?u 鍜?v 鍧愭爣褰掍竴鍖栧埌 [0, 1] 鑼冨洿锛?
     u = (u / maxAxis + 1.0f) * 0.5f;
     v = (v / maxAxis + 1.0f) * 0.5f;
-	// 将归一化的 u, v 坐标转换为像素坐标
+	// 灏嗗綊涓€鍖栫殑 u, v 鍧愭爣杞崲涓哄儚绱犲潗鏍?
     uint32_t x = std::min((uint32_t)(u * width), width - 1);
     uint32_t y = std::min((uint32_t)(v * height), height - 1);
-	// 声明静态变量 sampleCount，用于记录采样次数（仅用于调试日志）。
+	// 澹版槑闈欐€佸彉閲?sampleCount锛岀敤浜庤褰曢噰鏍锋鏁帮紙浠呯敤浜庤皟璇曟棩蹇楋級銆?
     static int sampleCount = 0;
     if (sampleCount < 10) {
         std::ofstream logFile("../../examples/lightprobesh/lightprobeshsh_coefficients.log", std::ios::app);
@@ -1668,18 +1668,18 @@ glm::vec3 sampleCubemap(uint16_t* data, uint32_t width, uint32_t height, glm::ve
         logFile.close();
         sampleCount++;
     }
-	// 计算单个立方体贴图面的像素总数（宽 × 高）。
+	// 璁＄畻鍗曚釜绔嬫柟浣撹创鍥鹃潰鐨勫儚绱犳€绘暟锛堝 脳 楂橈級銆?
     uint32_t pixelCount = width * height;
-	// 计算采样像素在立方体贴图中的偏移量（faceOffset）和像素在数据数组中的偏移量（pixelOffset）。
+	// 璁＄畻閲囨牱鍍忕礌鍦ㄧ珛鏂逛綋璐村浘涓殑鍋忕Щ閲忥紙faceOffset锛夊拰鍍忕礌鍦ㄦ暟鎹暟缁勪腑鐨勫亸绉婚噺锛坧ixelOffset锛夈€?
     uint32_t faceOffset = face * pixelCount;
     uint32_t pixelOffset = faceOffset + y * width + x;
     uint32_t offset = pixelOffset * 4;
-	// 检查偏移是否超出数据范围（6 面 × 每面像素数 × 4 通道）。
+	// 妫€鏌ュ亸绉绘槸鍚﹁秴鍑烘暟鎹寖鍥达紙6 闈?脳 姣忛潰鍍忕礌鏁?脳 4 閫氶亾锛夈€?
     if (offset + 3 >= 6 * pixelCount * 4) {
-		// 如果偏移越界，返回黑色（RGB = 0, 0, 0）以避免非法访问。
+		// 濡傛灉鍋忕Щ瓒婄晫锛岃繑鍥為粦鑹诧紙RGB = 0, 0, 0锛変互閬垮厤闈炴硶璁块棶銆?
         return glm::vec3(0.0f);
     }
-	// 从数据中读取 RGB 通道值（半精度浮点格式，uint16_t），并转换为浮点数：
+	// 浠庢暟鎹腑璇诲彇 RGB 閫氶亾鍊硷紙鍗婄簿搴︽诞鐐规牸寮忥紝uint16_t锛夛紝骞惰浆鎹负娴偣鏁帮細
     float r = half_to_float(data[offset]);
     float g = half_to_float(data[offset + 1]);
     float b = half_to_float(data[offset + 2]);
@@ -1687,25 +1687,18 @@ glm::vec3 sampleCubemap(uint16_t* data, uint32_t width, uint32_t height, glm::ve
 }
 
 
-// 从当前立方体贴图计算球谐（SH）系数，用于环境光照计算。
+// 浠庡綋鍓嶇珛鏂逛綋璐村浘璁＄畻鐞冭皭锛圫H锛夌郴鏁帮紝鐢ㄤ簬鐜鍏夌収璁＄畻銆?
 void generateSHCoefficients() {
-	// 打开日志文件（追加模式），用于记录 SH 系数生成过程。
+    // 鎵撳紑鏃ュ織鏂囦欢锛堣拷鍔犳ā寮忥級锛岃褰?SH 绯绘暟鐢熸垚杩囩▼
     std::ofstream logFile("../../examples/lightprobesh/lightprobeshsh_coefficients.log", std::ios::app);
-	// 记录函数开始执行的时间（UTC），写入日志文件。
-	logFile <<"\n"<< "begin time(UTC): " << std::chrono::system_clock::now() << "\n";
-	// 记录 SH 系数生成开始的日志信息。
-    logFile << "Starting SH coefficient generation\n";
-
+    logFile << "\n" << "begin time(UTC): " << std::chrono::system_clock::now() << "\n";
+    logFile << "Starting SH coefficient generation (GPU)\n";
     logFile << "skyboxIndex: " << skyboxIndex << "\n";
-    logFile << "Using texture: ";
-    if (skyboxIndex == 1) logFile << "environmentCube\n";
-    else if (skyboxIndex == 2) logFile << "environmentCube2\n";
-    else if (skyboxIndex == 3) logFile << "environmentCube3\n";
-	// 声明指向当前立方体贴图的指针，初始化为 nullptr。
+
+    // 閫夋嫨褰撳墠绔嬫柟浣撹创鍥?
     vks::TextureCubeMap* currentCube = nullptr;
     switch (skyboxIndex) {
-		// skyboxIndex == 0时将清零的 SH 系数复制到统一缓冲区（uniformBuffers.sh.mapped）。
-        case 0: 
+        case 0:
             logFile << "Invalid skyboxIndex, setting SH coefficients to zero\n";
             shCoeffs = SHCoefficients{};
             memcpy(uniformBuffers.sh.mapped, &shCoeffs, sizeof(SHCoefficients));
@@ -1714,9 +1707,9 @@ void generateSHCoefficients() {
         case 1: currentCube = &textures.environmentCube; break;
         case 2: currentCube = &textures.environmentCube2; break;
         case 3: currentCube = &textures.environmentCube3; break;
-
     }
-	// 检查立方体贴图是否有效：
+
+    // 妫€鏌ョ珛鏂逛綋璐村浘鏄惁鏈夋晥
     if (!currentCube || !currentCube->image) {
         logFile << "Error: currentCube is null or not initialized\n";
         shCoeffs = SHCoefficients{};
@@ -1724,187 +1717,131 @@ void generateSHCoefficients() {
         logFile.close();
         return;
     }
-	// 记录立方体贴图的宽度和高度。
+
     logFile << "Cubemap width: " << currentCube->width << ", height: " << currentCube->height << "\n";
-	// 获取立方体贴图的宽度和高度，存储到局部变量。
-    uint32_t width = currentCube->width;
-    uint32_t height = currentCube->height;
-	// 计算整个立方体贴图的数据大小
-    VkDeviceSize imageSize = width * height * 6 * 4 * sizeof(uint16_t);
-	// 声明一个 Vulkan 缓冲区对象（stagingBuffer），用于从 GPU 内存复制贴图数据到 CPU。
-    vks::Buffer stagingBuffer;
-	// 创建 Vulkan 缓冲区：
-	// VK_BUFFER_USAGE_TRANSFER_DST_BIT：缓冲区用于接收传输数据。
-	// VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT：缓冲区对主机（CPU）可见且内存一致。
-	// imageSize：缓冲区大小。
-	// VK_CHECK_RESULT：检查 Vulkan 操作是否成功。
+
+    // 鍒涘缓瀛樺偍缂撳啿鍖猴紝鐢ㄤ簬瀛樺偍 SH 绯绘暟
+    vks::Buffer shStorageBuffer;
+    VkDeviceSize bufferSize = sizeof(SHCoefficients);
     VK_CHECK_RESULT(vulkanDevice->createBuffer(
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-        &stagingBuffer,
-        imageSize));
-	// 创建主级别命令缓冲区（cmdBuf），用于记录 Vulkan 命令，true 表示立即开始录制。	
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        &shStorageBuffer,
+        bufferSize));
+
+    // 鍒涘缓鎻忚堪绗︽睜
+    std::vector<VkDescriptorPoolSize> poolSizes = {
+        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1 },
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1 }
+    };
+    VkDescriptorPoolCreateInfo descriptorPoolInfo = vks::initializers::descriptorPoolCreateInfo(poolSizes, 1);
+    VkDescriptorPool descriptorPool;
+    VK_CHECK_RESULT(vkCreateDescriptorPool(device, &descriptorPoolInfo, nullptr, &descriptorPool));
+
+    // 鍒涘缓鎻忚堪绗﹂泦甯冨眬
+    std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {
+        vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_COMPUTE_BIT, 0),
+        vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT, 1)
+    };
+    VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCI = vks::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings);
+    VkDescriptorSetLayout descriptorSetLayout;
+    VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorSetLayoutCI, nullptr, &descriptorSetLayout));
+
+    // 鍒嗛厤鎻忚堪绗﹂泦
+    VkDescriptorSetAllocateInfo allocInfo = vks::initializers::descriptorSetAllocateInfo(descriptorPool, &descriptorSetLayout, 1);
+    VkDescriptorSet descriptorSet;
+    VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSet));
+
+    // 鏇存柊鎻忚堪绗﹂泦
+    VkDescriptorImageInfo imageInfo = currentCube->descriptor;
+    VkDescriptorBufferInfo bufferInfo = shStorageBuffer.descriptor;
+    std::vector<VkWriteDescriptorSet> writeDescriptorSets = {
+        vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 0, &imageInfo),
+        vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, &bufferInfo)
+    };
+    vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, nullptr);
+
+    // 鍒涘缓璁＄畻绠＄嚎甯冨眬
+    VkPipelineLayoutCreateInfo pipelineLayoutCI = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayout, 1);
+    VkPipelineLayout pipelineLayout;
+    VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCI, nullptr, &pipelineLayout));
+
+    // 加载计算着色器并创建管线
+    VkPipelineShaderStageCreateInfo shaderStage = loadShader(getShadersPath() + "lightprobesh/sh_compute.comp.spv", VK_SHADER_STAGE_COMPUTE_BIT);
+    VkShaderModule shaderModule = shaderStage.module;
+    VkComputePipelineCreateInfo computePipelineCI = vks::initializers::computePipelineCreateInfo(pipelineLayout);
+    computePipelineCI.stage = shaderStage;
+    VkPipeline computePipeline;
+    VK_CHECK_RESULT(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &computePipelineCI, nullptr, &computePipeline));
+
+    // 鍒涘缓鍛戒护缂撳啿鍖?
     VkCommandBuffer cmdBuf = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
-	// 定义图像子资源范围：
 
-	// VK_IMAGE_ASPECT_COLOR_BIT：操作颜色数据。
-	// 0, 1：mip 级别（仅基级别）。
-	// 0, 6：数组层（6 个面，立方体贴图）
-    VkImageSubresourceRange subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 6 };
-	// 记录图像布局转换信息，从当前布局转换为 VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL。
-    logFile << "Transitioning image layout from " << currentCube->descriptor.imageLayout << " to TRANSFER_SRC_OPTIMAL\n";
-	// 将立方体贴图的图像布局转换为 VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL，以便从 GPU 内存复制数据
-	vks::tools::setImageLayout(
-        cmdBuf,
-        currentCube->image,
-        currentCube->descriptor.imageLayout,
-        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-        subresourceRange);
-	// 提交并执行命令缓冲区，等待其完成（queue 为 Vulkan 命令队列）。
+    // 缁戝畾绠＄嚎鍜屾弿杩扮闆?
+    vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline);
+    vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
+
+    // 鍒嗘淳璁＄畻浠诲姟锛? 涓嚎绋嬶紝1 涓伐浣滅粍锛?
+    vkCmdDispatch(cmdBuf, 1, 1, 1);
+
+    // 娣诲姞鍐呭瓨灞忛殰锛岀‘淇濊绠楀畬鎴愬悗鏁版嵁鍙
+    VkMemoryBarrier barrier = vks::initializers::memoryBarrier();
+    barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    vkCmdPipelineBarrier(cmdBuf, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 1, &barrier, 0, nullptr, 0, nullptr);
+
+    // 灏嗗瓨鍌ㄧ紦鍐插尯鐨勬暟鎹鍒跺埌 Uniform 缂撳啿鍖?
+    VkBufferCopy copyRegion = {};
+    copyRegion.size = sizeof(SHCoefficients);
+    vkCmdCopyBuffer(cmdBuf, shStorageBuffer.buffer, uniformBuffers.sh.buffer, 1, &copyRegion);
+
+    // 鎻愪氦鍛戒护缂撳啿鍖?
     vulkanDevice->flushCommandBuffer(cmdBuf, queue);
-	// 创建新的命令缓冲区，用于后续图像到缓冲区的复制操作。
-    cmdBuf = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
-	// 初始化图像到缓冲区的复制区域结构体。
-    VkBufferImageCopy copyRegion = {};
-    copyRegion.bufferOffset = 0;// 缓冲区起始偏移。
-    copyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;//复制颜色数据。
-    copyRegion.imageSubresource.mipLevel = 0;// 基级别。
-    copyRegion.imageSubresource.baseArrayLayer = 0;
-    copyRegion.imageSubresource.layerCount = 6;    // 复制所有 6 个面(0-6)。
-    copyRegion.imageExtent = { width, height, 1 }; // 图像尺寸（宽、高、1）。
-	// 记录命令，将立方体贴图图像数据复制到 stagingBuffer。
-    vkCmdCopyImageToBuffer(cmdBuf, currentCube->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, stagingBuffer.buffer, 1, &copyRegion);
-    
-	// 配置内存屏障，确保数据复制完成后 CPU 可以安全读取：
-	VkMemoryBarrier barrier = {};
-    barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;// 传输写入操作。
-    barrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;	 // 主机读取操作。
-	// 插入内存屏障，同步传输阶段和主机读取阶段。
-    vkCmdPipelineBarrier(cmdBuf, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &barrier, 0, nullptr, 0, nullptr);
-    vulkanDevice->flushCommandBuffer(cmdBuf, queue);// 提交并执行命令缓冲区，完成图像到缓冲区的复制。
-	// 创建新的命令缓冲区，用于恢复图像布局。
-    cmdBuf = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
-	// 将图像布局从 VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL 恢复到原始布局。
-    vks::tools::setImageLayout(
-        cmdBuf,
-        currentCube->image,
-        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-        currentCube->descriptor.imageLayout,
-        subresourceRange);
-    vulkanDevice->flushCommandBuffer(cmdBuf, queue);// 提交并执行命令缓冲区，完成图像到缓冲区的复制。
-	// 将 stagingBuffer 映射到 CPU 内存，使其数据可访问。	
-    VK_CHECK_RESULT(stagingBuffer.map());
-	// 获取映射后的缓冲区数据指针（uint16_t 格式，半精度浮点）。
-    uint16_t* data = (uint16_t*)stagingBuffer.mapped;
-    logFile << "First 10 pixels:\n";
-    for (int i = 0; i < 10; ++i) {
-        logFile << "Pixel " << i << ": " << half_to_float(data[i * 4]) << ", " 
-                << half_to_float(data[i * 4 + 1]) << ", " << half_to_float(data[i * 4 + 2]) << ", " 
-                << half_to_float(data[i * 4 + 3]) << "\n";
-    }
 
-   //输出到文件验证天空盒切换后是否准确获取图像信息
-    // std::string ppmFile = "../../examples/lightprobesh/cubemap_skybox" + std::to_string(skyboxIndex) + ".ppm";
-    // saveCubemapToPPM(ppmFile.c_str(), data, width, height);
+    // 璇诲彇 SH 绯绘暟鐢ㄤ簬鏃ュ織璁板綍
+    SHCoefficients tempCoeffs;
+    memcpy(&tempCoeffs, uniformBuffers.sh.mapped, sizeof(SHCoefficients));
 
-	// 极角（θ）方向的分辨率（256 样本）。
-    const int theta_res = 256;
-	// 方位角（φ）方向的分辨率（512 样本）。
-    const int phi_res = 512;
-	// 极角的步长（π / theta_res）。
-    const float hf = glm::pi<float>() / theta_res;
-	// 方位角的步长（2π / phi_res）。
-    const float wf = 2.0f * glm::pi<float>() / phi_res;
-	// 计算归一化因子，用于积分（4π / 总样本数）。
-    float norm = 4.0f * glm::pi<float>() / (theta_res * phi_res);
-    logFile << "Normalization factor: " << norm << "\n";
-	// 初始化 9 个 SH 系数（每个为 RGB 向量
-    std::vector<glm::vec3> coeffs(9, glm::vec3(0.0f));
-	// 循环遍历
-    for (int j = 0; j < theta_res; ++j) {
-        float theta = hf * (j + 0.5f);// 计算当前极角（加 0.5 以采样中心点）。
-        float sin_theta = sinf(theta);// 计算 sin(θ)，用于权重计算。 
-        float weight = sin_theta * hf * wf;// 计算采样权重（sin(θ) 考虑球面积分的面积元素）。
-
-        if (j == 0) {
-            logFile << "Weight: " << weight << ", sin_theta: " << sin_theta << ", hf: " << hf << ", wf: " << wf << "\n";
-        }
-
-        for (int i = 0; i < phi_res; ++i) {
-            float phi = wf * (i + 0.5f);// 计算当前方位角（加 0.5 以采样中心点）。
-			// 根据球坐标 (θ, φ) 计算归一化的 3D 方向向量。
-            glm::vec3 dir(sin_theta * cosf(phi), sin_theta * sinf(phi), cosf(theta));
-			// 调用 getSHBasis 函数，获取给定方向的 9 个 SH 基函数值（未提供实现，假设返回 9 个浮点值）。
-            std::vector<float> basis = getSHBasis(dir);
-			// 调用 sampleCubemap，根据方向向量从立方体贴图采样颜色。
-            glm::vec3 color = sampleCubemap(data, width, height, dir);
-			// 每隔 theta_res / 10 次极角循环，且前 5 个方位角，记录采样方向和颜色，用于调试。
-            if (j % (theta_res / 10) == 0 && i < 5) {
-                logFile << "Sample (theta=" << j << ", phi=" << i << "): dir=" << dir.x << ", " << dir.y << ", " 
-                        << dir.z << ", color=" << color.x << ", " << color.y << ", " << color.z << "\n";
-            }
-			// 对每个基函数（k=0 到 8），将采样颜色乘以对应基函数值和权重，累加到 coeffs[k]。
-            for (int k = 0; k < 9; ++k) {
-                coeffs[k] += color * basis[k] * weight;
-            }
-        }
-    }
-	// 将所有 SH 系数放大 100 倍（为了提高数值精度）。
-    for (int k = 0; k < 9; ++k) {
-        coeffs[k] *= 10.0f; // 放大系数
-    }
-
-    shCoeffs.l00 = glm::vec4(coeffs[0], 0.0f);
-    shCoeffs.l1m1 = glm::vec4(coeffs[1], 0.0f);
-    shCoeffs.l10 = glm::vec4(coeffs[2], 0.0f);
-    shCoeffs.l1p1 = glm::vec4(coeffs[3], 0.0f);
-    shCoeffs.l2m2 = glm::vec4(coeffs[4], 0.0f);
-    shCoeffs.l2m1 = glm::vec4(coeffs[5], 0.0f);
-    shCoeffs.l20 = glm::vec4(coeffs[6], 0.0f);
-    shCoeffs.l2p1 = glm::vec4(coeffs[7], 0.0f);
-    shCoeffs.l2p2 = glm::vec4(coeffs[8], 0.0f);
-
+    // 璁板綍 SH 绯绘暟
     logFile << "SH Coefficients for skyboxIndex " << skyboxIndex << ":\n";
-    logFile << "l00: " << shCoeffs.l00.x << ", " << shCoeffs.l00.y << ", " << shCoeffs.l00.z << "\n";
-    logFile << "l1m1: " << shCoeffs.l1m1.x << ", " << shCoeffs.l1m1.y << ", " << shCoeffs.l1m1.z << "\n";
-    logFile << "l10: " << shCoeffs.l10.x << ", " << shCoeffs.l10.y << ", " << shCoeffs.l10.z << "\n";
-    logFile << "l1p1: " << shCoeffs.l1p1.x << ", " << shCoeffs.l1p1.y << ", " << shCoeffs.l1p1.z << "\n";
-    logFile << "l2m2: " << shCoeffs.l2m2.x << ", " << shCoeffs.l2m2.y << ", " << shCoeffs.l2m2.z << "\n";
-    logFile << "l2m1: " << shCoeffs.l2m1.x << ", " << shCoeffs.l2m1.y << ", " << shCoeffs.l2m1.z << "\n";
-    logFile << "l20: " << shCoeffs.l20.x << ", " << shCoeffs.l20.y << ", " << shCoeffs.l20.z << "\n";
-    logFile << "l2p1: " << shCoeffs.l2p1.x << ", " << shCoeffs.l2p1.y << ", " << shCoeffs.l2p1.z << "\n";
-    logFile << "l2p2: " << shCoeffs.l2p2.x << ", " << shCoeffs.l2p2.y << ", " << shCoeffs.l2p2.z << "\n";
+    logFile << "l00: " << tempCoeffs.l00.x << ", " << tempCoeffs.l00.y << ", " << tempCoeffs.l00.z << "\n";
+    logFile << "l1m1: " << tempCoeffs.l1m1.x << ", " << tempCoeffs.l1m1.y << ", " << tempCoeffs.l1m1.z << "\n";
+    logFile << "l10: " << tempCoeffs.l10.x << ", " << tempCoeffs.l10.y << ", " << tempCoeffs.l10.z << "\n";
+    logFile << "l1p1: " << tempCoeffs.l1p1.x << ", " << tempCoeffs.l1p1.y << ", " << tempCoeffs.l1p1.z << "\n";
+    logFile << "l2m2: " << tempCoeffs.l2m2.x << ", " << tempCoeffs.l2m2.y << ", " << tempCoeffs.l2m2.z << "\n";
+    logFile << "l2m1: " << tempCoeffs.l2m1.x << ", " << tempCoeffs.l2m1.y << ", " << tempCoeffs.l2m1.z << "\n";
+    logFile << "l20: " << tempCoeffs.l20.x << ", " << tempCoeffs.l20.y << ", " << tempCoeffs.l20.z << "\n";
+    logFile << "l2p1: " << tempCoeffs.l2p1.x << ", " << tempCoeffs.l2p1.y << ", " << tempCoeffs.l2p1.z << "\n";
+    logFile << "l2p2: " << tempCoeffs.l2p2.x << ", " << tempCoeffs.l2p2.y << ", " << tempCoeffs.l2p2.z << "\n";
 
-    if (!uniformBuffers.sh.mapped) {
-        logFile << "Error: uniformBuffers.sh.mapped is null\n";
-        return;
-    }
-    memcpy(uniformBuffers.sh.mapped, &shCoeffs, sizeof(SHCoefficients));
+    // 娓呯悊璧勬簮
+    vkDestroyPipeline(device, computePipeline, nullptr);
+    vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+    vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+    vkDestroyDescriptorPool(device, descriptorPool, nullptr);
+    vkDestroyShaderModule(device, shaderModule, nullptr);
+    shStorageBuffer.destroy();
 
-    stagingBuffer.unmap();
-    stagingBuffer.destroy();
-
-    logFile << "SH coefficient generation completed\n";
-	logFile << "end time(UTC): " << std::chrono::system_clock::now() << "\n";
+    logFile << "SH coefficient generation completed (GPU)\n";
+    logFile << "end time(UTC): " << std::chrono::system_clock::now() << "\n";
     logFile.close();
 }
-// 从当前 environmentCube 计算 SH 系数
-    // 使用 9 个基础函数投影（基于 LearnOpenGL 和 jMonkeyEngine 的思路）
-    // 这里简化实现：实际需采样 cubemap（CPU 或 GPU compute shader）
-    // 示例公式：每个系数 = ∫ L(ω) * Y_lm(ω) dω (Y_lm 是 SH basis)
-    // 为简化，用伪代码；实际可参考 https://cseweb.ucsd.edu/~ravir/papers/envmap/envmap.pdf
+// 浠庡綋鍓?environmentCube 璁＄畻 SH 绯绘暟
+    // 浣跨敤 9 涓熀纭€鍑芥暟鎶曞奖锛堝熀浜?LearnOpenGL 鍜?jMonkeyEngine 鐨勬€濊矾锛?
+    // 杩欓噷绠€鍖栧疄鐜帮細瀹為檯闇€閲囨牱 cubemap锛圕PU 鎴?GPU compute shader锛?
+    // 绀轰緥鍏紡锛氭瘡涓郴鏁?= 鈭?L(蠅) * Y_lm(蠅) d蠅 (Y_lm 鏄?SH basis)
+    // 涓虹畝鍖栵紝鐢ㄤ吉浠ｇ爜锛涘疄闄呭彲鍙傝€?https://cseweb.ucsd.edu/~ravir/papers/envmap/envmap.pdf
     // shCoeffs = SHCoefficients{};
     
-    // 示例：计算 l00 (常数项) = (1 / 4π) * ∫ L(ω) dω
-    // 假设从 cubemap 采样积分（需实现采样循环，类似 generateIrradianceCube 中的采样）
+    // 绀轰緥锛氳绠?l00 (甯告暟椤? = (1 / 4蟺) * 鈭?L(蠅) d蠅
+    // 鍋囪浠?cubemap 閲囨牱绉垎锛堥渶瀹炵幇閲囨牱寰幆锛岀被浼?generateIrradianceCube 涓殑閲囨牱锛?
     // const float pi = glm::pi<float>();
-    // glm::vec3 basis[9] = { /* SH basis constants */ };  // 预定义 basis 值
+    // glm::vec3 basis[9] = { /* SH basis constants */ };  // 棰勫畾涔?basis 鍊?
     // for (int face = 0; face < 6; ++face) {
-        // 采样每个面，积分...
+        // 閲囨牱姣忎釜闈紝绉垎...
         // shCoeffs.l00 += sample * basis[0] * weight;
     // }
-    // 归一化
+    // 褰掍竴鍖?
     // shCoeffs.l00 *= 4.0f * pi / numSamples;
 
     

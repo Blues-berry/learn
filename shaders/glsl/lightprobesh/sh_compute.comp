@@ -1,0 +1,72 @@
+#version 450
+
+// 定义工作组大小：9个线程，每个线程计算一个 SH 系数
+layout(local_size_x = 9, local_size_y = 1, local_size_z = 1) in;
+
+// 绑定 0：输入的立方体贴图（环境光贴图）
+layout(binding = 0) uniform samplerCube cubemap;
+// 绑定 1：输出存储缓冲区，存储 SH 系数（9 个 vec4）
+layout(binding = 1) buffer SHCoefficients {
+    vec4 coeffs[];
+};
+
+// 数学常数：π
+const float PI = 3.1415926535897932384626433832795;
+// 极角（θ）分辨率：32 样本
+const int THETA_RES = 32;
+// 方位角（φ）分辨率：64 样本
+const int PHI_RES = 64;
+// 极角步长：π / THETA_RES
+const float HF = PI / float(THETA_RES);
+// 方位角步长：2π / PHI_RES
+const float WF = 2.0 * PI / float(PHI_RES);
+// 归一化因子：4π / (THETA_RES * PHI_RES)
+const float NORM = 4.0 * PI / float(THETA_RES * PHI_RES);
+
+// 计算 SH 基函数（2 阶，9 个基函数）
+// 输入：方向向量 dir（归一化）
+// 输出：对应 gl_GlobalInvocationID.x 的基函数值（vec3，RGB 通道）
+vec3 getSHBasis(vec3 dir) {
+    float x = dir.x, y = dir.y, z = dir.z;
+    float x2 = x * x, y2 = y * y, z2 = z * z;
+    vec3 basis[9] = vec3[](
+        vec3(0.282095),                  // l00: 常数项
+        vec3(0.488603 * y),              // l1m1
+        vec3(0.488603 * z),              // l10
+        vec3(0.488603 * x),              // l1p1
+        vec3(1.092548 * x * y),          // l2m2
+        vec3(1.092548 * y * z),          // l2m1
+        vec3(0.315392 * (3.0 * z2 - 1.0)), // l20
+        vec3(1.092548 * x * z),          // l2p1
+        vec3(0.546274 * (x2 - y2))       // l2p2
+    );
+    return basis[gl_GlobalInvocationID.x];
+}
+
+// 主函数：计算 SH 系数
+void main() {
+    // 初始化累加和，用于存储当前线程的 SH 系数（RGB）
+    vec3 sum = vec3(0.0);
+    // 遍历极角 θ
+    for (int j = 0; j < THETA_RES; ++j) {
+        float theta = HF * (float(j) + 0.5); // 极角，偏移 0.5 以采样中心点
+        float sin_theta = sin(theta);        // sin(θ)，用于权重计算
+        float weight = sin_theta * HF * WF;  // 积分权重，考虑球面积分面积元素
+        // 遍历方位角 φ
+        for (int i = 0; i < PHI_RES; ++i) {
+            float phi = WF * (float(i) + 0.5); // 方位角，偏移 0.5 以采样中心点
+            // 计算方向向量（球坐标转笛卡尔坐标）
+            vec3 dir = vec3(sin_theta * cos(phi), sin_theta * sin(phi), cos(theta));
+            // 从立方体贴图采样颜色（RGB）
+            vec3 color = texture(cubemap, dir).rgb;
+            // 获取对应 SH 基函数值
+            vec3 basis = getSHBasis(dir);
+            // 累加颜色 * 基函数 * 权重
+            sum += color * basis * weight;
+        }
+    }
+    // 放大系数（与 CPU 版本一致）
+    sum *= 10.0;
+    // 存储到缓冲区（vec4，第 4 分量为 0.0）
+    coeffs[gl_GlobalInvocationID.x] = vec4(sum, 0.0);
+}
