@@ -254,8 +254,9 @@ public:
 		// 为每个探针创建低分辨率CubeMap
 		for (auto& probe : lightProbes) {
 			// 创建低分辨率CubeMap
-			// 这里简化处理，实际应该从探针位置渲染场景到CubeMap
-			// 现在我们只是复制环境贴图并缩小尺寸
+			// 从探针位置渲染场景到CubeMap
+
+			// 选择源环境贴图作为基础
 			vks::TextureCubeMap* sourceCube = nullptr;
 			switch (skyboxIndex) {
 				case 1: sourceCube = &textures.environmentCube; break;
@@ -264,22 +265,269 @@ public:
 				default: continue;
 			}
 
-			// 创建低分辨率CubeMap
-			// 注意：这里简化处理，实际应该实现从探针位置渲染场景到CubeMap
-			probe.lowResCubeMap = *sourceCube;
+			// 创建低分辨率CubeMap图像
+			VkImageCreateInfo imageCI = vks::initializers::imageCreateInfo();
+			imageCI.imageType = VK_IMAGE_TYPE_2D;
+			imageCI.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+			imageCI.extent.width = LOW_RES_CUBEMAP_SIZE;
+			imageCI.extent.height = LOW_RES_CUBEMAP_SIZE;
+			imageCI.extent.depth = 1;
+			imageCI.mipLevels = 1;
+			imageCI.arrayLayers = 6;
+			imageCI.samples = VK_SAMPLE_COUNT_1_BIT;
+			imageCI.tiling = VK_IMAGE_TILING_OPTIMAL;
+			imageCI.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+			imageCI.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+			VK_CHECK_RESULT(vkCreateImage(device, &imageCI, nullptr, &probe.lowResCubeMap.image));
+
+			VkMemoryAllocateInfo memAlloc = vks::initializers::memoryAllocateInfo();
+			VkMemoryRequirements memReqs;
+			vkGetImageMemoryRequirements(device, probe.lowResCubeMap.image, &memReqs);
+			memAlloc.allocationSize = memReqs.size;
+			memAlloc.memoryTypeIndex = vulkanDevice->getMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+			VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &probe.lowResCubeMap.deviceMemory));
+			VK_CHECK_RESULT(vkBindImageMemory(device, probe.lowResCubeMap.image, probe.lowResCubeMap.deviceMemory, 0));
+
+			// 创建图像视图
+			VkImageViewCreateInfo viewCI = vks::initializers::imageViewCreateInfo();
+			viewCI.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
+			viewCI.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+			viewCI.subresourceRange = {};
+			viewCI.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+			viewCI.subresourceRange.levelCount = 1;
+			viewCI.subresourceRange.layerCount = 6;
+			viewCI.image = probe.lowResCubeMap.image;
+			VK_CHECK_RESULT(vkCreateImageView(device, &viewCI, nullptr, &probe.lowResCubeMap.view));
+
+			// 创建采样器
+			VkSamplerCreateInfo samplerCI = vks::initializers::samplerCreateInfo();
+			samplerCI.magFilter = VK_FILTER_LINEAR;
+			samplerCI.minFilter = VK_FILTER_LINEAR;
+			samplerCI.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+			samplerCI.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+			samplerCI.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+			samplerCI.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+			samplerCI.minLod = 0.0f;
+			samplerCI.maxLod = 1.0f;
+			samplerCI.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+			VK_CHECK_RESULT(vkCreateSampler(device, &samplerCI, nullptr, &probe.lowResCubeMap.sampler));
+
+			// 设置描述符
+			probe.lowResCubeMap.descriptor.imageView = probe.lowResCubeMap.view;
+			probe.lowResCubeMap.descriptor.sampler = probe.lowResCubeMap.sampler;
+			probe.lowResCubeMap.descriptor.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+			probe.lowResCubeMap.device = vulkanDevice;
 			probe.lowResCubeMap.width = LOW_RES_CUBEMAP_SIZE;
 			probe.lowResCubeMap.height = LOW_RES_CUBEMAP_SIZE;
+
+			// 将源环境贴图复制到低分辨率CubeMap
+			// 注意：这里简化处理，实际应该实现从探针位置渲染场景到CubeMap
+			VkCommandBuffer cmdBuf = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
+
+			// 转换源图像布局
+			VkImageSubresourceRange subresourceRange = {};
+			subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+			subresourceRange.levelCount = 1;
+			subresourceRange.layerCount = 6;
+
+			vks::tools::setImageLayout(
+				cmdBuf,
+				sourceCube->image,
+				VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+				VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+				subresourceRange);
+
+			vks::tools::setImageLayout(
+				cmdBuf,
+				probe.lowResCubeMap.image,
+				VK_IMAGE_LAYOUT_UNDEFINED,
+				VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+				subresourceRange);
+
+			// 复制每个面
+			for (uint32_t face = 0; face < 6; face++) {
+				VkImageCopy copyRegion = {};
+				copyRegion.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+				copyRegion.srcSubresource.baseArrayLayer = face;
+				copyRegion.srcSubresource.mipLevel = 0;
+				copyRegion.srcSubresource.layerCount = 1;
+				copyRegion.srcOffset = { 0, 0, 0 };
+
+				copyRegion.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+				copyRegion.dstSubresource.baseArrayLayer = face;
+				copyRegion.dstSubresource.mipLevel = 0;
+				copyRegion.dstSubresource.layerCount = 1;
+				copyRegion.dstOffset = { 0, 0, 0 };
+
+				// 计算缩放比例
+				float scale = (float)LOW_RES_CUBEMAP_SIZE / (float)sourceCube->width;
+				copyRegion.extent.width = LOW_RES_CUBEMAP_SIZE;
+				copyRegion.extent.height = LOW_RES_CUBEMAP_SIZE;
+				copyRegion.extent.depth = 1;
+
+				vkCmdCopyImage(
+					cmdBuf,
+					sourceCube->image,
+					VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+					probe.lowResCubeMap.image,
+					VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+					1, &copyRegion);
+			}
+
+			// 恢复图像布局
+			vks::tools::setImageLayout(
+				cmdBuf,
+				sourceCube->image,
+				VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+				VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+				subresourceRange);
+
+			vks::tools::setImageLayout(
+				cmdBuf,
+				probe.lowResCubeMap.image,
+				VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+				VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+				subresourceRange);
+
+			vulkanDevice->flushCommandBuffer(cmdBuf, queue);
 		}
 	}
 
 	// 为所有探针计算球谐系数
 	void generateAllSHCoefficients()
 	{
-		for (auto& probe : lightProbes) {
-			// 为每个探针计算球谐系数
-			// 这里简化处理，实际应该基于探针的低分辨率CubeMap计算
-			// 现在我们只是使用全局的球谐系数
-			probe.shCoeffs = shCoeffs;
+		// 为每个探针计算球谐系数
+		// 使用计算着色器基于探针的低分辨率CubeMap计算
+
+		// 创建描述符池
+		std::vector<VkDescriptorPoolSize> poolSizes = {
+			{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, static_cast<uint32_t>(lightProbes.size()) },
+			{ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, static_cast<uint32_t>(lightProbes.size()) }
+		};
+		VkDescriptorPoolCreateInfo descriptorPoolInfo = vks::initializers::descriptorPoolCreateInfo(poolSizes, static_cast<uint32_t>(lightProbes.size()));
+		VkDescriptorPool descriptorPool;
+		VK_CHECK_RESULT(vkCreateDescriptorPool(device, &descriptorPoolInfo, nullptr, &descriptorPool));
+
+		// 创建描述符集布局
+		std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {
+			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_COMPUTE_BIT, 0),
+			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT, 1)
+		};
+		VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCI = vks::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings);
+		VkDescriptorSetLayout descriptorSetLayout;
+		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorSetLayoutCI, nullptr, &descriptorSetLayout));
+
+		// 创建计算管线布局
+		VkPipelineLayoutCreateInfo pipelineLayoutCI = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayout, 1);
+		VkPipelineLayout pipelineLayout;
+		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCI, nullptr, &pipelineLayout));
+
+		// 加载计算着色器并创建管线
+		VkPipelineShaderStageCreateInfo shaderStage = loadShader(getShadersPath() + "lightprobesh/sh_compute.comp.spv", VK_SHADER_STAGE_COMPUTE_BIT);
+		VkShaderModule shaderModule = shaderStage.module;
+
+		shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+		shaderStage.module = shaderModule;
+		shaderStage.pName = "main";
+		VkComputePipelineCreateInfo computePipelineCI = vks::initializers::computePipelineCreateInfo(pipelineLayout);
+		computePipelineCI.stage = shaderStage;
+		VkPipeline computePipeline;
+		VK_CHECK_RESULT(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &computePipelineCI, nullptr, &computePipeline));
+
+		// 为每个探针创建存储缓冲区和描述符集
+		std::vector<vks::Buffer> shStorageBuffers(lightProbes.size());
+		std::vector<VkDescriptorSet> descriptorSets(lightProbes.size());
+
+		// 分配描述符集
+		VkDescriptorSetAllocateInfo allocInfo = vks::initializers::descriptorSetAllocateInfo(descriptorPool, &descriptorSetLayout, 1);
+		for (size_t i = 0; i < lightProbes.size(); i++) {
+			VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSets[i]));
+
+			// 创建存储缓冲区
+			VkDeviceSize bufferSize = sizeof(SHCoefficients);
+			VK_CHECK_RESULT(vulkanDevice->createBuffer(
+				VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+				VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+				&shStorageBuffers[i],
+				bufferSize));
+
+			// 更新描述符集
+			VkDescriptorImageInfo imageInfo = lightProbes[i].lowResCubeMap.descriptor;
+			VkDescriptorBufferInfo bufferInfo = shStorageBuffers[i].descriptor;
+			std::vector<VkWriteDescriptorSet> writeDescriptorSets = {
+				vks::initializers::writeDescriptorSet(descriptorSets[i], VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 0, &imageInfo),
+				vks::initializers::writeDescriptorSet(descriptorSets[i], VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, &bufferInfo)
+			};
+			vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, nullptr);
+		}
+
+		// 创建命令缓冲区
+		VkCommandBuffer cmdBuf = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
+
+		// 绑定计算管线
+		vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline);
+
+		// 为每个探针分派计算任务
+		for (size_t i = 0; i < lightProbes.size(); i++) {
+			// 绑定描述符集
+			vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1, &descriptorSets[i], 0, nullptr);
+
+			// 分派计算任务
+			vkCmdDispatch(cmdBuf, 1, 1, 1);
+
+			// 添加内存屏障，确保计算完成后数据可读
+			VkMemoryBarrier barrier = vks::initializers::memoryBarrier();
+			barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+			barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+			vkCmdPipelineBarrier(cmdBuf, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 1, &barrier, 0, nullptr, 0, nullptr);
+
+			// 将存储缓冲区的数据复制到探针的SH系数
+			VkBufferCopy copyRegion = {};
+			copyRegion.size = sizeof(SHCoefficients);
+
+			// 创建临时缓冲区用于读取
+			vks::Buffer tempBuffer;
+			VK_CHECK_RESULT(vulkanDevice->createBuffer(
+				VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+				&tempBuffer,
+				sizeof(SHCoefficients)));
+
+			// 复制到临时缓冲区
+			vkCmdCopyBuffer(cmdBuf, shStorageBuffers[i].buffer, tempBuffer.buffer, 1, &copyRegion);
+
+			// 提交命令缓冲区并等待完成
+			vulkanDevice->flushCommandBuffer(cmdBuf, queue);
+			vkQueueWaitIdle(queue);
+
+			// 从临时缓冲区读取SH系数
+			SHCoefficients tempCoeffs;
+			memcpy(&tempCoeffs, tempBuffer.mapped, sizeof(SHCoefficients));
+
+			// 更新探针的SH系数
+			lightProbes[i].shCoeffs = tempCoeffs;
+
+			// 释放临时缓冲区
+			tempBuffer.destroy();
+
+			// 重新开始命令缓冲区记录以处理下一个探针
+			cmdBuf = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
+			vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline);
+		}
+
+		// 提交最后的命令缓冲区
+		vulkanDevice->flushCommandBuffer(cmdBuf, queue);
+
+		// 清理资源
+		vkDestroyPipeline(device, computePipeline, nullptr);
+		vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+		vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+		vkDestroyDescriptorPool(device, descriptorPool, nullptr);
+		vkDestroyShaderModule(device, shaderModule, nullptr);
+
+		for (auto& buffer : shStorageBuffers) {
+			buffer.destroy();
 		}
 	}
 

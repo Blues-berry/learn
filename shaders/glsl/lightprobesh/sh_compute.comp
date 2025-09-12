@@ -1,72 +1,134 @@
 #version 450
 
-// 定义工作组大小：9个线程，每个线程计算一个 SH 系数
-layout(local_size_x = 9, local_size_y = 1, local_size_z = 1) in;
-
-// 绑定 0：输入的立方体贴图（环境光贴图）
-layout(binding = 0) uniform samplerCube cubemap;
-// 绑定 1：输出存储缓冲区，存储 SH 系数（9 个 vec4）
-layout(binding = 1) buffer SHCoefficients {
-    vec4 coeffs[];
+// 球谐系数结构体
+struct SHCoefficients {
+    vec4 l00;    // 0阶
+    vec4 l1m1;   // 1阶
+    vec4 l10;    // 1阶
+    vec4 l1p1;   // 1阶
+    vec4 l2m2;   // 2阶
+    vec4 l2m1;   // 2阶
+    vec4 l20;    // 2阶
+    vec4 l2p1;   // 2阶
+    vec4 l2p2;   // 2阶
 };
 
-// 数学常数：π
-const float PI = 3.1415926535897932384626433832795;
-// 极角（θ）分辨率：32 样本
-const int THETA_RES = 32;
-// 方位角（φ）分辨率：64 样本
-const int PHI_RES = 64;
-// 极角步长：π / THETA_RES
-const float HF = PI / float(THETA_RES);
-// 方位角步长：2π / PHI_RES
-const float WF = 2.0 * PI / float(PHI_RES);
-// 归一化因子：4π / (THETA_RES * PHI_RES)
-const float NORM = 4.0 * PI / float(THETA_RES * PHI_RES);
+// 输入绑定
+layout(set = 0, binding = 0) uniform samplerCube envMap;      // 环境贴图
+layout(set = 0, binding = 1) buffer SHBuffer {                // 存储SH系数的缓冲区
+    SHCoefficients shCoeffs;
+};
 
-// 计算 SH 基函数（2 阶，9 个基函数）
-// 输入：方向向量 dir（归一化）
-// 输出：对应 gl_GlobalInvocationID.x 的基函数值（vec3，RGB 通道）
-vec3 getSHBasis(vec3 dir) {
-    float x = dir.x, y = dir.y, z = dir.z;
-    float x2 = x * x, y2 = y * y, z2 = z * z;
-    vec3 basis[9] = vec3[](
-        vec3(0.282095),                  // l00: 常数项
-        vec3(0.488603 * y),              // l1m1
-        vec3(0.488603 * z),              // l10
-        vec3(0.488603 * x),              // l1p1
-        vec3(1.092548 * x * y),          // l2m2
-        vec3(1.092548 * y * z),          // l2m1
-        vec3(0.315392 * (3.0 * z2 - 1.0)), // l20
-        vec3(1.092548 * x * z),          // l2p1
-        vec3(0.546274 * (x2 - y2))       // l2p2
-    );
-    return basis[gl_GlobalInvocationID.x];
+// 工作组大小
+layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+
+// 球谐基函数
+// 参考: https://cseweb.ucsd.edu/~ravir/papers/envmap/envmap.pdf
+// 以及 LearnOpenGL 的实现
+
+// 0阶 - 常数项
+float shBasis00(vec3 dir) {
+    return 0.282095f;
 }
 
-// 主函数：计算 SH 系数
+// 1阶 - 线性项
+float shBasis1m1(vec3 dir) {
+    return -0.488603f * dir.y;
+}
+
+float shBasis10(vec3 dir) {
+    return 0.488603f * dir.z;
+}
+
+float shBasis1p1(vec3 dir) {
+    return -0.488603f * dir.x;
+}
+
+// 2阶 - 二次项
+float shBasis2m2(vec3 dir) {
+    return 1.092548f * dir.x * dir.y;
+}
+
+float shBasis2m1(vec3 dir) {
+    return -1.092548f * dir.y * dir.z;
+}
+
+float shBasis20(vec3 dir) {
+    return 0.315392f * (3.0f * dir.z * dir.z - 1.0f);
+}
+
+float shBasis2p1(vec3 dir) {
+    return -1.092548f * dir.x * dir.z;
+}
+
+float shBasis2p2(vec3 dir) {
+    return 0.546274f * (dir.x * dir.x - dir.y * dir.y);
+}
+
+// 蒙特卡洛积分生成球谐系数
 void main() {
-    // 初始化累加和，用于存储当前线程的 SH 系数（RGB）
-    vec3 sum = vec3(0.0);
-    // 遍历极角 θ
-    for (int j = 0; j < THETA_RES; ++j) {
-        float theta = HF * (float(j) + 0.5); // 极角，偏移 0.5 以采样中心点
-        float sin_theta = sin(theta);        // sin(θ)，用于权重计算
-        float weight = sin_theta * HF * WF;  // 积分权重，考虑球面积分面积元素
-        // 遍历方位角 φ
-        for (int i = 0; i < PHI_RES; ++i) {
-            float phi = WF * (float(i) + 0.5); // 方位角，偏移 0.5 以采样中心点
-            // 计算方向向量（球坐标转笛卡尔坐标）
-            vec3 dir = vec3(sin_theta * cos(phi), sin_theta * sin(phi), cos(theta));
-            // 从立方体贴图采样颜色（RGB）
-            vec3 color = texture(cubemap, dir).rgb;
-            // 获取对应 SH 基函数值
-            vec3 basis = getSHBasis(dir);
-            // 累加颜色 * 基函数 * 权重
-            sum += color * basis * weight;
-        }
+    // 采样数
+    const int numSamples = 1024;
+
+    // 初始化所有SH系数为0
+    shCoeffs.l00 = vec4(0.0);
+    shCoeffs.l1m1 = vec4(0.0);
+    shCoeffs.l10 = vec4(0.0);
+    shCoeffs.l1p1 = vec4(0.0);
+    shCoeffs.l2m2 = vec4(0.0);
+    shCoeffs.l2m1 = vec4(0.0);
+    shCoeffs.l20 = vec4(0.0);
+    shCoeffs.l2p1 = vec4(0.0);
+    shCoeffs.l2p2 = vec4(0.0);
+
+    // 用于生成随机数的种子
+    uint rngState = gl_GlobalInvocationID.x;
+
+    // 蒙特卡洛积分
+    for (int i = 0; i < numSamples; i++) {
+        // 生成半球上的随机方向
+        // 使用Hammersley序列生成低差异序列
+        float u = float(i) / float(numSamples);
+        float v = fract(sin(float(i) * 12.9898 + float(rngState) * 78.233) * 43758.5453);
+
+        // 将UV转换为球坐标
+        float theta = 2.0 * 3.14159265 * u;  // 方位角 [0, 2π]
+        float phi = acos(2.0 * v - 1.0);      // 仰角 [0, π]
+
+        // 球坐标转笛卡尔坐标
+        float sinPhi = sin(phi);
+        vec3 dir = vec3(
+            sinPhi * cos(theta),
+            sinPhi * sin(theta),
+            cos(phi)
+        );
+
+        // 从环境贴图采样
+        vec3 color = texture(envMap, dir).rgb;
+
+        // 计算每个SH基函数的权重
+        float weight = 4.0 * 3.14159265 / float(numSamples);
+
+        // 累加到SH系数
+        shCoeffs.l00.rgb += color * shBasis00(dir) * weight;
+        shCoeffs.l1m1.rgb += color * shBasis1m1(dir) * weight;
+        shCoeffs.l10.rgb += color * shBasis10(dir) * weight;
+        shCoeffs.l1p1.rgb += color * shBasis1p1(dir) * weight;
+        shCoeffs.l2m2.rgb += color * shBasis2m2(dir) * weight;
+        shCoeffs.l2m1.rgb += color * shBasis2m1(dir) * weight;
+        shCoeffs.l20.rgb += color * shBasis20(dir) * weight;
+        shCoeffs.l2p1.rgb += color * shBasis2p1(dir) * weight;
+        shCoeffs.l2p2.rgb += color * shBasis2p2(dir) * weight;
     }
-    // 放大系数（与 CPU 版本一致）
-    sum *= 10.0;
-    // 存储到缓冲区（vec4，第 4 分量为 0.0）
-    coeffs[gl_GlobalInvocationID.x] = vec4(sum, 0.0);
+
+    // 设置alpha通道为1.0
+    shCoeffs.l00.a = 1.0;
+    shCoeffs.l1m1.a = 1.0;
+    shCoeffs.l10.a = 1.0;
+    shCoeffs.l1p1.a = 1.0;
+    shCoeffs.l2m2.a = 1.0;
+    shCoeffs.l2m1.a = 1.0;
+    shCoeffs.l20.a = 1.0;
+    shCoeffs.l2p1.a = 1.0;
+    shCoeffs.l2p2.a = 1.0;
 }
