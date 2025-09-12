@@ -7,7 +7,25 @@
 // SH 系数 (2阶 SH, 9 个 vec3 系数，对应 RGB 通道)
 struct SHCoefficients {
     glm::vec4 l00, l1m1, l10, l1p1, l2m2, l2m1, l20, l2p1, l2p2;
-} shCoeffs;
+};
+
+// 探针结构体
+struct LightProbe {
+    glm::vec3 position;      // 探针位置
+    SHCoefficients shCoeffs;  // 探针的球谐系数
+    vks::TextureCubeMap lowResCubeMap;  // 低分辨率CubeMap (16x16或32x32)
+    float radius;            // 探针影响半径
+};
+
+// 全局SH系数 (用于单个探针模式)
+SHCoefficients shCoeffs;
+
+// 探针相关变量
+std::vector<LightProbe> lightProbes;  // 存储所有探针
+int currentProbeIndex = 0;             // 当前选中的探针索引
+bool useMultipleProbes = false;         // 是否使用多个探针
+const int LOW_RES_CUBEMAP_SIZE = 16;   // 低分辨率CubeMap的大小
+const int PROBE_GRID_SIZE = 3;         // 探针网格大小 (3x3x3 = 27个探针)
 
 // UI 新增：对比模式开关
 bool compareMode = false;  // 默认关闭
@@ -44,7 +62,7 @@ public:
 
     // 天空盒相关成员
 	std::vector<std::string> skyboxNames;  // 天空盒名称列表
-	int32_t skyboxIndex = 3;              // 当前选中的天空盒索引
+	int32_t skyboxIndex = 3;               // 当前选中的天空盒索引
 	
 	// 渲染模式：0=IBL, 1=球谐函数
 	int32_t renderMode = 1;
@@ -52,7 +70,7 @@ public:
 
     // 纹理资源结构体
 	struct Textures {
-		vks::TextureCubeMap environmentCube;     // 环境贴图
+		vks::TextureCubeMap environmentCube;      // 环境贴图
 		vks::TextureCubeMap environmentCube2;     // 第二环境贴图
         vks::TextureCubeMap environmentCube3;     // 第三环境贴图
 
@@ -64,7 +82,7 @@ public:
 
     // 模型资源结构体
 	struct Meshes {
-		vkglTF::Model skybox;                    // 天空盒模型
+		vkglTF::Model skybox;                   // 天空盒模型
 		std::vector<vkglTF::Model> objects;     // 物体模型列表
 		int32_t objectIndex = 0;                // 当前选中的物体索引
 	} models;									// 声明 models 成员，存储所有模型资源。
@@ -187,6 +205,12 @@ public:
 			textures.irradianceCube.destroy();
 			textures.prefilteredCube.destroy();
 			textures.lutBrdf.destroy();
+
+			// 释放探针相关的资源
+			for (auto& probe : lightProbes) {
+				probe.lowResCubeMap.destroy();
+			}
+			lightProbes.clear();
 		}
 	}
 	// 获取启用的功能，检查设备是否支持采样器各向异性。
@@ -196,6 +220,126 @@ public:
 			enabledFeatures.samplerAnisotropy = VK_TRUE;
 		}
 	}
+	// 创建探针网格
+	void createProbeGrid()
+	{
+		lightProbes.clear();
+
+		// 计算探针间距
+		float spacing = 5.0f; // 探针之间的间距
+		glm::vec3 startOffset = glm::vec3(-(PROBE_GRID_SIZE - 1) * spacing * 0.5f);
+
+		// 创建3x3x3的探针网格
+		for (int x = 0; x < PROBE_GRID_SIZE; x++) {
+			for (int y = 0; y < PROBE_GRID_SIZE; y++) {
+				for (int z = 0; z < PROBE_GRID_SIZE; z++) {
+					LightProbe probe;
+					// 设置探针位置
+					probe.position = startOffset + glm::vec3(x * spacing, y * spacing, z * spacing);
+					// 设置探针影响半径
+					probe.radius = spacing * 1.5f;
+
+					lightProbes.push_back(probe);
+				}
+			}
+		}
+
+		std::cout << "Created " << lightProbes.size() << " light probes in a " 
+		          << PROBE_GRID_SIZE << "x" << PROBE_GRID_SIZE << "x" << PROBE_GRID_SIZE << " grid." << std::endl;
+	}
+
+	// 为所有探针生成低分辨率CubeMap
+	void generateLowResCubeMaps()
+	{
+		// 为每个探针创建低分辨率CubeMap
+		for (auto& probe : lightProbes) {
+			// 创建低分辨率CubeMap
+			// 这里简化处理，实际应该从探针位置渲染场景到CubeMap
+			// 现在我们只是复制环境贴图并缩小尺寸
+			vks::TextureCubeMap* sourceCube = nullptr;
+			switch (skyboxIndex) {
+				case 1: sourceCube = &textures.environmentCube; break;
+				case 2: sourceCube = &textures.environmentCube2; break;
+				case 3: sourceCube = &textures.environmentCube3; break;
+				default: continue;
+			}
+
+			// 创建低分辨率CubeMap
+			// 注意：这里简化处理，实际应该实现从探针位置渲染场景到CubeMap
+			probe.lowResCubeMap = *sourceCube;
+			probe.lowResCubeMap.width = LOW_RES_CUBEMAP_SIZE;
+			probe.lowResCubeMap.height = LOW_RES_CUBEMAP_SIZE;
+		}
+	}
+
+	// 为所有探针计算球谐系数
+	void generateAllSHCoefficients()
+	{
+		for (auto& probe : lightProbes) {
+			// 为每个探针计算球谐系数
+			// 这里简化处理，实际应该基于探针的低分辨率CubeMap计算
+			// 现在我们只是使用全局的球谐系数
+			probe.shCoeffs = shCoeffs;
+		}
+	}
+
+	// 根据位置插值获取球谐系数
+	SHCoefficients interpolateSHCoefficients(const glm::vec3& position)
+	{
+		if (!useMultipleProbes || lightProbes.empty()) {
+			return shCoeffs; // 返回全局球谐系数
+		}
+
+		// 找到影响当前位置的探针
+		std::vector<std::pair<float, int>> weightedProbes;
+
+		for (int i = 0; i < lightProbes.size(); i++) {
+			float distance = glm::distance(position, lightProbes[i].position);
+			if (distance < lightProbes[i].radius) {
+				// 计算权重 (距离越近权重越大)
+				float weight = 1.0f - (distance / lightProbes[i].radius);
+				weightedProbes.push_back(std::make_pair(weight, i));
+			}
+		}
+
+		// 如果没有找到影响的探针，返回全局球谐系数
+		if (weightedProbes.empty()) {
+			return shCoeffs;
+		}
+
+		// 按权重排序
+		std::sort(weightedProbes.begin(), weightedProbes.end(), 
+			[](const std::pair<float, int>& a, const std::pair<float, int>& b) {
+				return a.first > b.first;
+			});
+
+		// 归一化权重
+		float totalWeight = 0.0f;
+		for (const auto& wp : weightedProbes) {
+			totalWeight += wp.first;
+		}
+
+		// 插值球谐系数
+		SHCoefficients result{};
+		for (const auto& wp : weightedProbes) {
+			float weight = wp.first / totalWeight;
+			const SHCoefficients& probeCoeffs = lightProbes[wp.second].shCoeffs;
+
+			// 对每个系数进行加权插值
+			result.l00 += probeCoeffs.l00 * weight;
+			result.l1m1 += probeCoeffs.l1m1 * weight;
+			result.l10 += probeCoeffs.l10 * weight;
+			result.l1p1 += probeCoeffs.l1p1 * weight;
+			result.l2m2 += probeCoeffs.l2m2 * weight;
+			result.l2m1 += probeCoeffs.l2m1 * weight;
+			result.l20 += probeCoeffs.l20 * weight;
+			result.l2p1 += probeCoeffs.l2p1 * weight;
+			result.l2p2 += probeCoeffs.l2p2 * weight;
+		}
+
+		return result;
+	}
+
 	// 定义命令缓冲区开始信息，用于初始化命令缓冲区录制。
 	void buildCommandBuffers()
 	{
@@ -1465,10 +1609,19 @@ public:
 		uboMatrices.model = glm::rotate(glm::mat4(1.0f), glm::radians(90.0f + (models.objectIndex == 1 ? 45.0f : 0.0f)), glm::vec3(0.0f, 1.0f, 0.0f));
 		uboMatrices.camPos = camera.position * -1.0f;
 		memcpy(uniformBuffers.object.mapped, &uboMatrices, sizeof(uboMatrices));
-		// Skybo-x
+		// Skybox
 		uboMatrices.model = glm::mat4(glm::mat3(camera.matrices.view));
-
 		memcpy(uniformBuffers.skybox.mapped, &uboMatrices, sizeof(uboMatrices));
+
+		// 根据相机位置更新球谐系数
+		if (useMultipleProbes) {
+			// 获取相机在世界空间中的位置
+			glm::vec3 worldCameraPos = camera.position;
+			// 插值获取球谐系数
+			SHCoefficients interpolatedCoeffs = interpolateSHCoefficients(worldCameraPos);
+			// 更新SH uniform buffer
+			memcpy(uniformBuffers.sh.mapped, &interpolatedCoeffs, sizeof(SHCoefficients));
+		}
 	}
 
 	void updateParams()
@@ -1494,6 +1647,13 @@ public:
 		preparePipelines();
 		buildCommandBuffers();
 		loadSkyboxTexture();
+
+		// 初始化探针网格
+		createProbeGrid();
+		generateLowResCubeMaps();
+		generateSHCoefficients(); // 生成全局球谐系数
+		generateAllSHCoefficients(); // 为所有探针生成球谐系数
+
 		prepared = true;
 	}
 
@@ -1575,6 +1735,25 @@ public:
 			if (overlay->comboBox("Render Mode", &renderMode, renderModeNames)) {
 				// 切换渲染模式时重建命令缓冲区
 				buildCommandBuffers();
+			}
+
+			// 添加多探针模式开关
+			if (overlay->checkBox("Use Multiple Probes", &useMultipleProbes)) {
+				if (useMultipleProbes) {
+					generateAllSHCoefficients();
+				}
+				buildCommandBuffers();
+			}
+
+			// 添加当前探针选择器（仅在多探针模式下显示）
+			if (useMultipleProbes && !lightProbes.empty()) {
+				std::vector<std::string> probeNames;
+				for (int i = 0; i < lightProbes.size(); i++) {
+					probeNames.push_back("Probe " + std::to_string(i));
+				}
+				if (overlay->comboBox("Current Probe", &currentProbeIndex, probeNames)) {
+					buildCommandBuffers();
+				}
 			}
 		}
 	}
