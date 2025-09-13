@@ -2074,19 +2074,20 @@ public:
 		}
 	}
 	// 辅助函数：获取 SH basis (包含 normalization，常量匹配 LearnOpenGL)
+	// 辅助函数：获取 SH basis (修正符号以匹配标准 LearnOpenGL 和论文)
 	std::vector<float> getSHBasis(const glm::vec3& dir) {
 		float x = dir.x, y = dir.y, z = dir.z;
 		float x2 = x * x, y2 = y * y, z2 = z * z;
 		return {
-			0.282095f,                  // l00
-			0.488603f * y,              // l1m1
-			0.488603f * z,              // l10
-			0.488603f * x,              // l1p1
-			1.092548f * x * y,          // l2m2
-			1.092548f * y * z,          // l2m1
+			0.282095f,                   // l00
+			-0.488603f * y,              // l1m1 (负号修正)
+			0.488603f * z,               // l10
+			-0.488603f * x,              // l1p1 (负号修正)
+			1.092548f * x * y,           // l2m2
+			-1.092548f * y * z,          // l2m1 (负号修正)
 			0.315392f * (3.0f * z2 - 1.0f), // l20
-			1.092548f * x * z,          // l2p1
-			0.546274f * (x2 - y2)       // l2p2
+			-1.092548f * x * z,          // l2p1 (负号修正)
+			0.546274f * (x2 - y2)        // l2p2
 		};
 	}
 
@@ -2314,7 +2315,7 @@ void generateSHCoefficients() {
     logFile << "SH coefficient generation completed (GPU)\n";
     logFile << "end time(UTC): " << std::chrono::system_clock::now() << "\n";
     logFile.close();
-    // 清理资源
+    // 清理资源有bug
     // 先销毁存储缓冲区，然后再销毁其他资源
     // shStorageBuffer.destroy();
     // vkDestroyPipeline(device, computePipeline, nullptr);
@@ -2322,31 +2323,8 @@ void generateSHCoefficients() {
     // vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
     // vkDestroyDescriptorPool(device, descriptorPool, nullptr);
     // vkDestroyShaderModule(device, shaderModule, nullptr);
-
-
 }
-// 从当前 environmentCube 计算 SH 系数
-    // 使用 9 个基础函数投影（基于 LearnOpenGL 和 jMonkeyEngine 的思路）
-    // 这里简化实现：实际需采样 cubemap（CPU 或 GPU compute shader）
-    // 示例公式：每个系数 = ∫ L(ω) * Y_lm(ω) dω (Y_lm 是 SH basis)
-    // 为简化，用伪代码；实际可参考 https://cseweb.ucsd.edu/~ravir/papers/envmap/envmap.pdf
-    // shCoeffs = SHCoefficients{};
-    
-    // 示例：计算 l00 (常数项) = (1 / 4π) * ∫ L(ω) dω
-    // 假设从 cubemap 采样积分（需实现采样循环，类似 generateIrradianceCube 中的采样）
-    // const float pi = glm::pi<float>();
-    // glm::vec3 basis[9] = { /* SH basis constants */ };  // 预定义 basis 值
-    // for (int face = 0; face < 6; ++face) {
-        // 采样每个面，积分...
-        // shCoeffs.l00 += sample * basis[0] * weight;
-    // }
-    // 归一化
-    // shCoeffs.l00 *= 4.0f * pi / numSamples;
-
-    
-//     memcpy(uniformBuffers.sh.mapped, &shCoeffs, sizeof(SHCoefficients));
-// }
-
+// 从当前 environmentCube 计算 SH 系数。实际可参考 https://cseweb.ucsd.edu/~ravir/papers/envmap/envmap.pdf
 
 };
 
