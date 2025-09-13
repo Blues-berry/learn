@@ -15,6 +15,7 @@ struct LightProbe {
     SHCoefficients shCoeffs;  // 探针的球谐系数
     vks::TextureCubeMap lowResCubeMap;  // 低分辨率CubeMap (16x16或32x32)
     float radius;            // 探针影响半径
+    glm::vec3 debugColor;    // 新增：调试颜色
 };
 
 // 全局SH系数 (用于单个探针模式)
@@ -129,6 +130,7 @@ public:
 	// 定义管线布局和描述符集布局，用于管理着色器资源绑定
 	VkPipelineLayout pipelineLayout{ VK_NULL_HANDLE };         // 管道布局
 	VkDescriptorSetLayout descriptorSetLayout{ VK_NULL_HANDLE }; // 描述符集布局
+	VkShaderModule shaderModule{ VK_NULL_HANDLE };             // 着色器模块
 
 	
 
@@ -193,6 +195,9 @@ public:
 			vkDestroyPipeline(device, pipelines.sh, nullptr);
 			vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
 			vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+			if (shaderModule != VK_NULL_HANDLE) {
+				vkDestroyShaderModule(device, shaderModule, nullptr);
+			}
 			uniformBuffers.object.destroy();
 			uniformBuffers.skybox.destroy();
 			uniformBuffers.params.destroy();
@@ -238,6 +243,12 @@ public:
 					probe.position = startOffset + glm::vec3(x * spacing, y * spacing, z * spacing);
 					// 设置探针影响半径
 					probe.radius = spacing * 1.5f;
+					// 设置调试颜色
+					probe.debugColor = glm::vec3(
+						(float)((x + y * PROBE_GRID_SIZE + z * PROBE_GRID_SIZE * PROBE_GRID_SIZE) % 3) * 0.5f,
+						(float)((x + y * PROBE_GRID_SIZE + z * PROBE_GRID_SIZE * PROBE_GRID_SIZE) % 5) * 0.2f,
+						(float)((x + y * PROBE_GRID_SIZE + z * PROBE_GRID_SIZE * PROBE_GRID_SIZE) % 7) * 0.14f
+					);
 
 					lightProbes.push_back(probe);
 				}
@@ -393,6 +404,28 @@ public:
 		}
 	}
 
+	// 创建计算管线的辅助函数
+	VkPipeline createComputePipeline(VkPipelineLayout pipelineLayout)
+	{
+		// 加载计算着色器
+		VkPipelineShaderStageCreateInfo shaderStage = loadShader(getShadersPath() + "lightprobesh/sh_compute.comp.spv", VK_SHADER_STAGE_COMPUTE_BIT);
+		VkShaderModule shaderModule = shaderStage.module;
+
+		shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+		shaderStage.module = shaderModule;
+		shaderStage.pName = "main";
+
+		VkComputePipelineCreateInfo computePipelineCI = vks::initializers::computePipelineCreateInfo(pipelineLayout);
+		computePipelineCI.stage = shaderStage;
+
+		VkPipeline computePipeline;
+		VK_CHECK_RESULT(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &computePipelineCI, nullptr, &computePipeline));
+
+		// 注意：这里不销毁shaderModule，因为它被管线使用
+		return computePipeline;
+	}
+
 	// 为所有探针计算球谐系数
 	void generateAllSHCoefficients()
 	{
@@ -422,18 +455,8 @@ public:
 		VkPipelineLayout pipelineLayout;
 		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCI, nullptr, &pipelineLayout));
 
-		// 加载计算着色器并创建管线
-		VkPipelineShaderStageCreateInfo shaderStage = loadShader(getShadersPath() + "lightprobesh/sh_compute.comp.spv", VK_SHADER_STAGE_COMPUTE_BIT);
-		VkShaderModule shaderModule = shaderStage.module;
-
-		shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-		shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-		shaderStage.module = shaderModule;
-		shaderStage.pName = "main";
-		VkComputePipelineCreateInfo computePipelineCI = vks::initializers::computePipelineCreateInfo(pipelineLayout);
-		computePipelineCI.stage = shaderStage;
-		VkPipeline computePipeline;
-		VK_CHECK_RESULT(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &computePipelineCI, nullptr, &computePipeline));
+		// 使用辅助函数创建计算管线
+		VkPipeline computePipeline = createComputePipeline(pipelineLayout);
 
 		// 为每个探针创建存储缓冲区和描述符集
 		std::vector<vks::Buffer> shStorageBuffers(lightProbes.size());
@@ -482,6 +505,14 @@ public:
 			barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
 			vkCmdPipelineBarrier(cmdBuf, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 1, &barrier, 0, nullptr, 0, nullptr);
 
+			// 确保存储缓冲区数据可见
+			VkBufferMemoryBarrier bufferBarrier = vks::initializers::bufferMemoryBarrier();
+			bufferBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+			bufferBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+			bufferBarrier.buffer = shStorageBuffers[i].buffer;
+			bufferBarrier.size = sizeof(SHCoefficients);
+			vkCmdPipelineBarrier(cmdBuf, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 1, &bufferBarrier, 0, nullptr);
+
 			// 将存储缓冲区的数据复制到探针的SH系数
 			VkBufferCopy copyRegion = {};
 			copyRegion.size = sizeof(SHCoefficients);
@@ -503,13 +534,30 @@ public:
 
 			// 从临时缓冲区读取SH系数
 			SHCoefficients tempCoeffs;
-			memcpy(&tempCoeffs, tempBuffer.mapped, sizeof(SHCoefficients));
+			if (tempBuffer.buffer && tempBuffer.memory) {
+				void* mappedData = nullptr;
+				VkResult mapResult = vkMapMemory(device, tempBuffer.memory, 0, sizeof(SHCoefficients), 0, &mappedData);
+				if (mapResult == VK_SUCCESS && mappedData) {
+					memcpy(&tempCoeffs, mappedData, sizeof(SHCoefficients));
+					vkUnmapMemory(device, tempBuffer.memory);
 
-			// 更新探针的SH系数
-			lightProbes[i].shCoeffs = tempCoeffs;
+					// 更新探针的SH系数（确保探针有效）
+					if (i < lightProbes.size()) {
+						lightProbes[i].shCoeffs = tempCoeffs;
+					} else {
+						std::cerr << "Error: Invalid probe index " << i << std::endl;
+					}
+				} else {
+					std::cerr << "Error: Failed to map tempBuffer memory" << std::endl;
+				}
+			} else {
+				std::cerr << "Error: tempBuffer is not properly initialized" << std::endl;
+			}
 
 			// 释放临时缓冲区
-			tempBuffer.destroy();
+			if (tempBuffer.buffer) {
+				tempBuffer.destroy();
+			}
 
 			// 重新开始命令缓冲区记录以处理下一个探针
 			cmdBuf = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
@@ -662,6 +710,23 @@ public:
 			}
 			// 绘制用户界面（UI），包含材质选择、对象选择等控件。
 			drawUI(drawCmdBuffers[i]);
+			
+			// 渲染探针调试信息
+			if (useMultipleProbes && !lightProbes.empty()) {
+				for (auto& probe : lightProbes) {
+					// 创建简单的球体模型矩阵
+					glm::mat4 model = glm::translate(glm::mat4(1.0f), probe.position);
+					model = glm::scale(model, glm::vec3(0.05f));
+					
+					// 推送常量数据
+					vkCmdPushConstants(drawCmdBuffers[i], pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &model);
+					vkCmdPushConstants(drawCmdBuffers[i], pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(glm::mat4), sizeof(glm::vec3), &probe.debugColor);
+					
+					// 绘制探针标记
+					models.objects[0].draw(drawCmdBuffers[i]); // 使用第一个模型(球体)
+				}
+			}
+			
 			// 结束渲染通道
 			vkCmdEndRenderPass(drawCmdBuffers[i]);
 
@@ -688,6 +753,9 @@ public:
 		// textures.environmentCube4.loadFromFile(getAssetPath() + "textures/hdr/grace_cross.ktx", VK_FORMAT_R16G16B16A16_SFLOAT, vulkanDevice, queue);
 		// textures.environmentCube5.loadFromFile(getAssetPath() + "textures/hdr/rnl_cross.ktx", VK_FORMAT_R16G16B16A16_SFLOAT, vulkanDevice, queue);
 
+		// 使用已有的 loadShader 函数加载计算着色器
+		VkPipelineShaderStageCreateInfo shaderStageInfo = loadShader(getShadersPath() + "lightprobesh/sh_compute.comp.spv", VK_SHADER_STAGE_COMPUTE_BIT);
+		shaderModule = shaderStageInfo.module;
 	}
 
 	void setupDescriptors()
@@ -2193,18 +2261,8 @@ void generateSHCoefficients() {
     VkPipelineLayout pipelineLayout;
     VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCI, nullptr, &pipelineLayout));
 
-   // 加载计算着色器并创建管线
-    VkPipelineShaderStageCreateInfo shaderStage = loadShader(getShadersPath() + "lightprobesh/sh_compute.comp.spv", VK_SHADER_STAGE_COMPUTE_BIT);
-    VkShaderModule shaderModule = shaderStage.module;
-
-    shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    shaderStage.module = shaderModule;
-    shaderStage.pName = "main";
-    VkComputePipelineCreateInfo computePipelineCI = vks::initializers::computePipelineCreateInfo(pipelineLayout);
-    computePipelineCI.stage = shaderStage;
-    VkPipeline computePipeline;
-    VK_CHECK_RESULT(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &computePipelineCI, nullptr, &computePipeline));
+   // 使用辅助函数创建计算管线
+    VkPipeline computePipeline = createComputePipeline(pipelineLayout);
 
     // 创建命令缓冲区
     VkCommandBuffer cmdBuf = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
@@ -2221,6 +2279,14 @@ void generateSHCoefficients() {
     barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
     barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
     vkCmdPipelineBarrier(cmdBuf, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 1, &barrier, 0, nullptr, 0, nullptr);
+
+    // 确保存储缓冲区数据可见
+    VkBufferMemoryBarrier bufferBarrier = vks::initializers::bufferMemoryBarrier();
+    bufferBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    bufferBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    bufferBarrier.buffer = shStorageBuffer.buffer;
+    bufferBarrier.size = sizeof(SHCoefficients);
+    vkCmdPipelineBarrier(cmdBuf, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 1, &bufferBarrier, 0, nullptr);
 
     // 将存储缓冲区的数据复制到 Uniform 缓冲区
     VkBufferCopy copyRegion = {};
@@ -2245,18 +2311,19 @@ void generateSHCoefficients() {
     logFile << "l20: " << tempCoeffs.l20.x << ", " << tempCoeffs.l20.y << ", " << tempCoeffs.l20.z << "\n";
     logFile << "l2p1: " << tempCoeffs.l2p1.x << ", " << tempCoeffs.l2p1.y << ", " << tempCoeffs.l2p1.z << "\n";
     logFile << "l2p2: " << tempCoeffs.l2p2.x << ", " << tempCoeffs.l2p2.y << ", " << tempCoeffs.l2p2.z << "\n";
-
-    // 清理资源
-    vkDestroyPipeline(device, computePipeline, nullptr);
-    vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
-    vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
-    vkDestroyDescriptorPool(device, descriptorPool, nullptr);
-    vkDestroyShaderModule(device, shaderModule, nullptr);
-    shStorageBuffer.destroy();
-
     logFile << "SH coefficient generation completed (GPU)\n";
     logFile << "end time(UTC): " << std::chrono::system_clock::now() << "\n";
     logFile.close();
+    // 清理资源
+    // 先销毁存储缓冲区，然后再销毁其他资源
+    // shStorageBuffer.destroy();
+    // vkDestroyPipeline(device, computePipeline, nullptr);
+    // vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+    // vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+    // vkDestroyDescriptorPool(device, descriptorPool, nullptr);
+    // vkDestroyShaderModule(device, shaderModule, nullptr);
+
+
 }
 // 从当前 environmentCube 计算 SH 系数
     // 使用 9 个基础函数投影（基于 LearnOpenGL 和 jMonkeyEngine 的思路）

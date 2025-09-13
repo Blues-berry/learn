@@ -22,16 +22,14 @@ layout(set = 0, binding = 1) buffer SHBuffer {                // 存储SH系数�
 // 工作组大小
 layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
 
-// 球谐基函数
-// 参考: https://cseweb.ucsd.edu/~ravir/papers/envmap/envmap.pdf
-// 以及 LearnOpenGL 的实现
+// 放大系数
+const float scaleFactor = 1.5f;
 
-// 0阶 - 常数项
+// 球谐基函数
 float shBasis00(vec3 dir) {
     return 0.282095f;
 }
 
-// 1阶 - 线性项
 float shBasis1m1(vec3 dir) {
     return -0.488603f * dir.y;
 }
@@ -44,7 +42,6 @@ float shBasis1p1(vec3 dir) {
     return -0.488603f * dir.x;
 }
 
-// 2阶 - 二次项
 float shBasis2m2(vec3 dir) {
     return 1.092548f * dir.x * dir.y;
 }
@@ -68,7 +65,7 @@ float shBasis2p2(vec3 dir) {
 // 蒙特卡洛积分生成球谐系数
 void main() {
     // 采样数
-    const int numSamples = 1024;
+    const int numSamples = 128;
 
     // 初始化所有SH系数为0
     shCoeffs.l00 = vec4(0.0);
@@ -81,15 +78,11 @@ void main() {
     shCoeffs.l2p1 = vec4(0.0);
     shCoeffs.l2p2 = vec4(0.0);
 
-    // 用于生成随机数的种子
-    uint rngState = gl_GlobalInvocationID.x;
-
     // 蒙特卡洛积分
     for (int i = 0; i < numSamples; i++) {
-        // 生成半球上的随机方向
-        // 使用Hammersley序列生成低差异序列
+        // 使用简单的线性分布
         float u = float(i) / float(numSamples);
-        float v = fract(sin(float(i) * 12.9898 + float(rngState) * 78.233) * 43758.5453);
+        float v = float(i) / float(numSamples);
 
         // 将UV转换为球坐标
         float theta = 2.0 * 3.14159265 * u;  // 方位角 [0, 2π]
@@ -109,16 +102,16 @@ void main() {
         // 计算每个SH基函数的权重
         float weight = 4.0 * 3.14159265 / float(numSamples);
 
-        // 累加到SH系数
-        shCoeffs.l00.rgb += color * shBasis00(dir) * weight;
-        shCoeffs.l1m1.rgb += color * shBasis1m1(dir) * weight;
-        shCoeffs.l10.rgb += color * shBasis10(dir) * weight;
-        shCoeffs.l1p1.rgb += color * shBasis1p1(dir) * weight;
-        shCoeffs.l2m2.rgb += color * shBasis2m2(dir) * weight;
-        shCoeffs.l2m1.rgb += color * shBasis2m1(dir) * weight;
-        shCoeffs.l20.rgb += color * shBasis20(dir) * weight;
-        shCoeffs.l2p1.rgb += color * shBasis2p1(dir) * weight;
-        shCoeffs.l2p2.rgb += color * shBasis2p2(dir) * weight;
+        // 累加到SH系数时直接乘以放大系数
+        shCoeffs.l00.rgb += color * shBasis00(dir) * weight * scaleFactor;
+        shCoeffs.l1m1.rgb += color * shBasis1m1(dir) * weight * scaleFactor;
+        shCoeffs.l10.rgb += color * shBasis10(dir) * weight * scaleFactor;
+        shCoeffs.l1p1.rgb += color * shBasis1p1(dir) * weight * scaleFactor;
+        shCoeffs.l2m2.rgb += color * shBasis2m2(dir) * weight * scaleFactor;
+        shCoeffs.l2m1.rgb += color * shBasis2m1(dir) * weight * scaleFactor;
+        shCoeffs.l20.rgb += color * shBasis20(dir) * weight * scaleFactor;
+        shCoeffs.l2p1.rgb += color * shBasis2p1(dir) * weight * scaleFactor;
+        shCoeffs.l2p2.rgb += color * shBasis2p2(dir) * weight * scaleFactor;
     }
 
     // 设置alpha通道为1.0
