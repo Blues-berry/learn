@@ -126,6 +126,7 @@ set(EXAMPLES
 	inputattachments
 	instancing
 	lightprobesh
+	lightprobesh2
 	meshshader
 	multisampling
 	multithreading

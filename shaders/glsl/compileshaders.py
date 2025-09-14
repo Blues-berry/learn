@@ -9,6 +9,7 @@ import sys
 
 parser = argparse.ArgumentParser(description='Compile all GLSL shaders')
 parser.add_argument('--glslang', type=str, help='path to glslangvalidator executable')
+parser.add_argument('--project', type=str, help='single project')
 parser.add_argument('--g', action='store_true', help='compile with debug symbols')
 args = parser.parse_args()
 
@@ -37,6 +38,11 @@ dir_path = os.path.dirname(os.path.realpath(__file__))
 dir_path = dir_path.replace('\\', '/')
 for root, dirs, files in os.walk(dir_path):
     for file in files:
+        if args.project != None:
+            folder_name = os.path.basename(os.path.normpath(root))
+            if folder_name != args.project:
+                continue
+        
         if file.endswith(file_extensions):
             input_file = os.path.join(root, file)
             output_file = input_file + ".spv"
