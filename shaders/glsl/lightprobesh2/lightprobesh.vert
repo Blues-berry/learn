@@ -18,9 +18,11 @@ layout (set = 0, binding = 0) uniform Global
 layout (set = 1, binding = 0) uniform Local
 {
 	mat4 model;
-} local;
+} ubo;
 
-layout (location = 0) out vec3 outUVW;
+layout (location = 0) out vec3 outWorldPos;
+layout (location = 1) out vec3 outNormal;
+layout (location = 2) out vec2 outUV;
 
 out gl_PerVertex 
 {
@@ -29,7 +31,12 @@ out gl_PerVertex
 
 void main() 
 {
-	outUVW = inPos;
-	gl_Position = global.projection * local.model * vec4(inPos.xyz, 1.0);
-	gl_Position.z = gl_Position.w;
+	vec4 worldPos = ubo.model * vec4(inPos, 1.0);
+
+	outWorldPos = worldPos.xyz;
+	outNormal = mat3(ubo.model) * inNormal;
+	outUV = inUV;
+	outUV.t = 1.0 - inUV.t;
+
+	gl_Position =  global.projection * global.view * worldPos;
 }

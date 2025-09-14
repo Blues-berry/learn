@@ -7,8 +7,10 @@ layout (location = 0) out vec4 outColor;
 layout (set = 0, binding = 0) uniform Global
 {
 	mat4 projection;
+	mat4 view;
 
 	vec4 lights[4];
+	vec4 cameraPos;
 	float exposure;
 	float gamma;
 } global;

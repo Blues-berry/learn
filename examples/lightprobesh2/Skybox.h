@@ -13,7 +13,7 @@ class Skybox
 {
 public:
     explicit Skybox(vks::VulkanDevice* dev, IExampleInterfasce* example);
-    ~Skybox() = default;
+    ~Skybox();
 
     struct LocalBuffer {
         glm::mat4 transform;
@@ -24,6 +24,7 @@ public:
     void PreparePSO(VkRenderPass renderPass, VkDescriptorSetLayout passLayout);
     void Destroy();
     void Draw(VkCommandBuffer cmd, VkDescriptorSet globalSet);
+    void Update(const glm::mat4& view);
 
 private:
     void PreparePerBatchResource();
@@ -32,7 +33,7 @@ private:
     vks::VulkanDevice* device;
     IExampleInterfasce* iLoader;
 
-    vkglTF::Model model;
+    std::unique_ptr<vkglTF::Model> model;
 
     VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
     VkDescriptorSet descriptorSet = VK_NULL_HANDLE;

@@ -1,49 +1,76 @@
-#include "Skybox.h"
+#include "PreviewModel.h"
+#include "VulkanDevice.h"
 
-Skybox::Skybox(vks::VulkanDevice* dev, IExampleInterfasce* example) : device(dev), iLoader(example)
+PreviewModel::PreviewModel(vks::VulkanDevice* dev, IExampleInterfasce* example) : device(dev), iLoader(example)
 {
 	PreparePerBatchResource();
-}
-
-Skybox::~Skybox()
-{
-}
-
-void Skybox::LoadFromPath(const std::string& mesh, VkQueue queue)
-{
-	uint32_t glTFLoadingFlags = vkglTF::FileLoadingFlags::PreTransformVertices | vkglTF::FileLoadingFlags::FlipY;
-
-	model = std::make_unique<vkglTF::Model>();
-	model->loadFromFile(getAssetPath() + "models/cube.gltf", device, queue, glTFLoadingFlags);
-}
-
-void Skybox::UpdateCubemap(const std::shared_ptr<vks::TextureCubeMap>& tex)
-{
-	cubemap = tex;
 	UpdateSet();
 }
 
-void Skybox::UpdateSet()
+void PreviewModel::UpdateModel(const std::shared_ptr<vkglTF::Model>& model_)
 {
-	std::vector<VkWriteDescriptorSet> writeDescriptorSets = {
-		vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &localBuffer.descriptor),
-		vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, &cubemap->descriptor)
-	};
-	vkUpdateDescriptorSets(device->logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, NULL);
+	model = model_;
 }
 
-void Skybox::PreparePerBatchResource()
+void PreviewModel::Destroy()
+{
+	localBuffer.destroy();
+	materialBuffer.destroy();
+	model = nullptr;
+
+	if (descriptorPool != VK_NULL_HANDLE)
+	{
+		vkDestroyDescriptorPool(device->logicalDevice, descriptorPool, nullptr);
+		descriptorPool = VK_NULL_HANDLE;
+	}
+
+	if (descriptorSetLayout != VK_NULL_HANDLE)
+	{
+		vkDestroyDescriptorSetLayout(device->logicalDevice, descriptorSetLayout, nullptr);
+		descriptorSetLayout = VK_NULL_HANDLE;
+	}
+
+	if (pipelineLayout != VK_NULL_HANDLE)
+	{
+		vkDestroyPipelineLayout(device->logicalDevice, pipelineLayout, nullptr);
+		pipelineLayout = VK_NULL_HANDLE;
+	}
+
+	if (pso != VK_NULL_HANDLE)
+	{
+		vkDestroyPipeline(device->logicalDevice, pso, nullptr);
+		pso = VK_NULL_HANDLE;
+	}
+}
+
+void PreviewModel::Draw(VkCommandBuffer cmd, VkDescriptorSet globalSet)
+{
+	if (!model)
+	{
+		return;
+	}
+
+	std::vector<VkDescriptorSet> sets = {
+		globalSet, descriptorSet
+	};
+
+	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, static_cast<uint32_t>(sets.size()), sets.data(), 0, NULL);
+	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pso);
+	model->draw(cmd);
+}
+
+void PreviewModel::PreparePerBatchResource()
 {
 	std::vector<VkDescriptorPoolSize> poolSizes = {
 		{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 },
-		{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1 },
+		{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 },
 	};
 	VkDescriptorPoolCreateInfo descriptorPoolInfo = vks::initializers::descriptorPoolCreateInfo(poolSizes, 1);
 	VK_CHECK_RESULT(vkCreateDescriptorPool(device->logicalDevice, &descriptorPoolInfo, nullptr, &descriptorPool));
 
 	std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {
 		vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0),
-		vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 1),
+		vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT, 1),
 	};
 	VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCI = vks::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings);
 	VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device->logicalDevice, &descriptorSetLayoutCI, nullptr, &descriptorSetLayout));
@@ -58,12 +85,28 @@ void Skybox::PreparePerBatchResource()
 		sizeof(LocalBuffer));
 	localBuffer.map();
 
-	LocalBuffer empty = {};
-	empty.transform = glm::mat4();
-	memcpy(localBuffer.mapped, &empty, sizeof(LocalBuffer));
+	device->createBuffer(
+		VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+		&materialBuffer,
+		sizeof(MaterialBuffer));
+	materialBuffer.map();
+;
+	localData.transform = glm::mat4();
+	memcpy(localBuffer.mapped, &localData, sizeof(LocalBuffer));
+	memcpy(materialBuffer.mapped, &materialData, sizeof(MaterialBuffer));
 }
 
-void Skybox::PreparePSO(VkRenderPass renderPass, VkDescriptorSetLayout passLayout)
+void PreviewModel::UpdateSet()
+{
+	std::vector<VkWriteDescriptorSet> writeDescriptorSets = {
+	vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &localBuffer.descriptor),
+	vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, &materialBuffer.descriptor)
+	};
+	vkUpdateDescriptorSets(device->logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, NULL);
+}
+
+void PreviewModel::PreparePSO(VkRenderPass renderPass, VkDescriptorSetLayout passLayout)
 {
 	VkDevice rawDevice = device->logicalDevice;
 
@@ -135,57 +178,23 @@ void Skybox::PreparePSO(VkRenderPass renderPass, VkDescriptorSetLayout passLayou
 
 	// Skybox pipeline (background cube)
 
-	shaderStages[0] = iLoader->LoadShader("lightprobesh2/skybox.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
-	shaderStages[1] = iLoader->LoadShader("lightprobesh2/skybox.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
+	shaderStages[0] = iLoader->LoadShader("lightprobesh2/lightprobesh.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
+	shaderStages[1] = iLoader->LoadShader("lightprobesh2/lightprobesh.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
 	VK_CHECK_RESULT(vkCreateGraphicsPipelines(rawDevice, VK_NULL_HANDLE, 1, &pipelineCI, nullptr, &pso));
 }
 
-void Skybox::Update(const glm::mat4& view)
+void PreviewModel::ShowUI(vks::UIOverlay* overlay)
 {
-	LocalBuffer empty = {};
-	empty.transform = glm::mat4(glm::mat3(view));
-	memcpy(localBuffer.mapped, &empty, sizeof(LocalBuffer));
-}
-
-void Skybox::Draw(VkCommandBuffer cmd, VkDescriptorSet globalSet)
-{
-	std::vector<VkDescriptorSet> sets = {
-		globalSet, descriptorSet
-	};
-
-	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, static_cast<uint32_t>(sets.size()), sets.data(), 0, NULL);
-	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pso);
-	model->draw(cmd);
-}
-
-void Skybox::Destroy()
-{
-	localBuffer.destroy();
-	model = nullptr;
-
-	if (descriptorPool != VK_NULL_HANDLE)
-	{
-		vkDestroyDescriptorPool(device->logicalDevice, descriptorPool, nullptr);
-		descriptorPool = VK_NULL_HANDLE;
+	if (overlay->header("Material")) {
+		materialDirty |= overlay->inputFloat("roughness", &materialData.roughness, 0.1f, 2);
+		materialDirty |= overlay->inputFloat("metallic", &materialData.metallic, 0.1f, 2);
+		materialDirty |= overlay->inputFloat("specular", &materialData.specular, 0.1f, 2);
+		materialDirty |= overlay->colorPicker("elbedo", &materialData.elbedo.r);
 	}
 
-
-	if (descriptorSetLayout != VK_NULL_HANDLE)
+	if (materialDirty)
 	{
-		vkDestroyDescriptorSetLayout(device->logicalDevice, descriptorSetLayout, nullptr);
-		descriptorSetLayout = VK_NULL_HANDLE;
+		memcpy(materialBuffer.mapped, &materialData, sizeof(MaterialBuffer));
+		materialDirty = false;
 	}
-
-	if (pipelineLayout != VK_NULL_HANDLE)
-	{
-		vkDestroyPipelineLayout(device->logicalDevice, pipelineLayout, nullptr);
-		pipelineLayout = VK_NULL_HANDLE;
-	}
-
-	if (pso != VK_NULL_HANDLE)
-	{
-		vkDestroyPipeline(device->logicalDevice, pso, nullptr);
-		pso = VK_NULL_HANDLE;
-	}
-
 }
