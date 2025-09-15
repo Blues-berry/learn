@@ -21,7 +21,7 @@ layout (set = 1, binding = 1) uniform Material
 	float metallic;
 	float specular;
 	float padding;
-	vec4 elbedo;
+	vec4 elbedo;//基础颜色（Base Color）或反照率（Albedo）。
 } material;
 
 layout (location = 0) out vec4 outColor;

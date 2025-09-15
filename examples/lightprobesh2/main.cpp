@@ -17,14 +17,14 @@ class VulkanExample : public VulkanExampleBase, public IExampleInterfasce
 public:
     VulkanExample() : VulkanExampleBase()
     {
-        camera.type = Camera::CameraType::firstperson;//ÉèÖÃÏà»úÎªµÚÒ»ÈË³ÆÄ£Ê½¡£
-        camera.movementSpeed = 4.0f;//ÉèÖÃÏà»úÒÆ¶¯ËÙ¶ÈÎª4.0µ¥Î»/Ãë¡£
-        camera.setPerspective(60.0f, (float)width / (float)height, 0.1f, 256.0f);//ÉèÖÃÍ¸ÊÓÍ¶Ó°£¬ÊÓ³¡½Ç60¶È£¬¿í¸ß±È»ùÓÚ´°¿Ú³ß´ç£¬½ü²Ã¼ôÃæ0.1£¬Ô¶²Ã¼ôÃæ256.0¡£
-        camera.rotationSpeed = 0.25f;//ÉèÖÃÏà»úĞı×ªËÙ¶ÈÎª0.25¡£
+        camera.type = Camera::CameraType::firstperson;//è®¾ç½®ç›¸æœºä¸ºç¬¬ä¸€äººç§°æ¨¡å¼ã€‚
+        camera.movementSpeed = 4.0f;//è®¾ç½®ç›¸æœºç§»åŠ¨é€Ÿåº¦ä¸º4.0å•ä½/ç§’ã€‚
+        camera.setPerspective(60.0f, (float)width / (float)height, 0.1f, 256.0f);//è®¾ç½®é€è§†æŠ•å½±ï¼Œè§†åœºè§’60åº¦ï¼Œå®½é«˜æ¯”åŸºäºçª—å£å°ºå¯¸ï¼Œè¿‘è£å‰ªé¢0.1ï¼Œè¿œè£å‰ªé¢256.0ã€‚
+        camera.rotationSpeed = 0.25f;//è®¾ç½®ç›¸æœºæ—‹è½¬é€Ÿåº¦ä¸º0.25ã€‚
 
-        // ÉèÖÃÏà»ú³õÊ¼Î»ÖÃºÍ³¯Ïò
+        // è®¾ç½®ç›¸æœºåˆå§‹ä½ç½®å’Œæœå‘
         camera.setRotation({ -3.75f, 180.0f, 0.0f });
-        camera.setPosition({ 0.55f, 0.85f, 12.0f });//ÉèÖÃÏà»ú³õÊ¼Î»ÖÃÎª(0.55, 0.85, 12.0)¡£
+        camera.setPosition({ 0.55f, 0.85f, 12.0f });//è®¾ç½®ç›¸æœºåˆå§‹ä½ç½®ä¸º(0.55, 0.85, 12.0)ã€‚
     }
 
     ~VulkanExample() override

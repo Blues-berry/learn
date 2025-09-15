@@ -39,7 +39,6 @@ private:
     VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
     VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
     VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
-
     LocalBuffer localData;
     vks::Buffer localBuffer;
     std::shared_ptr<vks::TextureCubeMap> cubemap;

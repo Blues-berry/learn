@@ -1,7 +1,12 @@
 #include "PreviewModel.h"
 #include "VulkanDevice.h"
 
-PreviewModel::PreviewModel(vks::VulkanDevice* dev, IExampleInterfasce* example) : device(dev), iLoader(example)
+/**
+ * @brief PreviewModel类的构造函数
+ * @param dev 指向VulkanDevice设备的指针，用于管理Vulkan设备资源
+ * @param example 指向IExampleInterface接口的指针，用于提供示例接口功能
+ */
+PreviewModel::PreviewModel(vks::VulkanDevice* dev, IExampleInterfasce* example) : device(dev), iLoader(example) // 使用初始化列表设置设备指针和接口指针
 {
 	PreparePerBatchResource();
 	UpdateSet();
@@ -12,34 +17,44 @@ void PreviewModel::UpdateModel(const std::shared_ptr<vkglTF::Model>& model_)
 	model = model_;
 }
 
+/**
+ * @brief PreviewModel类的析构函数，用于释放和清理模型相关的资源
+ * 该函数会销毁所有与模型相关的Vulkan对象，包括缓冲区、描述符池、管线等
+ */
 void PreviewModel::Destroy()
 {
+    // 销毁局部缓冲区和材质缓冲区
 	localBuffer.destroy();
 	materialBuffer.destroy();
+    // 将模型指针置空
 	model = nullptr;
 
+    // 检查并销毁描述符池（如果存在）
 	if (descriptorPool != VK_NULL_HANDLE)
 	{
 		vkDestroyDescriptorPool(device->logicalDevice, descriptorPool, nullptr);
-		descriptorPool = VK_NULL_HANDLE;
+		descriptorPool = VK_NULL_HANDLE;  // 将句柄置空，避免悬空指针
 	}
 
+    // 检查并销毁描述符集布局（如果存在）
 	if (descriptorSetLayout != VK_NULL_HANDLE)
 	{
 		vkDestroyDescriptorSetLayout(device->logicalDevice, descriptorSetLayout, nullptr);
-		descriptorSetLayout = VK_NULL_HANDLE;
+		descriptorSetLayout = VK_NULL_HANDLE;  // 将句柄置空，避免悬空指针
 	}
 
+    // 检查并销毁管线布局（如果存在）
 	if (pipelineLayout != VK_NULL_HANDLE)
 	{
 		vkDestroyPipelineLayout(device->logicalDevice, pipelineLayout, nullptr);
-		pipelineLayout = VK_NULL_HANDLE;
+		pipelineLayout = VK_NULL_HANDLE;  // 将句柄置空，避免悬空指针
 	}
 
+    // 检查并销毁图形管线（如果存在）
 	if (pso != VK_NULL_HANDLE)
 	{
 		vkDestroyPipeline(device->logicalDevice, pso, nullptr);
-		pso = VK_NULL_HANDLE;
+		pso = VK_NULL_HANDLE;  // 将句柄置空，避免悬空指针
 	}
 }
 
@@ -97,12 +112,21 @@ void PreviewModel::PreparePerBatchResource()
 	memcpy(materialBuffer.mapped, &materialData, sizeof(MaterialBuffer));
 }
 
+/**
+ * @brief 更新描述符集
+ * 该函数用于更新描述符集，将本地缓冲区和材质缓冲区的绑定信息更新到描述符集中
+ */
 void PreviewModel::UpdateSet()
 {
+    // 创建描述符集写入操作数组，包含两个写入操作
+    // 第一个写入操作：绑定本地缓冲区到描述符集的0号槽位
+    // 第二个写入操作：绑定材质缓冲区到描述符集的1号槽位
 	std::vector<VkWriteDescriptorSet> writeDescriptorSets = {
 	vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &localBuffer.descriptor),
 	vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, &materialBuffer.descriptor)
 	};
+    // 调用Vulkan API更新描述符集
+    // 参数：逻辑设备、写入操作数量、写入操作数组指针、无需设置操作、无需设置操作参数
 	vkUpdateDescriptorSets(device->logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, NULL);
 }
 
@@ -110,33 +134,33 @@ void PreviewModel::PreparePSO(VkRenderPass renderPass, VkDescriptorSetLayout pas
 {
 	VkDevice rawDevice = device->logicalDevice;
 
-	// ����������װ״̬��ʹ���������б����ˡ�
+	// 配置输入组装状态，使用三角形列表拓扑。
 	VkPipelineInputAssemblyStateCreateInfo inputAssemblyState =
 		vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
-	// ���ù�դ��״̬�����ģʽ���ޱ����޳�����ʱ��Ϊ���档
+	// 配置光栅化状态，填充模式，无背面剔除，逆时针为正面。
 	VkPipelineRasterizationStateCreateInfo rasterizationState =
 		vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE);
-	// ������ɫ���״̬�����û��	
+	// 配置颜色混合状态，禁用混合	
 	VkPipelineColorBlendAttachmentState blendAttachmentState =
 		vks::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE);
-	// ������ɫ���״̬��ָ��һ��������
+	// 配置颜色混合状态，指定一个附件。
 	VkPipelineColorBlendStateCreateInfo colorBlendState =
 		vks::initializers::pipelineColorBlendStateCreateInfo(1, &blendAttachmentState);
-	// ������Ⱥ�ģ��״̬����ʼ������Ȳ��Ժ�д�롣
+	// 配置深度和模板状态，初始禁用深度测试和写入。
 	VkPipelineDepthStencilStateCreateInfo depthStencilState =
 		vks::initializers::pipelineDepthStencilStateCreateInfo(VK_FALSE, VK_FALSE, VK_COMPARE_OP_LESS_OR_EQUAL);
-	// �����ӿ�״̬��ָ��һ���ӿںͲü����Ρ�
+	// 配置视口状态，指定一个视口和裁剪矩形。
 	VkPipelineViewportStateCreateInfo viewportState =
 		vks::initializers::pipelineViewportStateCreateInfo(1, 1);
-	// ���ö��ز���״̬�����ö��ز���������������
+	// 配置多重采样状态，禁用多重采样（单采样）。
 	VkPipelineMultisampleStateCreateInfo multisampleState =
 		vks::initializers::pipelineMultisampleStateCreateInfo(VK_SAMPLE_COUNT_1_BIT);
-	// ���嶯̬״̬�������ӿںͲü����Ρ�
+	// 定义动态状态，包括视口和裁剪矩形。
 	std::vector<VkDynamicState> dynamicStateEnables = {
 		VK_DYNAMIC_STATE_VIEWPORT,
 		VK_DYNAMIC_STATE_SCISSOR
 	};
-	// ���ö�̬״̬��
+	// 配置动态状态。
 	VkPipelineDynamicStateCreateInfo dynamicState =
 		vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables);
 
@@ -145,35 +169,35 @@ void PreviewModel::PreparePSO(VkRenderPass renderPass, VkDescriptorSetLayout pas
 		descriptorSetLayout
 	};
 
-	// Pipeline layout ��ʼ�����߲��ִ�����Ϣ��ָ�������������֡�
+	// Pipeline layout 初始化管线布局创建信息，指定描述符集布局。
 	VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(setLayotus.data(), static_cast<uint32_t>(setLayotus.size()));
-	// �������߲��֡�
+	// 创建管线布局。
 	VK_CHECK_RESULT(vkCreatePipelineLayout(rawDevice, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout));
-	// ����������ɫ���׶Σ������Ƭ�Σ���
+	// 定义两个着色器阶段（顶点和片段）。
 	std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages;
 
 	// Pipelines
-	// ��ʼ��ͼ�ι��ߴ�����Ϣ��ָ�����߲��ֺ���Ⱦͨ����
+	// 初始化图形管线创建信息，指定管线布局和渲染通道。
 	VkGraphicsPipelineCreateInfo pipelineCI = vks::initializers::pipelineCreateInfo(pipelineLayout, renderPass);
-	// ����������װ״̬��
+	// 设置输入组装状态。
 	pipelineCI.pInputAssemblyState = &inputAssemblyState;
-	// ���ù�դ��״̬��
+	// 设置光栅化状态。
 	pipelineCI.pRasterizationState = &rasterizationState;
-	// ������ɫ���״̬��
+	// 设置颜色混合状态。
 	pipelineCI.pColorBlendState = &colorBlendState;
-	// ������Ⱥ�ģ��״̬��
+	// 设置深度和模板状态。
 	pipelineCI.pMultisampleState = &multisampleState;
-	// �����ӿ�״̬��
+	// 设置视口状态。
 	pipelineCI.pViewportState = &viewportState;
-	// ������Ⱥ�ģ��״̬��
+	// 设置深度和模板状态。
 	pipelineCI.pDepthStencilState = &depthStencilState;
-	// ���ö�̬״̬��
+	// 设置动态状态。
 	pipelineCI.pDynamicState = &dynamicState;
-	// ������ɫ���׶�������2����
+	// 设置着色器阶段数量（2）。
 	pipelineCI.stageCount = static_cast<uint32_t>(shaderStages.size());
-	// ������ɫ���׶����顣
+	// 设置着色器阶段数组。
 	pipelineCI.pStages = shaderStages.data();
-	// ���ö�������״̬������λ�á����ߺ�UV���ꡣ
+	// 设置顶点输入状态，包括位置、法线和UV坐标。
 	pipelineCI.pVertexInputState = vkglTF::Vertex::getPipelineVertexInputState({ vkglTF::VertexComponent::Position, vkglTF::VertexComponent::Normal, vkglTF::VertexComponent::UV });
 
 	// Skybox pipeline (background cube)
