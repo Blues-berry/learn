@@ -9,12 +9,9 @@ Skybox::~Skybox()
 {
 }
 
-void Skybox::LoadFromPath(const std::string& mesh, VkQueue queue)
+void Skybox::SetModel(const std::shared_ptr<vkglTF::Model>& model_)
 {
-	uint32_t glTFLoadingFlags = vkglTF::FileLoadingFlags::PreTransformVertices | vkglTF::FileLoadingFlags::FlipY;
-
-	model = std::make_unique<vkglTF::Model>();
-	model->loadFromFile(getAssetPath() + "models/cube.gltf", device, queue, glTFLoadingFlags);
+	model = model_;
 }
 
 void Skybox::UpdateCubemap(const std::shared_ptr<vks::TextureCubeMap>& tex)

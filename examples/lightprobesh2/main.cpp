@@ -25,6 +25,16 @@ public:
         // 设置相机初始位置和朝向
         camera.setRotation({ -3.75f, 180.0f, 0.0f });
         camera.setPosition({ 0.55f, 0.85f, 12.0f });//设置相机初始位置为(0.55, 0.85, 12.0)。
+
+        // Enable extension required for multiview
+        enabledDeviceExtensions.push_back(VK_KHR_MULTIVIEW_EXTENSION_NAME);
+
+        // Reading device properties and features for multiview requires VK_KHR_get_physical_device_properties2 to be enabled
+        enabledInstanceExtensions.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
+        // Enable required extension features
+        physicalDeviceMultiviewFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES_KHR;
+        physicalDeviceMultiviewFeatures.multiview = VK_TRUE;
+        deviceCreatepNextChain = &physicalDeviceMultiviewFeatures;
     }
 
     ~VulkanExample() override
@@ -46,12 +56,16 @@ public:
         cubeMaps.clear();
 
         mainPass = nullptr;
+        shGenPass = nullptr;
+        brdfPass = nullptr;
+        genIBL = nullptr;
     }
 
 	void LoadAssets();
 	void LoadCubeMap(const std::string& name, const std::string& cubemapPath, VkFormat format);
-    void LoadPreviewModel(const std::string& name, const std::string& cubemapPath);
-    void LoadScene();
+    void LoadPreviewModel(const std::string& name, const std::string& cubemapPath, uint32_t glTFLoadingFlags);
+    void PrepareScene();
+    void UpdateSkyBox();
 
     void PrepareProbes();
     void PreparePasses();
@@ -61,8 +75,9 @@ public:
     void prepare() override
     {
         VulkanExampleBase::prepare();
-        PreparePasses();
         LoadAssets();
+        PreparePasses();
+        PrepareScene();
         prepared = true;
     }
 
@@ -107,6 +122,7 @@ public:
 
 private:
     // VulkanglTFScene glTFScene;
+    VkPhysicalDeviceMultiviewFeaturesKHR physicalDeviceMultiviewFeatures{};
 
     std::vector<std::unique_ptr<LightProbe>> lightProbes;
 
@@ -116,6 +132,7 @@ private:
     int32_t skyboxIndex = 0;
 
     // preview model
+    std::shared_ptr<vkglTF::Model> skyboxModel;
     std::vector<std::shared_ptr<vkglTF::Model>> previewModels;
     std::vector<std::string> previewModelNames;
     int32_t modelIndex = 0;
@@ -125,18 +142,12 @@ private:
     MainPass::GlobalUbo mainPassData = {};
     std::unique_ptr<MainPass> mainPass;
     std::unique_ptr<GenBRDFLutPass> brdfPass;
+    std::unique_ptr<GenSHComputePass> shGenPass;
+    std::unique_ptr<GenIBLPass> genIBL;
 
     // scene
-    struct SceneTextures
-    {
-        VkImageView brdfView; // weakRef
-        VkImageView irradianceCube; // weakRef
-        VkImageView prefilteredCube; // weakRef
-    };
-
     std::unique_ptr<Skybox> skybox;
     std::unique_ptr<PreviewModel> previewModel;
-    SceneTextures sceneTextures;
 };
 
 void VulkanExample::LoadAssets()
@@ -145,18 +156,21 @@ void VulkanExample::LoadAssets()
     LoadCubeMap("gcanyon", "textures/hdr/gcanyon_cube.ktx", VK_FORMAT_R16G16B16A16_SFLOAT);
     LoadCubeMap("uffizi", "textures/hdr/uffizi_cube.ktx", VK_FORMAT_R16G16B16A16_SFLOAT);
 
-    LoadPreviewModel("sphere", "models/sphere.gltf");
-    LoadPreviewModel("teapot", "models/teapot.gltf");
-    LoadPreviewModel("torusknot", "models/torusknot.gltf");
-    LoadPreviewModel("venus", "models/venus.gltf");
+    uint32_t glTFLoadingFlags = vkglTF::FileLoadingFlags::PreTransformVertices | vkglTF::FileLoadingFlags::FlipY;
 
-    LoadScene();
+    LoadPreviewModel("sphere", "models/sphere.gltf", glTFLoadingFlags);
+    LoadPreviewModel("teapot", "models/teapot.gltf", glTFLoadingFlags);
+    LoadPreviewModel("torusknot", "models/torusknot.gltf", glTFLoadingFlags);
+    LoadPreviewModel("venus", "models/venus.gltf", glTFLoadingFlags);
+
+    skyboxModel = std::make_shared<vkglTF::Model>();
+    skyboxModel->loadFromFile(getAssetPath() + "models/cube.gltf", vulkanDevice, queue, glTFLoadingFlags);
 }
 
-void VulkanExample::LoadScene()
+void VulkanExample::PrepareScene()
 {
     skybox = std::make_unique<Skybox>(vulkanDevice, this);
-    skybox->LoadFromPath("models/cube.gltf", queue);
+    skybox->SetModel(skyboxModel);
     skybox->PreparePSO(renderPass, mainPass->descriptorSetLayout);
     skybox->UpdateCubemap(cubeMaps[skyboxIndex]);
 
@@ -165,10 +179,21 @@ void VulkanExample::LoadScene()
     previewModel->UpdateModel(previewModels[modelIndex]);
 }
 
-void VulkanExample::LoadPreviewModel(const std::string& name, const std::string& cubemapPath)
+void VulkanExample::UpdateSkyBox()
 {
-    uint32_t glTFLoadingFlags = vkglTF::FileLoadingFlags::PreTransformVertices | vkglTF::FileLoadingFlags::FlipY;
+    skybox->UpdateCubemap(cubeMaps[skyboxIndex]);
+    shGenPass->SetCubeMap(cubeMaps[skyboxIndex]);
+    genIBL->SetCubeMap(cubeMaps[skyboxIndex]);
 
+    // gen sh and env map
+    VkCommandBuffer cmdBuf = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
+    shGenPass->Draw(cmdBuf);
+    genIBL->Draw(cmdBuf);
+    vulkanDevice->flushCommandBuffer(cmdBuf, queue);
+}
+
+void VulkanExample::LoadPreviewModel(const std::string& name, const std::string& cubemapPath, uint32_t glTFLoadingFlags)
+{
     auto model = std::make_shared<vkglTF::Model>();
     model->loadFromFile(getAssetPath() + cubemapPath, vulkanDevice, queue, glTFLoadingFlags);
 
@@ -198,15 +223,28 @@ void VulkanExample::PreparePasses()
 
     brdfPass = std::make_unique<GenBRDFLutPass>(vulkanDevice, this);
     brdfPass->Prepare();
+    brdfPass->FeedDescriptor(mainPass->environmemts.brdfView);
+
+    shGenPass = std::make_unique<GenSHComputePass>(vulkanDevice, this);
+    shGenPass->SetCubeMap(cubeMaps[skyboxIndex]);
+    shGenPass->FeedSH(mainPass->environmemts.shCoeffs);
+
+    genIBL = std::make_unique<GenIBLPass>(vulkanDevice, this, 256);
+    genIBL->SetCubeMap(cubeMaps[skyboxIndex]);
+    genIBL->SetModel(skyboxModel);
+    genIBL->FeedIrradianceMap(mainPass->environmemts.irradianceCube);
+    genIBL->FeedPrefilteredMap(mainPass->environmemts.prefilteredCube);
 
     // pipeline only draw once
     {
         VkCommandBuffer cmdBuf = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
         brdfPass->Draw(cmdBuf);
+        shGenPass->Draw(cmdBuf);
+        genIBL->Draw(cmdBuf);
         vulkanDevice->flushCommandBuffer(cmdBuf, queue);
-
-        sceneTextures.brdfView = brdfPass->view;
     }
+
+    mainPass->UpdateBinngs();
 }
 
 void VulkanExample::ReginPrefilterPasses()
@@ -238,7 +276,7 @@ void VulkanExample::drawFrame(VkCommandBuffer cmd)
         skybox->Draw(cmd, mainPass->descriptorSet);
 
         previewModel->Draw(cmd, mainPass->descriptorSet);
-
+        
         drawUI(cmd);
         });
 }
@@ -253,7 +291,7 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
             globalDirty = true;
         }
         if (overlay->comboBox("Skybox", &skyboxIndex, cubemapNames)) {
-            skybox->UpdateCubemap(cubeMaps[skyboxIndex]);
+            UpdateSkyBox();
         }
         if (overlay->comboBox("PreviewModel", &modelIndex, previewModelNames)) {
             previewModel->UpdateModel(previewModels[modelIndex]);

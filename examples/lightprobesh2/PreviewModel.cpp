@@ -124,7 +124,7 @@ void PreviewModel::PreparePSO(VkRenderPass renderPass, VkDescriptorSetLayout pas
 		vks::initializers::pipelineColorBlendStateCreateInfo(1, &blendAttachmentState);
 	// 配置深度和模板状态，初始禁用深度测试和写入。
 	VkPipelineDepthStencilStateCreateInfo depthStencilState =
-		vks::initializers::pipelineDepthStencilStateCreateInfo(VK_FALSE, VK_FALSE, VK_COMPARE_OP_LESS_OR_EQUAL);
+		vks::initializers::pipelineDepthStencilStateCreateInfo(VK_TRUE, VK_TRUE, VK_COMPARE_OP_LESS_OR_EQUAL);
 	// 配置视口状态，指定一个视口和裁剪矩形。
 	VkPipelineViewportStateCreateInfo viewportState =
 		vks::initializers::pipelineViewportStateCreateInfo(1, 1);
@@ -190,6 +190,8 @@ void PreviewModel::ShowUI(vks::UIOverlay* overlay)
 		materialDirty |= overlay->inputFloat("metallic", &materialData.metallic, 0.1f, 2);
 		materialDirty |= overlay->inputFloat("specular", &materialData.specular, 0.1f, 2);
 		materialDirty |= overlay->colorPicker("elbedo", &materialData.elbedo.r);
+		materialDirty |= overlay->checkBox("UseSH", &materialData.useSH);
+		materialDirty |= overlay->checkBox("UseReflection", &materialData.useReflection);
 	}
 
 	if (materialDirty)

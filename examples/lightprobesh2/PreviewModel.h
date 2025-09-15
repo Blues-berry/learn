@@ -20,6 +20,9 @@ public:
 		float specular = 0.5;
 		float padding = 0.f;
 		glm::vec4 elbedo = glm::vec4(1.f, 1.f, 1.f, 1.f);
+
+		int32_t useSH = 1;
+		int32_t useReflection = 0;
 	};
 
 	struct LocalBuffer {

@@ -19,7 +19,7 @@ public:
         glm::mat4 transform;
     };
 
-    void LoadFromPath(const std::string& mesh, VkQueue queue);
+    void SetModel(const std::shared_ptr<vkglTF::Model> &model_);
     void UpdateCubemap(const std::shared_ptr<vks::TextureCubeMap>& tex);
     void PreparePSO(VkRenderPass renderPass, VkDescriptorSetLayout passLayout);
     void Destroy();
@@ -33,7 +33,7 @@ private:
     vks::VulkanDevice* device;
     IExampleInterfasce* iLoader;
 
-    std::unique_ptr<vkglTF::Model> model;
+    std::shared_ptr<vkglTF::Model> model;
 
     VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
     VkDescriptorSet descriptorSet = VK_NULL_HANDLE;

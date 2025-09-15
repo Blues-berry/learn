@@ -1,5 +1,7 @@
 #pragma once
 #include "VulkanDevice.h"
+#include "VulkanTexture.h"
+#include "VulkanglTFModel.h"
 #include "glm/glm.hpp"
 #include "ILoader.h"
 #include <functional>
@@ -13,13 +15,21 @@ class ComputePass
 {
 public:
     explicit ComputePass(vks::VulkanDevice* device_, IExampleInterfasce* example);
-    ~ComputePass();
+    virtual ~ComputePass();
+
+    void Draw(VkCommandBuffer cmd);
 
 protected:
+    virtual void Dispatch(VkCommandBuffer cmd) = 0;
+
     vks::VulkanDevice* device;
     IExampleInterfasce* iLoader;
 
     VkPipeline pipeline = VK_NULL_HANDLE;
+    VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
+    VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
+    VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
+    VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
 };
 
 class GenSHComputePass : public ComputePass
@@ -27,6 +37,30 @@ class GenSHComputePass : public ComputePass
 public:
     explicit GenSHComputePass(vks::VulkanDevice* device_, IExampleInterfasce* example);
     ~GenSHComputePass();
+
+    struct SHCoefficients {
+        glm::vec4 shCoeffs[9];
+    };
+
+    void SetCubeMap(const std::shared_ptr<vks::TextureCubeMap>& cube);
+
+    void Generate(VkQueue queue);
+
+    void FeedSH(VkDescriptorBufferInfo& descriptor);
+
+    vks::Buffer shCoeffBuffer;
+private:
+    void Dispatch(VkCommandBuffer cmd) override;
+
+    std::shared_ptr<vks::TextureCubeMap> cubemap;
+};
+
+struct Evnironmemt
+{
+    VkDescriptorImageInfo brdfView;
+    VkDescriptorImageInfo irradianceCube;
+    VkDescriptorImageInfo prefilteredCube;
+    VkDescriptorBufferInfo shCoeffs;
 };
 
 class MainPass
@@ -50,8 +84,13 @@ public:
     
     void Draw(VkCommandBuffer cmd, VkFramebuffer framebuffer, uint32_t width, uint32_t height, std::function<void(VkCommandBuffer)> &&encoder);
 
+    void UpdateBinngs();
+
     VkDescriptorSet descriptorSet;
     VkDescriptorSetLayout descriptorSetLayout;
+
+    Evnironmemt environmemts = {};
+
 private:
     void PreparePerPassResource();
     vks::VulkanDevice* device;
@@ -60,7 +99,6 @@ private:
     VkDescriptorPool descriptorPool;
 
     VkRenderPassBeginInfo beginInfo;
-
     vks::Buffer globalBuffer;
 };
 
@@ -72,12 +110,16 @@ public:
     virtual ~FullScreenPass();
 
     void Prepare();
-    void Draw(VkCommandBuffer cmd);
+    virtual void Draw(VkCommandBuffer cmd);
 
-    VkImageView view = VK_NULL_HANDLE;
+    void FeedDescriptor(VkDescriptorImageInfo& descriptor);
+
+    VkSampler GetDefaultSampler() const { return sampler; }
 protected:
-    void PrepareRenderPass();
+    void GenerateSampler();
 
+    virtual void PrepareRenderPass();
+    virtual void PrepareData() {}
     virtual void PreparePipeline() = 0;
     virtual void PrepareFrameBuffer() = 0;
 
@@ -92,6 +134,8 @@ protected:
     VkFormat format = VK_FORMAT_UNDEFINED;
     
     VkImage image = VK_NULL_HANDLE;
+    VkImageView view = VK_NULL_HANDLE;
+    VkSampler sampler = VK_NULL_HANDLE;
     VkDeviceMemory deviceMemory = VK_NULL_HANDLE;
     VkRenderPass renderpass = VK_NULL_HANDLE;
     VkFramebuffer fbo = VK_NULL_HANDLE;
@@ -100,7 +144,7 @@ protected:
     VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
     VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
     VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
-    VkDescriptorSet set = VK_NULL_HANDLE;
+    VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
 };
 
 class GenBRDFLutPass : public FullScreenPass
@@ -114,17 +158,99 @@ private:
     void PrepareFrameBuffer() override;
 };
 
-class GenIrranceCubeSinglePass : public FullScreenPass
-{
-public:
-    explicit GenIrranceCubeSinglePass(vks::VulkanDevice* device_, IExampleInterfasce* example, VkImage cubemap, uint32_t mip, uint32_t face);
-    ~GenIrranceCubeSinglePass();
-
-private:
-    uint32_t mip;
-    uint32_t face;
-
-    VkImage cubemap; // weakRef
-    VkImageView subView;
+struct IBLGenUBO {
+    glm::mat4 mvp[6];
+    float deltaPhi;
+    float deltaTheta;
+    float roughness;
+    uint32_t numSamples;
 };
 
+class GenIBLCubeMipPass : public FullScreenPass
+{
+public:
+    explicit GenIBLCubeMipPass(vks::VulkanDevice* device_, IExampleInterfasce* example, VkImage cubemap, VkFormat format, uint32_t mip, uint32_t width, uint32_t height);
+    ~GenIBLCubeMipPass();
+
+    void SetCubeMap(const std::shared_ptr<vks::TextureCubeMap>& cube);
+    void Draw(VkCommandBuffer cmd, vkglTF::Model& model);
+
+private:
+    void PrepareRenderPass() override;
+    void PreparePipeline() override;
+    void PrepareFrameBuffer() override;
+    void PrepareData() override;
+
+    virtual void FeeShader(std::array<VkPipelineShaderStageCreateInfo, 2>& shader) {}
+    virtual void FeedUBO(IBLGenUBO& ubo) {}
+
+    uint32_t mipmap;
+    VkImage cubemap; // weakRef
+    VkImageView subView = VK_NULL_HANDLE;
+
+    vks::Buffer ubo;
+};
+
+class GenIrradianceCubeMip : public GenIBLCubeMipPass
+{
+public:
+    GenIrradianceCubeMip(vks::VulkanDevice* device_, IExampleInterfasce* example, VkImage cubemap, VkFormat format, uint32_t mip, uint32_t width, uint32_t height)
+        : GenIBLCubeMipPass(device_, example, cubemap, format, mip, width, height)
+    {
+    }
+    ~GenIrradianceCubeMip() = default;
+
+private:
+    void FeeShader(std::array<VkPipelineShaderStageCreateInfo, 2>& shader) override;
+    void FeedUBO(IBLGenUBO& ubo) override;
+};
+
+class GenPrefilterEnvMapMip : public GenIBLCubeMipPass
+{
+public:
+    GenPrefilterEnvMapMip(vks::VulkanDevice* device_, IExampleInterfasce* example, VkImage cubemap, VkFormat format, uint32_t mip, uint32_t width, uint32_t height, float roughness_)
+        : GenIBLCubeMipPass(device_, example, cubemap, format, mip, width, height)
+        , roughness(roughness_)
+    {
+    }
+    ~GenPrefilterEnvMapMip() = default;
+
+private:
+    void FeeShader(std::array<VkPipelineShaderStageCreateInfo, 2>& shader) override;
+    void FeedUBO(IBLGenUBO& ubo) override;
+
+    float roughness;
+};
+
+class GenIBLPass
+{
+public:
+    GenIBLPass(vks::VulkanDevice* device_, IExampleInterfasce* example, uint32_t width);
+    ~GenIBLPass();
+
+    void SetModel(const std::shared_ptr<vkglTF::Model>& model_);
+    void SetCubeMap(const std::shared_ptr<vks::TextureCubeMap>& cube);
+    void Draw(VkCommandBuffer cmd);
+    void Generate(VkQueue queue);
+
+    void FeedIrradianceMap(VkDescriptorImageInfo& descriptor);
+    void FeedPrefilteredMap(VkDescriptorImageInfo& descriptor);
+
+private:
+    vks::VulkanDevice* device;
+    IExampleInterfasce* iLoader;
+    uint32_t numMips;
+
+    std::shared_ptr<vkglTF::Model> model;
+    std::shared_ptr<vks::TextureCubeMap> cubemap;
+    std::vector<std::unique_ptr<GenIrradianceCubeMip>> irradiance;
+    std::vector<std::unique_ptr<GenPrefilterEnvMapMip>> prefiltered;
+
+    VkImage irradianceImage = VK_NULL_HANDLE;
+    VkImageView irradianceView = VK_NULL_HANDLE;
+    VkDeviceMemory irradianceMemory = VK_NULL_HANDLE;
+
+    VkImage prefilteredImage = VK_NULL_HANDLE;
+    VkImageView prefilteredView = VK_NULL_HANDLE;
+    VkDeviceMemory prefilteredMemory = VK_NULL_HANDLE;
+};

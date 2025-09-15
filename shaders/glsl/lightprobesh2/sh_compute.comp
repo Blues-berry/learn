@@ -1,0 +1,139 @@
+#version 450
+
+// 球谐系数结构体 (匹配 C++)
+struct SHCoefficients {
+    vec4 l00;    // 0阶
+    vec4 l1m1;   // 1阶
+    vec4 l10;    // 1阶
+    vec4 l1p1;   // 1阶
+    vec4 l2m2;   // 2阶
+    vec4 l2m1;   // 2阶
+    vec4 l20;    // 2阶
+    vec4 l2p1;   // 2阶
+    vec4 l2p2;   // 2阶
+};
+
+// 输入绑定
+layout(set = 0, binding = 0) uniform samplerCube envMap;      // 环境贴图
+layout(set = 0, binding = 1) buffer SHBuffer {                // 存储SH系数的缓冲区
+    SHCoefficients shCoeffs;
+};
+
+// 工作组大小 (单个线程处理所有系数)
+layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+
+// SH 分析系数 (从论文: \hat{A}_l for irradiance, 仅 l=0,1,2 非零)
+const float A0 = 3.14159265f;  // π for l=0
+const float A1 = 2.09439510f;  // 2π/3 for l=1
+const float A2 = 0.78539816f;  // π/4 for l=2
+
+// 球谐基函数 (标准符号，匹配 LearnOpenGL 和论文)
+float shBasis00(vec3 dir) {
+    return 0.282095f;  // sqrt(1/4π)
+}
+
+float shBasis1m1(vec3 dir) {
+    return -0.488603f * dir.y;  // -sqrt(3/4π) * Y
+}
+
+float shBasis10(vec3 dir) {
+    return 0.488603f * dir.z;   // sqrt(3/4π) * Z
+}
+
+float shBasis1p1(vec3 dir) {
+    return -0.488603f * dir.x;  // -sqrt(3/4π) * X
+}
+
+float shBasis2m2(vec3 dir) {
+    return 1.092548f * dir.x * dir.y;  // sqrt(15/4π) * X*Y
+}
+
+float shBasis2m1(vec3 dir) {
+    return -1.092548f * dir.y * dir.z; // -sqrt(15/4π) * Y*Z
+}
+
+float shBasis20(vec3 dir) {
+    return 0.315392f * (3.0f * dir.z * dir.z - 1.0f);  // sqrt(5/16π) * (3Z²-1)
+}
+
+float shBasis2p1(vec3 dir) {
+    return -1.092548f * dir.x * dir.z;  // -sqrt(15/4π) * X*Z
+}
+
+float shBasis2p2(vec3 dir) {
+    return 0.546274f * (dir.x * dir.x - dir.y * dir.y);  // sqrt(15/16π) * (X²-Y²)
+}
+
+// 蒙特卡洛积分生成球谐系数 (优化：均匀球采样 + 分析 A_l 乘法)
+void main() {
+    const int numSamples = 1024;
+    const float invNumSamples = 4.0f * 3.14159265f / float(numSamples);  // 权重: 4π / N
+
+    // 初始化所有SH系数为0
+    shCoeffs.l00 = vec4(0.0);
+    shCoeffs.l1m1 = vec4(0.0);
+    shCoeffs.l10 = vec4(0.0);
+    shCoeffs.l1p1 = vec4(0.0);
+    shCoeffs.l2m2 = vec4(0.0);
+    shCoeffs.l2m1 = vec4(0.0);
+    shCoeffs.l20 = vec4(0.0);
+    shCoeffs.l2p1 = vec4(0.0);
+    shCoeffs.l2p2 = vec4(0.0);
+
+    // 蒙特卡洛积分 (均匀球采样: theta = acos(1-2v), phi = 2π u)
+    for (int i = 0; i < numSamples; i++) {
+        // 均匀随机 UV (简化线性，实际可使用低差异序列如 Halton)
+        float u = float(i % 16) / 16.0f + float(i / 16) / 16.0f;  // 伪随机
+        float v = float(i) / float(numSamples);
+
+        // 球坐标转换 (均匀分布在球面)
+        float phi = 2.0 * 3.14159265 * u;  // 方位角 [0, 2π]
+        float theta = acos(1.0 - 2.0 * v);  // 极角 [0, π]，cos(theta) = 1-2v 以均匀采样
+
+        // 球坐标转笛卡尔坐标
+        float sinTheta = sin(theta);
+        vec3 dir = vec3(
+            sinTheta * cos(phi),
+            sinTheta * sin(phi),
+            cos(theta)
+        );
+
+        // 从环境贴图采样 (假设 envMap 是 radiance L(ω))
+        vec3 sampleDir = vec3(dir.x, -dir.y, dir.z);
+        vec3 color = texture(envMap, sampleDir).rgb;
+
+        // 计算每个SH基函数 (投影 L(ω) * Y_lm(ω))
+        float b00 = shBasis00(dir);
+        float b1m1 = shBasis1m1(dir);
+        float b10 = shBasis10(dir);
+        float b1p1 = shBasis1p1(dir);
+        float b2m2 = shBasis2m2(dir);
+        float b2m1 = shBasis2m1(dir);
+        float b20 = shBasis20(dir);
+        float b2p1 = shBasis2p1(dir);
+        float b2p2 = shBasis2p2(dir);
+
+        // 累加到SH系数 (L_lm = ∫ L(ω) Y_lm(ω) dω ≈ sum color * basis * weight)
+        // 应用分析 A_l 乘法 for irradiance E_lm = A_l * L_lm (仅 l=0,1,2)
+        shCoeffs.l00.rgb += color * b00 * invNumSamples * A0;
+        shCoeffs.l1m1.rgb += color * b1m1 * invNumSamples * A1;
+        shCoeffs.l10.rgb += color * b10 * invNumSamples * A1;
+        shCoeffs.l1p1.rgb += color * b1p1 * invNumSamples * A1;
+        shCoeffs.l2m2.rgb += color * b2m2 * invNumSamples * A2;
+        shCoeffs.l2m1.rgb += color * b2m1 * invNumSamples * A2;
+        shCoeffs.l20.rgb += color * b20 * invNumSamples * A2;
+        shCoeffs.l2p1.rgb += color * b2p1 * invNumSamples * A2;
+        shCoeffs.l2p2.rgb += color * b2p2 * invNumSamples * A2;
+    }
+
+    // 设置alpha通道为1.0 (用于 uniform 填充)
+    shCoeffs.l00.a = 1.0;
+    shCoeffs.l1m1.a = 1.0;
+    shCoeffs.l10.a = 1.0;
+    shCoeffs.l1p1.a = 1.0;
+    shCoeffs.l2m2.a = 1.0;
+    shCoeffs.l2m1.a = 1.0;
+    shCoeffs.l20.a = 1.0;
+    shCoeffs.l2p1.a = 1.0;
+    shCoeffs.l2p2.a = 1.0;
+}
