@@ -23,7 +23,8 @@ layout (set = 1, binding = 1) uniform Material
 	float padding;
 	vec4 elbedo;//基础颜色（Base Color）或反照率（Albedo）。
 } material;
-
+layout (binding = 2) uniform samplerCube samplerIrradiance;
+layout (binding = 3) uniform sampler2D samplerBRDFLUT;
 layout (location = 0) out vec4 outColor;
 
 #define PI 3.1415926535897932384626433832795
@@ -37,6 +38,7 @@ void main()
 
 	float metallic = material.metallic;
 	float roughness = material.roughness;
-
-	outColor = ALBEDO;
+	vec3 irradiance = texture(samplerIrradiance, N).rgb;
+	outColor = vec4(texture(samplerBRDFLUT, inUV).rgb, ALBEDO.a);
+	outColor = vec4(texture(samplerBRDFLUT, inUV).rgb, ALBEDO.a);
 }

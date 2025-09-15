@@ -27,116 +27,115 @@ public:
         camera.setPosition({ 0.55f, 0.85f, 12.0f });//设置相机初始位置为(0.55, 0.85, 12.0)。
     }
 
-    ~VulkanExample() override
+        ~VulkanExample() override
     {
-        vkDeviceWaitIdle(device);
+        vkDeviceWaitIdle(device); // 等待设备空闲，确保所有命令完成
 
         if (skybox)
         {
-            skybox->Destroy();
-            skybox = nullptr;
+            skybox->Destroy(); // 销毁天空盒资源
+            skybox = nullptr; // 清空指针
         }
 
         if (previewModel)
         {
-            previewModel->Destroy();
-            previewModel = nullptr;
+            previewModel->Destroy(); // 销毁预览模型资源
+            previewModel = nullptr; // 清空指针
         }
         
-        cubeMaps.clear();
+        cubeMaps.clear(); // 清空立方体贴图列表
 
-        mainPass = nullptr;
+        mainPass = nullptr; // 清空主渲染通道（智能指针自动释放）
     }
 
-	void LoadAssets();
-	void LoadCubeMap(const std::string& name, const std::string& cubemapPath, VkFormat format);
-    void LoadPreviewModel(const std::string& name, const std::string& cubemapPath);
-    void LoadScene();
+	void LoadAssets(); // 加载资产（立方体贴图、预览模型、场景）
+    void LoadCubeMap(const std::string& name, const std::string& cubemapPath, VkFormat format); // 加载立方体贴图
+    void LoadPreviewModel(const std::string& name, const std::string& cubemapPath); // 加载预览模型
+    void LoadScene(); // 加载场景（天空盒和预览模型）
 
-    void PrepareProbes();
-    void PreparePasses();
+    void PrepareProbes(); // 准备光照探针（未实现）
+    void PreparePasses(); // 准备渲染通道
 
-    void ReginPrefilterPasses();
+    void ReginPrefilterPasses(); // 预滤波通道（未实现，拼写错误：应为 RegisterPrefilterPasses）
 
     void prepare() override
     {
-        VulkanExampleBase::prepare();
-        PreparePasses();
-        LoadAssets();
-        prepared = true;
+        VulkanExampleBase::prepare(); // 调用基类 prepare 方法，初始化 Vulkan 资源
+        PreparePasses(); // 准备渲染通道
+        LoadAssets(); // 加载资产
+        prepared = true; // 标记准备完成
     }
 
     void render() override
     {
         if (!prepared)
-            return;
-        draw();
+            return; // 如果未准备好，直接返回
+        draw(); // 调用绘制方法
     }
 
-    void drawFrame(VkCommandBuffer cmd);
+        void drawFrame(VkCommandBuffer cmd); // 绘制单帧
 
-    void prepareData();
+    void prepareData(); // 准备渲染数据（如相机矩阵）
 
     void draw()
     {
-        prepareData();
+        prepareData(); // 准备渲染数据
 
-        VulkanExampleBase::prepareFrame();
+        VulkanExampleBase::prepareFrame(); // 准备帧（基类方法，可能设置信号量等）
 
-        VkCommandBuffer cmdBuffer = drawCmdBuffers[currentBuffer];
+        VkCommandBuffer cmdBuffer = drawCmdBuffers[currentBuffer]; // 获取当前帧的命令缓冲区
 
-        VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
-        VK_CHECK_RESULT(vkBeginCommandBuffer(cmdBuffer, &cmdBufInfo));
+        VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo(); // 初始化命令缓冲区开始信息
+        VK_CHECK_RESULT(vkBeginCommandBuffer(cmdBuffer, &cmdBufInfo)); // 开始记录命令
 
-        drawFrame(cmdBuffer);
+        drawFrame(cmdBuffer); // 绘制帧
 
-        VK_CHECK_RESULT(vkEndCommandBuffer(cmdBuffer));
+        VK_CHECK_RESULT(vkEndCommandBuffer(cmdBuffer)); // 结束命令记录
 
-        submitInfo.commandBufferCount = 1;
-        submitInfo.pCommandBuffers = &cmdBuffer;
-        VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE));
-        VulkanExampleBase::submitFrame();
+        submitInfo.commandBufferCount = 1; // 设置提交的命令缓冲区数量
+        submitInfo.pCommandBuffers = &cmdBuffer; // 指定命令缓冲区
+        VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE)); // 提交命令到队列
+        VulkanExampleBase::submitFrame(); // 提交帧（基类方法，可能等待信号量）
+    }
+    void OnUpdateUIOverlay(vks::UIOverlay* overlay) override; // 更新 UI 覆盖层
+
+    VkPipelineShaderStageCreateInfo LoadShader(const std::string& path, VkShaderStageFlagBits stage) override
+    {
+        return loadShader(getShadersPath() + path, stage); // 加载着色器文件
     }
 
-    void OnUpdateUIOverlay(vks::UIOverlay* overlay) override;
-
-	VkPipelineShaderStageCreateInfo LoadShader(const std::string& path, VkShaderStageFlagBits stage) override
-	{
-		return loadShader(getShadersPath() + path, stage);
-	}
-
 private:
-    // VulkanglTFScene glTFScene;
+    // VulkanglTFScene glTFScene; // glTF 场景（注释掉，未使用）
 
-    std::vector<std::unique_ptr<LightProbe>> lightProbes;
+    std::vector<std::unique_ptr<LightProbe>> lightProbes; // 光照探针列表（未使用）
 
     // skybox
-    std::vector<std::shared_ptr<vks::TextureCubeMap>> cubeMaps;
-    std::vector<std::string> cubemapNames;
-    int32_t skyboxIndex = 0;
+    std::vector<std::shared_ptr<vks::TextureCubeMap>> cubeMaps; // 立方体贴图列表
+    std::vector<std::string> cubemapNames; // 立方体贴图名称
+    int32_t skyboxIndex = 0; // 当前天空盒索引
 
     // preview model
-    std::vector<std::shared_ptr<vkglTF::Model>> previewModels;
-    std::vector<std::string> previewModelNames;
-    int32_t modelIndex = 0;
+    std::vector<std::shared_ptr<vkglTF::Model>> previewModels; // 预览模型列表
+    std::vector<std::string> previewModelNames; // 预览模型名称
+    int32_t modelIndex = 0; // 当前模型索引
 
     // pipeline
-    bool globalDirty = true;
-    MainPass::GlobalUbo mainPassData = {};
-    std::unique_ptr<MainPass> mainPass;
-    std::unique_ptr<GenBRDFLutPass> brdfPass;
+    bool globalDirty = true; // 全局数据是否需要更新
+    MainPass::GlobalUbo mainPassData = {}; // 主渲染通道的统一缓冲区对象
+    std::unique_ptr<MainPass> mainPass; // 主渲染通道
+    std::unique_ptr<GenBRDFLutPass> brdfPass; // BRDF 查找表生成通道
 
     // scene
     struct SceneTextures
     {
-        VkImageView brdfView; // weakRef
-        VkImageView irradianceCube; // weakRef
-        VkImageView prefilteredCube; // weakRef
+        VkImageView brdfView; // BRDF 查找表图像视图（弱引用）
+        VkImageView irradianceCube; // 辐照度立方体贴图（弱引用，未使用）
+        VkImageView prefilteredCube; // 预滤波立方体贴图（弱引用，未使用）
     };
 
-    std::unique_ptr<Skybox> skybox;
-    std::unique_ptr<PreviewModel> previewModel;
-    SceneTextures sceneTextures;
+    std::unique_ptr<Skybox> skybox; // 天空盒
+    std::unique_ptr<PreviewModel> previewModel; // 预览模型
+    SceneTextures sceneTextures; // 场景纹理
 };
 
 void VulkanExample::LoadAssets()
@@ -155,57 +154,58 @@ void VulkanExample::LoadAssets()
 
 void VulkanExample::LoadScene()
 {
-    skybox = std::make_unique<Skybox>(vulkanDevice, this);
-    skybox->LoadFromPath("models/cube.gltf", queue);
-    skybox->PreparePSO(renderPass, mainPass->descriptorSetLayout);
-    skybox->UpdateCubemap(cubeMaps[skyboxIndex]);
+    skybox = std::make_unique<Skybox>(vulkanDevice, this); // 创建天空盒对象
+    skybox->LoadFromPath("models/cube.gltf", queue); // 加载立方体模型作为天空盒
+    skybox->PreparePSO(renderPass, mainPass->descriptorSetLayout); // 准备天空盒的管线状态对象（PSO）
+    skybox->UpdateCubemap(cubeMaps[skyboxIndex]); // 更新天空盒的立方体贴图
 
-    previewModel = std::make_unique<PreviewModel>(vulkanDevice, this);
-    previewModel->PreparePSO(renderPass, mainPass->descriptorSetLayout);
-    previewModel->UpdateModel(previewModels[modelIndex]);
+    previewModel = std::make_unique<PreviewModel>(vulkanDevice, this); // 创建预览模型对象
+    previewModel->PreparePSO(renderPass, mainPass->descriptorSetLayout); // 准备预览模型的 PSO
+    previewModel->UpdateModel(previewModels[modelIndex]); // 更新为当前选中的模型
 }
-
 void VulkanExample::LoadPreviewModel(const std::string& name, const std::string& cubemapPath)
 {
-    uint32_t glTFLoadingFlags = vkglTF::FileLoadingFlags::PreTransformVertices | vkglTF::FileLoadingFlags::FlipY;
+    uint32_t glTFLoadingFlags = vkglTF::FileLoadingFlags::PreTransformVertices | vkglTF::FileLoadingFlags::FlipY; // 设置 glTF 加载标志：预变换顶点，翻转 Y 轴
 
-    auto model = std::make_shared<vkglTF::Model>();
-    model->loadFromFile(getAssetPath() + cubemapPath, vulkanDevice, queue, glTFLoadingFlags);
+    auto model = std::make_shared<vkglTF::Model>(); // 创建 glTF 模型对象
+    model->loadFromFile(getAssetPath() + cubemapPath, vulkanDevice, queue, glTFLoadingFlags); // 从文件加载模型
 
-    previewModels.emplace_back(model);
-    previewModelNames.emplace_back(name);
+    previewModels.emplace_back(model); // 添加到预览模型列表
+    previewModelNames.emplace_back(name); // 添加模型名称
 }
-
 void VulkanExample::LoadCubeMap(const std::string& name, const std::string& cubemapPath, VkFormat format)
 {
     auto cubemap = std::shared_ptr<vks::TextureCubeMap>(new vks::TextureCubeMap(), [](vks::TextureCubeMap* cubemap) {
         if (cubemap)
         {
-            cubemap->destroy();
-            delete cubemap;
+            cubemap->destroy(); // 销毁立方体贴图
+            delete cubemap; // 删除对象
         }
-        });
+        }); // 创建智能指针管理立方体贴图
 
-    cubemap->loadFromFile(getAssetPath() + cubemapPath, VK_FORMAT_R16G16B16A16_SFLOAT, vulkanDevice, queue);
-    cubeMaps.emplace_back(cubemap);
-    cubemapNames.emplace_back(name);
+    cubemap->loadFromFile(getAssetPath() + cubemapPath, VK_FORMAT_R16G16B16A16_SFLOAT, vulkanDevice, queue); // 从文件加载立方体贴图
+    cubeMaps.emplace_back(cubemap); // 添加到立方体贴图列表
+    cubemapNames.emplace_back(name); // 添加贴图名称
 }
 
 void VulkanExample::PreparePasses()
 {
-    mainPass = std::make_unique<MainPass>(vulkanDevice);
-    mainPass->SetUp(renderPass);
+    mainPass = std::make_unique<MainPass>(vulkanDevice); // 创建主渲染通道
+    mainPass->SetUp(renderPass); // 设置主渲染通道的渲染通道句柄
 
-    brdfPass = std::make_unique<GenBRDFLutPass>(vulkanDevice, this);
-    brdfPass->Prepare();
+    brdfPass = std::make_unique<GenBRDFLutPass>(vulkanDevice, this); // 创建 BRDF 查找表生成通道
+    brdfPass->Prepare(); // 准备 BRDF 通道（创建渲染通道、管线、帧缓冲区）
+    
 
     // pipeline only draw once
     {
-        VkCommandBuffer cmdBuf = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
-        brdfPass->Draw(cmdBuf);
-        vulkanDevice->flushCommandBuffer(cmdBuf, queue);
+        VkCommandBuffer cmdBuf = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true); // 创建主命令缓冲区
+        brdfPass->Draw(cmdBuf); // 执行 BRDF 查找表绘制
+        vulkanDevice->flushCommandBuffer(cmdBuf, queue); // 提交并刷新命令缓冲区
 
-        sceneTextures.brdfView = brdfPass->view;
+        sceneTextures.brdfView = brdfPass->view; // 存储 BRDF 查找表的图像视图
+
+
     }
 }
 
@@ -221,25 +221,25 @@ void VulkanExample::PrepareProbes()
 
 void VulkanExample::prepareData()
 {
-    mainPassData.project = camera.matrices.perspective;
-    mainPassData.view = camera.matrices.view;
-    mainPassData.cameraPos = glm::vec4(camera.position, 1.0f);
+    mainPassData.project = camera.matrices.perspective; // 设置投影矩阵
+    mainPassData.view = camera.matrices.view; // 设置视图矩阵
+    mainPassData.cameraPos = glm::vec4(camera.position, 1.0f); // 设置相机位置（齐次坐标）
 
-    mainPass->UpdateGlobal(mainPassData);
+    mainPass->UpdateGlobal(mainPassData); // 更新主渲染通道的全局 UBO
 
     // update skybox
-    skybox->Update(camera.matrices.view);
+    skybox->Update(camera.matrices.view); // 更新天空盒的视图矩阵
 }
 
 void VulkanExample::drawFrame(VkCommandBuffer cmd)
 {
     mainPass->Draw(cmd, frameBuffers[currentBuffer], width, height, [this](VkCommandBuffer cmd) {
 
-        skybox->Draw(cmd, mainPass->descriptorSet);
+        skybox->Draw(cmd, mainPass->descriptorSet); // 绘制天空盒
 
-        previewModel->Draw(cmd, mainPass->descriptorSet);
+        previewModel->Draw(cmd, mainPass->descriptorSet); // 绘制预览模型
 
-        drawUI(cmd);
+        drawUI(cmd); // 绘制 UI
         });
 }
 

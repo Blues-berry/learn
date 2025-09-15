@@ -113,7 +113,9 @@ private:
     void PreparePipeline() override;
     void PrepareFrameBuffer() override;
 };
+//  		// Change image layout for all cubemap faces to transfer destination
 
+//  irradiance 需要进行多次采样，所以需要 mipmaps。此外需要变换格式，此部分暂未继续处理。
 class GenIrranceCubeSinglePass : public FullScreenPass
 {
 public:
@@ -121,10 +123,29 @@ public:
     ~GenIrranceCubeSinglePass();
 
 private:
+    uint32_t dim;
     uint32_t mip;
     uint32_t face;
 
     VkImage cubemap; // weakRef
     VkImageView subView;
+    void PreparePipeline() override;
+    void PrepareFrameBuffer() override;
 };
 
+class GenPrefiltercubepass : public FullScreenPass
+{
+public:
+    explicit GenPrefiltercubepass(vks::VulkanDevice* device_, IExampleInterfasce* example, VkImage cubemap, uint32_t mip, uint32_t face);
+    ~GenPrefiltercubepass();
+
+private:
+    uint32_t dim;
+    uint32_t mip;
+    uint32_t face;
+
+    VkImage cubemap; // weakRef
+    VkImageView subView;
+    void PreparePipeline() override;
+    void PrepareFrameBuffer() override;
+};

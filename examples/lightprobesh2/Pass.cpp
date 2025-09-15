@@ -1,6 +1,7 @@
 #include "Pass.h"
 #include <array>
-
+#include "vulkanexamplebase.h"  // 引入Vulkan基础示例类
+#include "VulkanglTFModel.h"    // 引入glTF模型加载类
 ComputePass::ComputePass(vks::VulkanDevice* device_, IExampleInterfasce* example) : device(device_), iLoader(example)
 {
 }
@@ -166,6 +167,7 @@ GenBRDFLutPass::~GenBRDFLutPass()
 
 void GenBRDFLutPass::PreparePipeline()
 {
+    auto tStart = std::chrono::high_resolution_clock::now();
     VkPipelineLayoutCreateInfo pipelineLayoutCI = vks::initializers::pipelineLayoutCreateInfo(nullptr, 0);
     VK_CHECK_RESULT(vkCreatePipelineLayout(device->logicalDevice, &pipelineLayoutCI, nullptr, &pipelineLayout));
 
@@ -198,6 +200,9 @@ void GenBRDFLutPass::PreparePipeline()
     shaderStages[1] = iLoader->LoadShader("lightprobesh2/genbrdflut.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
 
     VK_CHECK_RESULT(vkCreateGraphicsPipelines(device->logicalDevice, VK_NULL_HANDLE, 1, &pipelineCI, nullptr, &pipeline));
+		auto tEnd = std::chrono::high_resolution_clock::now();
+		auto tDiff = std::chrono::duration<double, std::milli>(tEnd - tStart).count();
+		std::cout << "Generating BRDF LUT took " << tDiff << " ms" << std::endl;
 }
 
 void GenBRDFLutPass::PrepareFrameBuffer()
@@ -323,7 +328,7 @@ void MainPass::Draw(VkCommandBuffer cmd, VkFramebuffer framebuffer, uint32_t wid
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
     encoder(cmd);
-
+                                   
     vkCmdEndRenderPass(cmd);
 }
 
@@ -358,6 +363,96 @@ void MainPass::PreparePerPassResource()
     vkUpdateDescriptorSets(device->logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, NULL);
 }
 
+void GenIrranceCubeSinglePass::PreparePipeline()
+{
+    auto tStart = std::chrono::high_resolution_clock::now();
+    VkPipelineLayoutCreateInfo pipelineLayoutCI = vks::initializers::pipelineLayoutCreateInfo(nullptr, 0);
+    VK_CHECK_RESULT(vkCreatePipelineLayout(device->logicalDevice, &pipelineLayoutCI, nullptr, &pipelineLayout));
+
+		// Pipeline
+		VkPipelineInputAssemblyStateCreateInfo inputAssemblyState = vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
+		VkPipelineRasterizationStateCreateInfo rasterizationState = vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE);
+		VkPipelineColorBlendAttachmentState blendAttachmentState = vks::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE);
+		VkPipelineColorBlendStateCreateInfo colorBlendState = vks::initializers::pipelineColorBlendStateCreateInfo(1, &blendAttachmentState);
+		VkPipelineDepthStencilStateCreateInfo depthStencilState = vks::initializers::pipelineDepthStencilStateCreateInfo(VK_FALSE, VK_FALSE, VK_COMPARE_OP_LESS_OR_EQUAL);
+		VkPipelineViewportStateCreateInfo viewportState = vks::initializers::pipelineViewportStateCreateInfo(1, 1);
+		VkPipelineMultisampleStateCreateInfo multisampleState = vks::initializers::pipelineMultisampleStateCreateInfo(VK_SAMPLE_COUNT_1_BIT);
+		std::vector<VkDynamicState> dynamicStateEnables = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+		VkPipelineDynamicStateCreateInfo dynamicState = vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables);
+		std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages;
+
+		VkGraphicsPipelineCreateInfo pipelineCI = vks::initializers::pipelineCreateInfo(pipelineLayout, renderpass);
+		pipelineCI.pInputAssemblyState = &inputAssemblyState;
+		pipelineCI.pRasterizationState = &rasterizationState;
+		pipelineCI.pColorBlendState = &colorBlendState;
+		pipelineCI.pMultisampleState = &multisampleState;
+		pipelineCI.pViewportState = &viewportState;
+		pipelineCI.pDepthStencilState = &depthStencilState;
+		pipelineCI.pDynamicState = &dynamicState;
+		pipelineCI.stageCount = 2;
+		pipelineCI.pStages = shaderStages.data();
+		pipelineCI.renderPass = renderpass;
+		pipelineCI.pVertexInputState = vkglTF::Vertex::getPipelineVertexInputState({ vkglTF::VertexComponent::Position, vkglTF::VertexComponent::Normal, vkglTF::VertexComponent::UV });
+
+
+    // Look-up-table (from BRDF) pipeline
+    shaderStages[0] = iLoader->LoadShader("lightprobesh2/filtercube.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
+    shaderStages[1] = iLoader->LoadShader("lightprobesh2/filtercube.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
+
+    VK_CHECK_RESULT(vkCreateGraphicsPipelines(device->logicalDevice, VK_NULL_HANDLE, 1, &pipelineCI, nullptr, &pipeline));
+		auto tEnd = std::chrono::high_resolution_clock::now();
+		auto tDiff = std::chrono::duration<double, std::milli>(tEnd - tStart).count();
+		std::cout << "Generating BRDF LUT took " << tDiff << " ms" << std::endl;
+}
+
+void GenIrranceCubeSinglePass::PrepareFrameBuffer()
+{
+    VkImageCreateInfo imageCI = vks::initializers::imageCreateInfo();
+    imageCI.imageType = VK_IMAGE_TYPE_2D;
+    imageCI.format = format;
+    imageCI.extent.width = dim;
+    imageCI.extent.height = dim;
+    imageCI.extent.depth = 1;
+    imageCI.mipLevels = mip;
+    imageCI.arrayLayers = 6;
+    imageCI.samples = VK_SAMPLE_COUNT_1_BIT;
+    imageCI.tiling = VK_IMAGE_TILING_OPTIMAL;
+    //图像用于采样（VK_IMAGE_USAGE_SAMPLED_BIT）和作为传输目标（VK_IMAGE_USAGE_TRANSFER_DST_BIT）。
+	imageCI.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+	imageCI.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;//标记图像为立方体贴图兼容。
+    VK_CHECK_RESULT(vkCreateImage(device->logicalDevice, &imageCI, nullptr, &image));
+
+
+    VkMemoryAllocateInfo memAlloc = vks::initializers::memoryAllocateInfo();
+    VkMemoryRequirements memReqs = {};
+    vkGetImageMemoryRequirements(device->logicalDevice, image, &memReqs);
+    memAlloc.allocationSize = memReqs.size;
+    memAlloc.memoryTypeIndex = device->getMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    VK_CHECK_RESULT(vkAllocateMemory(device->logicalDevice, &memAlloc, nullptr, &deviceMemory));
+    VK_CHECK_RESULT(vkBindImageMemory(device->logicalDevice, image, deviceMemory, 0));
+
+
+    VkImageViewCreateInfo viewCI = vks::initializers::imageViewCreateInfo();
+    viewCI.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    viewCI.format = format;
+    viewCI.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    viewCI.subresourceRange.levelCount = mip;
+    viewCI.subresourceRange.layerCount = 6;
+    viewCI.image = image;
+    VK_CHECK_RESULT(vkCreateImageView(device->logicalDevice, &viewCI, nullptr, &view));
+
+
+    VkFramebufferCreateInfo framebufferCI = vks::initializers::framebufferCreateInfo();
+    framebufferCI.renderPass = renderpass;
+    framebufferCI.attachmentCount = 1;
+    framebufferCI.pAttachments = &view;
+    framebufferCI.width = dim;
+    framebufferCI.height = dim;
+    framebufferCI.layers = 1;
+
+    VK_CHECK_RESULT(vkCreateFramebuffer(device->logicalDevice, &framebufferCI, nullptr, &fbo));
+}
+
 
 GenIrranceCubeSinglePass::GenIrranceCubeSinglePass(vks::VulkanDevice* device_, IExampleInterfasce* example, VkImage cubemap_, uint32_t mip_, uint32_t face_)
     : FullScreenPass(device_, example, VK_FORMAT_R32G32B32A32_SFLOAT)
@@ -365,10 +460,117 @@ GenIrranceCubeSinglePass::GenIrranceCubeSinglePass(vks::VulkanDevice* device_, I
     , mip(mip_)
     , face(face_)
 {
-
+    dim = 64;
+    mip=static_cast<uint32_t>(floor(log2(dim))) + 1;;
 }
 
 GenIrranceCubeSinglePass::~GenIrranceCubeSinglePass()
 {
 
+}
+
+void GenPrefiltercubepass::PreparePipeline()
+{
+    auto tStart = std::chrono::high_resolution_clock::now();
+    VkPipelineLayoutCreateInfo pipelineLayoutCI = vks::initializers::pipelineLayoutCreateInfo(nullptr, 0);
+    VK_CHECK_RESULT(vkCreatePipelineLayout(device->logicalDevice, &pipelineLayoutCI, nullptr, &pipelineLayout));
+
+		// Pipeline
+		VkPipelineInputAssemblyStateCreateInfo inputAssemblyState = vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
+		VkPipelineRasterizationStateCreateInfo rasterizationState = vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE);
+		VkPipelineColorBlendAttachmentState blendAttachmentState = vks::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE);
+		VkPipelineColorBlendStateCreateInfo colorBlendState = vks::initializers::pipelineColorBlendStateCreateInfo(1, &blendAttachmentState);
+		VkPipelineDepthStencilStateCreateInfo depthStencilState = vks::initializers::pipelineDepthStencilStateCreateInfo(VK_FALSE, VK_FALSE, VK_COMPARE_OP_LESS_OR_EQUAL);
+		VkPipelineViewportStateCreateInfo viewportState = vks::initializers::pipelineViewportStateCreateInfo(1, 1);
+		VkPipelineMultisampleStateCreateInfo multisampleState = vks::initializers::pipelineMultisampleStateCreateInfo(VK_SAMPLE_COUNT_1_BIT);
+		std::vector<VkDynamicState> dynamicStateEnables = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+		VkPipelineDynamicStateCreateInfo dynamicState = vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables);
+		std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages;
+
+		VkGraphicsPipelineCreateInfo pipelineCI = vks::initializers::pipelineCreateInfo(pipelineLayout, renderpass);
+		pipelineCI.pInputAssemblyState = &inputAssemblyState;
+		pipelineCI.pRasterizationState = &rasterizationState;
+		pipelineCI.pColorBlendState = &colorBlendState;
+		pipelineCI.pMultisampleState = &multisampleState;
+		pipelineCI.pViewportState = &viewportState;
+		pipelineCI.pDepthStencilState = &depthStencilState;
+		pipelineCI.pDynamicState = &dynamicState;
+		pipelineCI.stageCount = 2;
+		pipelineCI.pStages = shaderStages.data();
+		pipelineCI.renderPass = renderpass;
+		pipelineCI.pVertexInputState = vkglTF::Vertex::getPipelineVertexInputState({ vkglTF::VertexComponent::Position, vkglTF::VertexComponent::Normal, vkglTF::VertexComponent::UV });
+
+
+    // Look-up-table (from BRDF) pipeline
+    shaderStages[0] = iLoader->LoadShader("lightprobesh2/filtercube.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
+    shaderStages[1] = iLoader->LoadShader("lightprobesh2/prefilterenvmap.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
+
+    VK_CHECK_RESULT(vkCreateGraphicsPipelines(device->logicalDevice, VK_NULL_HANDLE, 1, &pipelineCI, nullptr, &pipeline));
+		auto tEnd = std::chrono::high_resolution_clock::now();
+		auto tDiff = std::chrono::duration<double, std::milli>(tEnd - tStart).count();
+		std::cout << "Generating BRDF LUT took " << tDiff << " ms" << std::endl;
+}
+
+void GenPrefiltercubepass::PrepareFrameBuffer()
+{
+    VkImageCreateInfo imageCI = vks::initializers::imageCreateInfo();
+    imageCI.imageType = VK_IMAGE_TYPE_2D;
+    imageCI.format = format;
+    imageCI.extent.width = dim;
+    imageCI.extent.height = dim;
+    imageCI.extent.depth = 1;
+    imageCI.mipLevels = mip;
+    imageCI.arrayLayers = 6;
+    imageCI.samples = VK_SAMPLE_COUNT_1_BIT;
+    imageCI.tiling = VK_IMAGE_TILING_OPTIMAL;
+    //图像用于采样（VK_IMAGE_USAGE_SAMPLED_BIT）和作为传输目标（VK_IMAGE_USAGE_TRANSFER_DST_BIT）。
+	imageCI.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+	imageCI.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;//标记图像为立方体贴图兼容。
+    VK_CHECK_RESULT(vkCreateImage(device->logicalDevice, &imageCI, nullptr, &image));
+
+
+    VkMemoryAllocateInfo memAlloc = vks::initializers::memoryAllocateInfo();
+    VkMemoryRequirements memReqs = {};
+    vkGetImageMemoryRequirements(device->logicalDevice, image, &memReqs);
+    memAlloc.allocationSize = memReqs.size;
+    memAlloc.memoryTypeIndex = device->getMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    VK_CHECK_RESULT(vkAllocateMemory(device->logicalDevice, &memAlloc, nullptr, &deviceMemory));
+    VK_CHECK_RESULT(vkBindImageMemory(device->logicalDevice, image, deviceMemory, 0));
+
+
+    VkImageViewCreateInfo viewCI = vks::initializers::imageViewCreateInfo();
+    viewCI.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    viewCI.format = format;
+    viewCI.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    viewCI.subresourceRange.levelCount = mip;
+    viewCI.subresourceRange.layerCount = 6;
+    viewCI.image = image;
+    VK_CHECK_RESULT(vkCreateImageView(device->logicalDevice, &viewCI, nullptr, &view));
+
+
+    VkFramebufferCreateInfo framebufferCI = vks::initializers::framebufferCreateInfo();
+    framebufferCI.renderPass = renderpass;
+    framebufferCI.attachmentCount = 1;
+    framebufferCI.pAttachments = &view;
+    framebufferCI.width = dim;
+    framebufferCI.height = dim;
+    framebufferCI.layers = 1;
+
+    VK_CHECK_RESULT(vkCreateFramebuffer(device->logicalDevice, &framebufferCI, nullptr, &fbo));
+}
+
+// DIM 和 mip 参数待确定
+GenPrefiltercubepass::GenPrefiltercubepass(vks::VulkanDevice* device_, IExampleInterfasce* example, VkImage cubemap_, uint32_t mip_, uint32_t face_)
+    : FullScreenPass(device_, example, VK_FORMAT_R32G32B32A32_SFLOAT)
+    , cubemap(cubemap_)
+    , mip(mip_)
+    , face(face_)
+{
+    dim = 64;
+    mip=static_cast<uint32_t>(floor(log2(dim))) + 1;;
+}
+
+GenPrefiltercubepass::~GenPrefiltercubepass()
+{
+    
 }
