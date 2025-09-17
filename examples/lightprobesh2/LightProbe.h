@@ -19,6 +19,8 @@ public:
     explicit LightProbe(vks::VulkanDevice * device_) : device(device_) {}
     ~LightProbe() = default;
 
+    //
+    void prepare();
     // 设置探针位置
     void SetPosition(const glm::vec3& position_) { position = position_; }
 
@@ -36,9 +38,10 @@ public:
 
 private:
     vks::VulkanDevice* device = nullptr;
-    
-    uint32_t width = 256;
-    uint32_t height = 256;
+    uint32_t lowReswidth = 128;
+    uint32_t lowResheight = 128;
+    uint32_t highReswidth = 256;
+    uint32_t highResheight = 256;
 
     glm::vec3 position;
     
