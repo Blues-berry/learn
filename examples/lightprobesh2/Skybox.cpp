@@ -64,33 +64,33 @@ void Skybox::PreparePSO(VkRenderPass renderPass, VkDescriptorSetLayout passLayou
 {
 	VkDevice rawDevice = device->logicalDevice;
 
-	// ÅäÖÃÊäÈë×é×°×´Ì¬£¬Ê¹ÓÃÈı½ÇĞÎÁĞ±íÍØÆË¡£
+	// é…ç½®è¾“å…¥ç»„è£…çŠ¶æ€ï¼Œä½¿ç”¨ä¸‰è§’å½¢åˆ—è¡¨æ‹“æ‰‘ã€‚
 	VkPipelineInputAssemblyStateCreateInfo inputAssemblyState =
 		vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
-	// ÅäÖÃ¹âÕ¤»¯×´Ì¬£¬Ìî³äÄ£Ê½£¬ÎŞ±³ÃæÌŞ³ı£¬ÄæÊ±ÕëÎªÕıÃæ¡£
+	// é…ç½®å…‰æ …åŒ–çŠ¶æ€ï¼Œå¡«å……æ¨¡å¼ï¼Œæ— èƒŒé¢å‰”é™¤ï¼Œé€†æ—¶é’ˆä¸ºæ­£é¢ã€‚
 	VkPipelineRasterizationStateCreateInfo rasterizationState =
 		vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE);
-	// ÅäÖÃÑÕÉ«»ìºÏ×´Ì¬£¬½ûÓÃ»ìºÏ	
+	// é…ç½®é¢œè‰²æ··åˆçŠ¶æ€ï¼Œç¦ç”¨æ··åˆ	
 	VkPipelineColorBlendAttachmentState blendAttachmentState =
 		vks::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE);
-	// ÅäÖÃÑÕÉ«»ìºÏ×´Ì¬£¬Ö¸¶¨Ò»¸ö¸½¼ş¡£
+	// é…ç½®é¢œè‰²æ··åˆçŠ¶æ€ï¼ŒæŒ‡å®šä¸€ä¸ªé™„ä»¶ã€‚
 	VkPipelineColorBlendStateCreateInfo colorBlendState =
 		vks::initializers::pipelineColorBlendStateCreateInfo(1, &blendAttachmentState);
-	// ÅäÖÃÉî¶ÈºÍÄ£°å×´Ì¬£¬³õÊ¼½ûÓÃÉî¶È²âÊÔºÍĞ´Èë¡£
+	// é…ç½®æ·±åº¦å’Œæ¨¡æ¿çŠ¶æ€ï¼Œåˆå§‹ç¦ç”¨æ·±åº¦æµ‹è¯•å’Œå†™å…¥ã€‚
 	VkPipelineDepthStencilStateCreateInfo depthStencilState =
 		vks::initializers::pipelineDepthStencilStateCreateInfo(VK_FALSE, VK_FALSE, VK_COMPARE_OP_LESS_OR_EQUAL);
-	// ÅäÖÃÊÓ¿Ú×´Ì¬£¬Ö¸¶¨Ò»¸öÊÓ¿ÚºÍ²Ã¼ô¾ØĞÎ¡£
+	// é…ç½®è§†å£çŠ¶æ€ï¼ŒæŒ‡å®šä¸€ä¸ªè§†å£å’Œè£å‰ªçŸ©å½¢ã€‚
 	VkPipelineViewportStateCreateInfo viewportState =
 		vks::initializers::pipelineViewportStateCreateInfo(1, 1);
-	// ÅäÖÃ¶àÖØ²ÉÑù×´Ì¬£¬½ûÓÃ¶àÖØ²ÉÑù£¨µ¥²ÉÑù£©¡£
+	// é…ç½®å¤šé‡é‡‡æ ·çŠ¶æ€ï¼Œç¦ç”¨å¤šé‡é‡‡æ ·ï¼ˆå•é‡‡æ ·ï¼‰ã€‚
 	VkPipelineMultisampleStateCreateInfo multisampleState =
 		vks::initializers::pipelineMultisampleStateCreateInfo(VK_SAMPLE_COUNT_1_BIT);
-	// ¶¨Òå¶¯Ì¬×´Ì¬£¬°üÀ¨ÊÓ¿ÚºÍ²Ã¼ô¾ØĞÎ¡£
+	// å®šä¹‰åŠ¨æ€çŠ¶æ€ï¼ŒåŒ…æ‹¬è§†å£å’Œè£å‰ªçŸ©å½¢ã€‚
 	std::vector<VkDynamicState> dynamicStateEnables = {
 		VK_DYNAMIC_STATE_VIEWPORT,
 		VK_DYNAMIC_STATE_SCISSOR
 	};
-	// ÅäÖÃ¶¯Ì¬×´Ì¬¡£
+	// é…ç½®åŠ¨æ€çŠ¶æ€ã€‚
 	VkPipelineDynamicStateCreateInfo dynamicState =
 		vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables);
 
@@ -99,35 +99,35 @@ void Skybox::PreparePSO(VkRenderPass renderPass, VkDescriptorSetLayout passLayou
 		descriptorSetLayout
 	};
 
-	// Pipeline layout ³õÊ¼»¯¹ÜÏß²¼¾Ö´´½¨ĞÅÏ¢£¬Ö¸¶¨ÃèÊö·û¼¯²¼¾Ö¡£
+	// Pipeline layout åˆå§‹åŒ–ç®¡çº¿å¸ƒå±€åˆ›å»ºä¿¡æ¯ï¼ŒæŒ‡å®šæè¿°ç¬¦é›†å¸ƒå±€ã€‚
 	VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(setLayotus.data(), static_cast<uint32_t>(setLayotus.size()));
-	// ´´½¨¹ÜÏß²¼¾Ö¡£
+	// åˆ›å»ºç®¡çº¿å¸ƒå±€ã€‚
 	VK_CHECK_RESULT(vkCreatePipelineLayout(rawDevice, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout));
-	// ¶¨ÒåÁ½¸ö×ÅÉ«Æ÷½×¶Î£¨¶¥µãºÍÆ¬¶Î£©¡£
+	// å®šä¹‰ä¸¤ä¸ªç€è‰²å™¨é˜¶æ®µï¼ˆé¡¶ç‚¹å’Œç‰‡æ®µï¼‰ã€‚
 	std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages;
 
 	// Pipelines
-	// ³õÊ¼»¯Í¼ĞÎ¹ÜÏß´´½¨ĞÅÏ¢£¬Ö¸¶¨¹ÜÏß²¼¾ÖºÍäÖÈ¾Í¨µÀ¡£
+	// åˆå§‹åŒ–å›¾å½¢ç®¡çº¿åˆ›å»ºä¿¡æ¯ï¼ŒæŒ‡å®šç®¡çº¿å¸ƒå±€å’Œæ¸²æŸ“é€šé“ã€‚
 	VkGraphicsPipelineCreateInfo pipelineCI = vks::initializers::pipelineCreateInfo(pipelineLayout, renderPass);
-	// ÉèÖÃÊäÈë×é×°×´Ì¬¡£
+	// è®¾ç½®è¾“å…¥ç»„è£…çŠ¶æ€ã€‚
 	pipelineCI.pInputAssemblyState = &inputAssemblyState;
-	// ÉèÖÃ¹âÕ¤»¯×´Ì¬¡£
+	// è®¾ç½®å…‰æ …åŒ–çŠ¶æ€ã€‚
 	pipelineCI.pRasterizationState = &rasterizationState;
-	// ÉèÖÃÑÕÉ«»ìºÏ×´Ì¬¡£
+	// è®¾ç½®é¢œè‰²æ··åˆçŠ¶æ€ã€‚
 	pipelineCI.pColorBlendState = &colorBlendState;
-	// ÉèÖÃÉî¶ÈºÍÄ£°å×´Ì¬¡£
+	// è®¾ç½®æ·±åº¦å’Œæ¨¡æ¿çŠ¶æ€ã€‚
 	pipelineCI.pMultisampleState = &multisampleState;
-	// ÉèÖÃÊÓ¿Ú×´Ì¬¡£
+	// è®¾ç½®è§†å£çŠ¶æ€ã€‚
 	pipelineCI.pViewportState = &viewportState;
-	// ÉèÖÃÉî¶ÈºÍÄ£°å×´Ì¬¡£
+	// è®¾ç½®æ·±åº¦å’Œæ¨¡æ¿çŠ¶æ€ã€‚
 	pipelineCI.pDepthStencilState = &depthStencilState;
-	// ÉèÖÃ¶¯Ì¬×´Ì¬¡£
+	// è®¾ç½®åŠ¨æ€çŠ¶æ€ã€‚
 	pipelineCI.pDynamicState = &dynamicState;
-	// ÉèÖÃ×ÅÉ«Æ÷½×¶ÎÊıÁ¿£¨2£©¡£
+	// è®¾ç½®ç€è‰²å™¨é˜¶æ®µæ•°é‡ï¼ˆ2ï¼‰ã€‚
 	pipelineCI.stageCount = static_cast<uint32_t>(shaderStages.size());
-	// ÉèÖÃ×ÅÉ«Æ÷½×¶ÎÊı×é¡£
+	// è®¾ç½®ç€è‰²å™¨é˜¶æ®µæ•°ç»„ã€‚
 	pipelineCI.pStages = shaderStages.data();
-	// ÉèÖÃ¶¥µãÊäÈë×´Ì¬£¬°üÀ¨Î»ÖÃ¡¢·¨ÏßºÍUV×ø±ê¡£
+	// è®¾ç½®é¡¶ç‚¹è¾“å…¥çŠ¶æ€ï¼ŒåŒ…æ‹¬ä½ç½®ã€æ³•çº¿å’ŒUVåæ ‡ã€‚
 	pipelineCI.pVertexInputState = vkglTF::Vertex::getPipelineVertexInputState({ vkglTF::VertexComponent::Position, vkglTF::VertexComponent::Normal, vkglTF::VertexComponent::UV });
 
 	// Skybox pipeline (background cube)
