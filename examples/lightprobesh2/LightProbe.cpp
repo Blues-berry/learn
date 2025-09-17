@@ -10,6 +10,7 @@ void LightProbe::prepare()
 
     
 }
+
 // 使用探针位置抓取
 /*
 过程涉及两个主要阶段：捕获低res cubemap（类似于之前的解释），然后使用图像blit操作或计算着色器进行上采样插值。
@@ -225,6 +226,7 @@ void LightProbe::CaptureCubeMap(VkFormat format, VkQueue queue)
 
     // 假设已有渲染管线（pipeline）和描述符集（descriptorSet）用于场景渲染
     // 更新统一缓冲区（UBO）中的视图/投影矩阵
+    //UpdateGlobal(ubo);
     for (uint32_t face = 0; face < 6; ++face) {
         // 更新UBO（假设UBO已创建，包含view和projection矩阵）
         struct UBO {
@@ -265,7 +267,7 @@ void LightProbe::CaptureCubeMap(VkFormat format, VkQueue queue)
 
     // 高分辨率cubemap：UNDEFINED -> TRANSFER_DST_OPTIMAL
     vks::tools::setImageLayout(
-        cmdBuf, cubemap->image,
+        cmdBuf, highResCubemap->image,
         VK_IMAGE_LAYOUT_UNDEFINED,
         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
         subresourceRange);
@@ -288,13 +290,13 @@ void LightProbe::CaptureCubeMap(VkFormat format, VkQueue queue)
 
         vkCmdBlitImage(
             cmdBuf, lowResCubemap->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-            cubemap->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            highResCubemap->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
             1, &blitRegion, VK_FILTER_LINEAR);
     }
 
     // 高分辨率cubemap：TRANSFER_DST_OPTIMAL -> SHADER_READ_ONLY_OPTIMAL
     vks::tools::setImageLayout(
-        cmdBuf, cubemap->image,
+        cmdBuf, highResCubemap->image,
         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
         subresourceRange);
