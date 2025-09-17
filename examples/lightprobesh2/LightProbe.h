@@ -30,6 +30,9 @@ public:
 
     // 生成球偕
     void GenSH(VkCommandBuffer cmdBuffer, VkQueue queue);
+    
+    // 获取内部的立方体贴图
+    std::shared_ptr<vks::TextureCubeMap> GetCubemap() const { return cubemap; }
 
 private:
     vks::VulkanDevice* device = nullptr;
@@ -42,4 +45,4 @@ private:
     std::shared_ptr<vks::TextureCubeMap> cubemap;
 
     SHCoefficients shCoefficients;
-};;
+};

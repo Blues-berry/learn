@@ -17,14 +17,14 @@ class VulkanExample : public VulkanExampleBase, public IExampleInterfasce
 public:
     VulkanExample() : VulkanExampleBase()
     {
-        camera.type = Camera::CameraType::firstperson;//ÉèÖÃÏà»úÎªµÚÒ»ÈË³ÆÄ£Ê½¡£
-        camera.movementSpeed = 4.0f;//ÉèÖÃÏà»úÒÆ¶¯ËÙ¶ÈÎª4.0µ¥Î»/Ãë¡£
-        camera.setPerspective(60.0f, (float)width / (float)height, 0.1f, 256.0f);//ÉèÖÃÍ¸ÊÓÍ¶Ó°£¬ÊÓ³¡½Ç60¶È£¬¿í¸ß±È»ùÓÚ´°¿Ú³ß´ç£¬½ü²Ã¼ôÃæ0.1£¬Ô¶²Ã¼ôÃæ256.0¡£
-        camera.rotationSpeed = 0.25f;//ÉèÖÃÏà»úĞı×ªËÙ¶ÈÎª0.25¡£
+        camera.type = Camera::CameraType::firstperson;//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Îªï¿½ï¿½Ò»ï¿½Ë³ï¿½Ä£Ê½ï¿½ï¿½
+        camera.movementSpeed = 4.0f;//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Æ¶ï¿½ï¿½Ù¶ï¿½Îª4.0ï¿½ï¿½Î»/ï¿½ë¡£
+        camera.setPerspective(60.0f, (float)width / (float)height, 0.1f, 256.0f);//ï¿½ï¿½ï¿½ï¿½Í¸ï¿½ï¿½Í¶Ó°ï¿½ï¿½ï¿½Ó³ï¿½ï¿½ï¿½60ï¿½È£ï¿½ï¿½ï¿½ï¿½ß±È»ï¿½ï¿½Ú´ï¿½ï¿½Ú³ß´ç£¬ï¿½ï¿½ï¿½Ã¼ï¿½ï¿½ï¿½0.1ï¿½ï¿½Ô¶ï¿½Ã¼ï¿½ï¿½ï¿½256.0ï¿½ï¿½
+        camera.rotationSpeed = 0.25f;//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½×ªï¿½Ù¶ï¿½Îª0.25ï¿½ï¿½
 
-        // ÉèÖÃÏà»ú³õÊ¼Î»ÖÃºÍ³¯Ïò
+        // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê¼Î»ï¿½ÃºÍ³ï¿½ï¿½ï¿½
         camera.setRotation({ -3.75f, 180.0f, 0.0f });
-        camera.setPosition({ 0.55f, 0.85f, 12.0f });//ÉèÖÃÏà»ú³õÊ¼Î»ÖÃÎª(0.55, 0.85, 12.0)¡£
+        camera.setPosition({ 0.55f, 0.85f, 12.0f });//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê¼Î»ï¿½ï¿½Îª(0.55, 0.85, 12.0)ï¿½ï¿½
 
         // Enable extension required for multiview
         enabledDeviceExtensions.push_back(VK_KHR_MULTIVIEW_EXTENSION_NAME);
@@ -69,6 +69,7 @@ public:
 
     void PrepareProbes();
     void PreparePasses();
+    void CaptureCubemap(const glm::vec3& position);
 
     void ReginPrefilterPasses();
 
@@ -77,6 +78,7 @@ public:
         VulkanExampleBase::prepare();
         LoadAssets();
         PreparePasses();
+        PrepareProbes();
         PrepareScene();
         prepared = true;
     }
@@ -254,7 +256,17 @@ void VulkanExample::ReginPrefilterPasses()
 
 void VulkanExample::PrepareProbes()
 {
-
+    // åˆ›å»ºå…‰ç…§æ¢é’ˆ
+    auto probe = std::make_unique<LightProbe>(vulkanDevice);
+    
+    // è®¾ç½®æ¢é’ˆä½ç½®ï¼ˆå¯ä»¥æ ¹æ®åœºæ™¯éœ€è¦è°ƒæ•´ï¼‰
+    probe->SetPosition(glm::vec3(0.0f, 0.0f, 0.0f));
+    
+    // åˆå§‹æ—¶ä½¿ç”¨å·²åŠ è½½çš„ç«‹æ–¹ä½“è´´å›¾
+    probe->SetExternalCubeMap(cubeMaps[skyboxIndex]);
+    
+    // æ·»åŠ åˆ°æ¢é’ˆåˆ—è¡¨
+    lightProbes.push_back(std::move(probe));
 }
 
 void VulkanExample::prepareData()
@@ -296,9 +308,48 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
         if (overlay->comboBox("PreviewModel", &modelIndex, previewModelNames)) {
             previewModel->UpdateModel(previewModels[modelIndex]);
         }
+        
+        // æ·»åŠ å®æ—¶æ•è·æŒ‰é’®
+        if (overlay->button("Capture Cubemap at Camera")) {
+            CaptureCubemap(camera.position);
+        }
     }
 
     previewModel->ShowUI(overlay);
+}
+
+void VulkanExample::CaptureCubemap(const glm::vec3& position)
+{
+    if (lightProbes.empty()) {
+        return;
+    }
+    
+    // ä½¿ç”¨ç¬¬ä¸€ä¸ªå…‰ç…§æ¢é’ˆè¿›è¡Œæ•è·
+    auto& probe = lightProbes[0];
+    
+    // è®¾ç½®æ¢é’ˆä½ç½®
+    probe->SetPosition(position);
+    
+    // æ•è·ç«‹æ–¹ä½“è´´å›¾
+    probe->CaptureCubeMap(VK_FORMAT_R16G16B16A16_SFLOAT, queue);
+    
+    // è·å–æ¢é’ˆæ•è·çš„ç«‹æ–¹ä½“è´´å›¾
+    auto capturedCubemap = probe->GetCubemap();
+    
+    // æ·»åŠ åˆ°ç«‹æ–¹ä½“è´´å›¾åˆ—è¡¨
+    cubeMaps.push_back(capturedCubemap);
+    cubemapNames.push_back("Captured_" + std::to_string(cubeMaps.size() - 1));
+    
+    // æ›´æ–° skyboxIndex ä¸ºæ–°æ•è·çš„ç«‹æ–¹ä½“è´´å›¾
+    skyboxIndex = static_cast<int32_t>(cubeMaps.size() - 1);
+    
+    // æ›´æ–°å¤©ç©ºç›’å’Œç›¸å…³èµ„æº
+    UpdateSkyBox();
+    
+    // ç”Ÿæˆçƒè°ç³»æ•°
+    VkCommandBuffer cmdBuf = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
+    probe->GenSH(cmdBuf, queue);
+    vulkanDevice->flushCommandBuffer(cmdBuf, queue);
 }
 
 VULKAN_EXAMPLE_MAIN()

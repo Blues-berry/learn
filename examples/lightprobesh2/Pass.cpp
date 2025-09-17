@@ -2,7 +2,12 @@
 #include "glm/gtc/matrix_transform.hpp"
 #include <array>
 
-ComputePass::ComputePass(vks::VulkanDevice* device_, IExampleInterfasce* example) : device(device_), iLoader(example)
+/**
+ * @brief ComputePass类的构造函数
+ * @param device_ 指向VulkanDevice对象的指针，用于管理Vulkan设备相关资源
+ * @param example 指向IExampleInterface接口的指针，提供示例功能的访问接口
+ */
+ComputePass::ComputePass(vks::VulkanDevice* device_, IExampleInterfasce* example) : device(device_), iLoader(example) // 使用成员初始化列表初始化device和iLoader成员变量
 {
 }
 
@@ -29,8 +34,14 @@ ComputePass::~ComputePass()
     }
 }
 
+/**
+ * @brief ComputePass类的Draw方法，用于执行计算着色器的绘制命令
+ * 
+ * @param cmd VkCommand类型的命令缓冲区，用于记录命令
+ */
 void ComputePass::Draw(VkCommandBuffer cmd)
 {
+    // 调用Dispatch方法，将命令缓冲区作为参数传递
     Dispatch(cmd);
 }
 
@@ -48,79 +59,111 @@ FullScreenPass::FullScreenPass(vks::VulkanDevice* device_, IExampleInterfasce* e
     GenerateSampler();
 }
 
+/**
+ * 全屏渲染通道的析构函数
+ * 用于释放和清理与全屏渲染相关的所有 Vulkan 资源
+ * 包括采样器、管线、图像、图像视图、内存、渲染通道、帧缓冲区、描述符集合布局、管线布局和描述符池等
+ */
 FullScreenPass::~FullScreenPass()
 {
+    // 检查并销毁采样器对象
     if (sampler != VK_NULL_HANDLE)
     {
         vkDestroySampler(device->logicalDevice, sampler, nullptr);
     }
 
+    // 检查并销毁图形管线对象
     if (pipeline != VK_NULL_HANDLE)
     {
         vkDestroyPipeline(device->logicalDevice, pipeline, nullptr);
     }
 
+    // 检查并销毁图像对象
     if (image != VK_NULL_HANDLE)
     {
         vkDestroyImage(device->logicalDevice, image, nullptr);
     }
 
+    // 检查并销毁图像视图对象
     if (view != VK_NULL_HANDLE)
     {
         vkDestroyImageView(device->logicalDevice, view, nullptr);
     }
 
+    // 检查并释放设备内存
     if (deviceMemory != VK_NULL_HANDLE)
     {
         vkFreeMemory(device->logicalDevice, deviceMemory, nullptr);
     }
 
+    // 检查并销毁渲染通道对象
     if (renderpass != VK_NULL_HANDLE)
     {
         vkDestroyRenderPass(device->logicalDevice, renderpass, nullptr);
     }
 
+    // 检查并销毁帧缓冲区对象
     if (fbo != VK_NULL_HANDLE)
     {
         vkDestroyFramebuffer(device->logicalDevice, fbo, nullptr);
     }
 
+    // 检查并销毁描述符集合布局对象
     if (descriptorSetLayout != VK_NULL_HANDLE)
     {
         vkDestroyDescriptorSetLayout(device->logicalDevice, descriptorSetLayout, nullptr);
     }
 
+    // 检查并销毁管线布局对象
     if (pipelineLayout != VK_NULL_HANDLE)
     {
         vkDestroyPipelineLayout(device->logicalDevice, pipelineLayout, nullptr);
     }
 
+    // 检查并销毁描述符池对象
     if (descriptorPool != VK_NULL_HANDLE)
     {
         vkDestroyDescriptorPool(device->logicalDevice, descriptorPool, nullptr);
     }
 }
 
+// 生成全屏渲染通道所需的采样器对象
 void FullScreenPass::GenerateSampler()
 {
+    // 初始化采样器创建信息结构体
     VkSamplerCreateInfo samplerCI = vks::initializers::samplerCreateInfo();
+    // 设置放大和缩小过滤方式为线性过滤
     samplerCI.magFilter = VK_FILTER_LINEAR;
     samplerCI.minFilter = VK_FILTER_LINEAR;
+    // 设置mipmap模式为线性
     samplerCI.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    // 设置U、V、W方向的寻址模式为边缘裁剪
     samplerCI.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     samplerCI.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     samplerCI.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    // 设置最小和最大LOD
     samplerCI.minLod = 0.0f;
     samplerCI.maxLod = 1.0f;
+    // 设置边界颜色为不透明白色
     samplerCI.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+    // 创建采样器对象，并检查结果
     VK_CHECK_RESULT(vkCreateSampler(device->logicalDevice, &samplerCI, nullptr, &sampler));
 }
 
+/**
+ * @brief 准备全屏渲染通道所需的所有资源
+ * 
+ * 该函数用于初始化全屏渲染所需的各个组件，包括渲染通道、管线、帧缓冲和数据。
+ */
 void FullScreenPass::Prepare()
 {
+    // 准备渲染通道，设置渲染目标等
     PrepareRenderPass();
+    // 准备渲染管线，包括着色器、状态设置等
     PreparePipeline();
+    // 准备帧缓冲，用于渲染目标
     PrepareFrameBuffer();
+    // 准备渲染所需的数据，如顶点数据、纹理等
     PrepareData();
 }
 
@@ -153,54 +196,67 @@ void FullScreenPass::Draw(VkCommandBuffer cmd)
     vkCmdEndRenderPass(cmd);
 }
 
+/**
+ * @brief 准备渲染通道(Render Pass)的函数
+ * 该函数用于创建和配置Vulkan渲染通道，包括附件描述、子通道描述和依赖关系
+ */
+/**
+ * @brief 准备渲染通道(Render Pass)的函数
+ * 该函数用于创建一个完整的渲染通道，包括附件描述、子通道描述和依赖关系
+ */
 void FullScreenPass::PrepareRenderPass()
 {
-    // FB, Att, RP, Pipe, etc.
-    VkAttachmentDescription attDesc = {};
-    // Color attachment
-    attDesc.format = format;
-    attDesc.samples = VK_SAMPLE_COUNT_1_BIT;
-    attDesc.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    attDesc.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    attDesc.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    attDesc.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    attDesc.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    attDesc.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    VkAttachmentReference colorReference = { 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL };
+    // FB, Att, RP, Pipe, etc. (帧缓冲、附件、渲染通道、管道等的缩写)
+    VkAttachmentDescription attDesc = {};  // Vulkan附件描述结构体，用于定义渲染通道的附件属性
+    // Color attachment - 颜色附件设置
+    attDesc.format = format;               // 设置附件的图像格式
+    attDesc.samples = VK_SAMPLE_COUNT_1_BIT;  // 设置采样数量为1，表示不使用多重采样
+    attDesc.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;  // 设置加载操作为清除操作
+    attDesc.storeOp = VK_ATTACHMENT_STORE_OP_STORE;  // 设置存储操作为存储操作
+    attDesc.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;  // 模板加载操作设为不关心
+    attDesc.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;  // 模板存储操作设为不关心
+    attDesc.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;  // 初始图像布局设为未定义
+    attDesc.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;  // 最终图像布局设为着色器读取最优
+    VkAttachmentReference colorReference = { 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL };  // 颜色附件引用，索引为0，布局为颜色附件最优
 
-    VkSubpassDescription subpassDescription = {};
-    subpassDescription.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    subpassDescription.colorAttachmentCount = 1;
-    subpassDescription.pColorAttachments = &colorReference;
+    VkSubpassDescription subpassDescription = {};  // 子通道描述结构体，用于定义渲染通道中的子通道
+    subpassDescription.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;  // 管道绑定点设置为图形管道
+    subpassDescription.colorAttachmentCount = 1;  // 颜色附件数量为1
+    subpassDescription.pColorAttachments = &colorReference;  // 指向颜色附件引用的指针
 
-    // Use subpass dependencies for layout transitions
-    std::array<VkSubpassDependency, 2> dependencies;
-    dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
-    dependencies[0].dstSubpass = 0;
-    dependencies[0].srcStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-    dependencies[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    dependencies[0].srcAccessMask = VK_ACCESS_MEMORY_READ_BIT;
-    dependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-    dependencies[0].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+    // Use subpass dependencies for layout transitions - 使用子通道依赖进行布局转换
+    std::array<VkSubpassDependency, 2> dependencies;  // 创建一个包含两个子通道依赖的数组
 
-    dependencies[1].srcSubpass = 0;
-    dependencies[1].dstSubpass = VK_SUBPASS_EXTERNAL;
-    dependencies[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    dependencies[1].dstStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-    dependencies[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-    dependencies[1].dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
-    dependencies[1].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+    // 第一个依赖：从外部子通道到我们子通道的转换
+    dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;  // 源子通道为外部
+    dependencies[0].dstSubpass = 0;  // 目标子通道为第一个子通道
+    dependencies[0].srcStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;  // 源阶段为管道底部阶段
+    dependencies[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;  // 目标阶段为颜色附件输出阶段
+    dependencies[0].srcAccessMask = VK_ACCESS_MEMORY_READ_BIT;  // 源访问掩码为内存读取
+    dependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;  // 目标访问掩码为颜色附件读写
+    dependencies[0].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;  // 依赖标志为按区域依赖
 
-    // Create the actual renderpass
-    VkRenderPassCreateInfo renderPassCI = vks::initializers::renderPassCreateInfo();
-    renderPassCI.attachmentCount = 1;
-    renderPassCI.pAttachments = &attDesc;
-    renderPassCI.subpassCount = 1;
-    renderPassCI.pSubpasses = &subpassDescription;
-    renderPassCI.dependencyCount = 2;
-    renderPassCI.pDependencies = dependencies.data();
 
-    VK_CHECK_RESULT(vkCreateRenderPass(device->logicalDevice, &renderPassCI, nullptr, &renderpass));
+
+    // 第二个依赖：从我们的子通道到外部子通道的转换
+    dependencies[1].srcSubpass = 0;  // 源子通道为第一个子通道
+    dependencies[1].dstSubpass = VK_SUBPASS_EXTERNAL;  // 目标子通道为外部
+    dependencies[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;  // 源阶段为颜色附件输出阶段
+    dependencies[1].dstStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;  // 目标阶段为管道底部阶段
+    dependencies[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;  // 源访问掩码为颜色附件读写
+    dependencies[1].dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;  // 目标访问掩码为内存读取
+    dependencies[1].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;  // 依赖标志为按区域依赖
+
+    // Create the actual renderpass - 创建实际的渲染通道
+    VkRenderPassCreateInfo renderPassCI = vks::initializers::renderPassCreateInfo();  // 创建渲染通道创建信息结构体
+    renderPassCI.attachmentCount = 1;  // 附件数量为1
+    renderPassCI.pAttachments = &attDesc;  // 指向附件描述的指针
+    renderPassCI.subpassCount = 1;  // 子通道数量为1
+    renderPassCI.pSubpasses = &subpassDescription;  // 指向子通道描述的指针
+    renderPassCI.dependencyCount = 2;  // 依赖数量为2
+    renderPassCI.pDependencies = dependencies.data();  // 指向依赖数组的指针
+
+    VK_CHECK_RESULT(vkCreateRenderPass(device->logicalDevice, &renderPassCI, nullptr, &renderpass));  // 创建渲染通道并检查结果
 }
 
 GenBRDFLutPass::GenBRDFLutPass(vks::VulkanDevice* device_, IExampleInterfasce* example)
@@ -215,24 +271,41 @@ GenBRDFLutPass::~GenBRDFLutPass()
 
 }
 
+/**
+ * 准备渲染管线
+ * 该函数用于创建并配置BRDF查找表(LUT)的渲染管线
+ */
 void GenBRDFLutPass::PreparePipeline()
 {
+    // 创建管线布局，不使用任何描述符集
     VkPipelineLayoutCreateInfo pipelineLayoutCI = vks::initializers::pipelineLayoutCreateInfo(nullptr, 0);
     VK_CHECK_RESULT(vkCreatePipelineLayout(device->logicalDevice, &pipelineLayoutCI, nullptr, &pipelineLayout));
 
+    // 配置输入装配状态，使用三角形图元
     VkPipelineInputAssemblyStateCreateInfo inputAssemblyState = vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
+    // 配置光栅化状态，填充多边形，禁用背面剔除，使用逆时针为正面
     VkPipelineRasterizationStateCreateInfo rasterizationState = vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE);
+    // 配置颜色混合附件状态，启用所有颜色通道
     VkPipelineColorBlendAttachmentState blendAttachmentState = vks::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE);
+    // 配置颜色混合状态，使用单个附件
     VkPipelineColorBlendStateCreateInfo colorBlendState = vks::initializers::pipelineColorBlendStateCreateInfo(1, &blendAttachmentState);
+    // 配置深度模板状态，禁用深度测试和模板测试
     VkPipelineDepthStencilStateCreateInfo depthStencilState = vks::initializers::pipelineDepthStencilStateCreateInfo(VK_FALSE, VK_FALSE, VK_COMPARE_OP_LESS_OR_EQUAL);
+    // 配视口状态，使用单个视口和剪刀
     VkPipelineViewportStateCreateInfo viewportState = vks::initializers::pipelineViewportStateCreateInfo(1, 1);
+    // 配置多重采样状态，禁用多重采样
     VkPipelineMultisampleStateCreateInfo multisampleState = vks::initializers::pipelineMultisampleStateCreateInfo(VK_SAMPLE_COUNT_1_BIT);
+    // 配置动态状态，启用视口和剪刀的动态设置
     std::vector<VkDynamicState> dynamicStateEnables = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
     VkPipelineDynamicStateCreateInfo dynamicState = vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables);
+    // 配置顶点输入状态，不使用顶点数据
     VkPipelineVertexInputStateCreateInfo emptyInputState = vks::initializers::pipelineVertexInputStateCreateInfo();
+    // 创建着色器阶段数组，包含顶点和片段着色器
     std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages;
 
+    // 创建图形管线信息
     VkGraphicsPipelineCreateInfo pipelineCI = vks::initializers::pipelineCreateInfo(pipelineLayout, renderpass);
+    // 设置管线各个状态
     pipelineCI.pInputAssemblyState = &inputAssemblyState;
     pipelineCI.pRasterizationState = &rasterizationState;
     pipelineCI.pColorBlendState = &colorBlendState;
