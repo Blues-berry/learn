@@ -479,6 +479,7 @@ void MainPass::Draw(VkCommandBuffer cmd, VkFramebuffer framebuffer, uint32_t wid
 
 void MainPass::UpdateBinngs()
 {
+    
     // 更新描述符集绑定。
     std::vector<VkWriteDescriptorSet> writeDescriptorSets = {
         vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &globalBuffer.descriptor), // 绑定 0：全局 UBO。
