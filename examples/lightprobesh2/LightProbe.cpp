@@ -9,7 +9,6 @@ LightProbe::LightProbe(vks::VulkanDevice* device_, IExampleInterfasce* example, 
     : device(device_), iLoader(example), position(position_), width(width_), height(height_)
 {
 }
-
 LightProbe::~LightProbe() {
     if (pipeline != VK_NULL_HANDLE) {
         vkDestroyPipeline(device->logicalDevice, pipeline, nullptr);
@@ -32,11 +31,25 @@ LightProbe::~LightProbe() {
     if (depthMemory != VK_NULL_HANDLE) {
         vkFreeMemory(device->logicalDevice, depthMemory, nullptr);
     }
+    if (cubemap) {
+        if (cubemap->image != VK_NULL_HANDLE) {
+            vkDestroyImage(device->logicalDevice, cubemap->image, nullptr);
+        }
+        if (cubemap->view != VK_NULL_HANDLE) {
+            vkDestroyImageView(device->logicalDevice, cubemap->view, nullptr);
+        }
+        if (cubemap->deviceMemory != VK_NULL_HANDLE) {
+            vkFreeMemory(device->logicalDevice, cubemap->deviceMemory, nullptr);
+        }
+        if (cubemap->sampler != VK_NULL_HANDLE) {
+            vkDestroySampler(device->logicalDevice, cubemap->sampler, nullptr);
+        }
+    }
     uboBuffer.destroy();
 }
-
 void LightProbe::SetExternalCubeMap(std::shared_ptr<vks::TextureCubeMap>& cubemap_) {
     cubemap = cubemap_;
+    UpdateBindings(); // 更新描述符集
 }
 
 void LightProbe::prepare() {
@@ -67,62 +80,18 @@ void LightProbe::prepare() {
         &uboBuffer,
         sizeof(UBO));
     uboBuffer.map();// 映射缓冲区。
-
-
-
-
-    // （假设场景纹理稍后绑定,稍后设置纹理信息）
-    VkDescriptorBufferInfo bufferInfo = uboBuffer.descriptor;
-    // 假设有一个默认纹理
-    VkDescriptorImageInfo textureInfo = {}; // 需要实际纹理
-    textureInfo.sampler = nullptr; // 稍后设置
-    textureInfo.imageView = nullptr;
-    textureInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-
-
-    // 更新描述符集
-    std::vector<VkWriteDescriptorSet> writeDescriptorSets = {
-        vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &bufferInfo),// 绑定 0：全局 UBO。
-        vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, &textureInfo)// 绑定 1：图像数据。
-    };
-    vkUpdateDescriptorSets(device->logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, nullptr);// 更新描述符集。
-
-    // 创建渲染管线
-    VkPipelineInputAssemblyStateCreateInfo inputAssemblyState = vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);// 设置三角形列表拓扑。
-    VkPipelineRasterizationStateCreateInfo rasterizationState = vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE);// 设置填充模式，背面剔除，逆时针为正面。
-    VkPipelineColorBlendAttachmentState blendAttachmentState = vks::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE);// 设置颜色混合，启用所有通道。
-    VkPipelineColorBlendStateCreateInfo colorBlendState = vks::initializers::pipelineColorBlendStateCreateInfo(1, &blendAttachmentState);// 设置颜色混合状态。
-    VkPipelineDepthStencilStateCreateInfo depthStencilState = vks::initializers::pipelineDepthStencilStateCreateInfo(VK_TRUE, VK_TRUE, VK_COMPARE_OP_LESS_OR_EQUAL);// 启用深度和模板测试。
-    VkPipelineViewportStateCreateInfo viewportState = vks::initializers::pipelineViewportStateCreateInfo(1, 1);// 设置一个视口和剪刀。
-    VkPipelineMultisampleStateCreateInfo multisampleState = vks::initializers::pipelineMultisampleStateCreateInfo(VK_SAMPLE_COUNT_1_BIT);// 禁用多重采样。
-    std::vector<VkDynamicState> dynamicStateEnables = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR }; // 启用动态视口和剪刀。
-    VkPipelineDynamicStateCreateInfo dynamicState = vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables);// 设置动态状态。
-
-    VkPipelineLayoutCreateInfo pipelineLayoutCI = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayout, 1);// 初始化管线布局。
-    VK_CHECK_RESULT(vkCreatePipelineLayout(device->logicalDevice, &pipelineLayoutCI, nullptr, &pipelineLayout));// 创建管线布局。
-
-    // 假设渲染场景的着色器(renderPass稍后设置)
-    std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages;// 定义两个着色器阶段。
-    shaderStages[0] = iLoader->LoadShader("lightprobe/scene.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);// 加载顶点着色器。
-    shaderStages[1] = iLoader->LoadShader("lightprobe/scene.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);// 加载片段着色器。
-
-    VkGraphicsPipelineCreateInfo pipelineCI = vks::initializers::pipelineCreateInfo(pipelineLayout, nullptr); // renderPass稍后设置
-    pipelineCI.pInputAssemblyState = &inputAssemblyState;// 设置输入装配状态。
-    pipelineCI.pRasterizationState = &rasterizationState;// 设置光栅化状态。
-    pipelineCI.pColorBlendState = &colorBlendState;// 设置颜色混合状态。
-    pipelineCI.pMultisampleState = &multisampleState;// 设置多重采样状态。
-    pipelineCI.pViewportState = &viewportState;// 设置视口状态。
-    pipelineCI.pDepthStencilState = &depthStencilState;// 设置深度模板状态。
-    pipelineCI.pDynamicState = &dynamicState;// 设置动态状态。
-    pipelineCI.stageCount = 2;// 两个着色器阶段
-    pipelineCI.pStages = shaderStages.data();// 指定着色器阶段数组。
-    // 设置顶点输入状态（位置、法线、UV）。
-    pipelineCI.pVertexInputState = vkglTF::Vertex::getPipelineVertexInputState({ vkglTF::VertexComponent::Position, vkglTF::VertexComponent::Normal, vkglTF::VertexComponent::UV });
-
-    // 渲染管线将在CaptureCubeMap中绑定具体renderPass
 }
-
+void LightProbe::UpdateBindings()
+{
+    if (!cubemap || !cubemap->descriptor.sampler || !cubemap->descriptor.imageView) {
+            throw std::runtime_error("Cubemap texture not properly initialized!");
+        }
+        std::vector<VkWriteDescriptorSet> writeDescriptorSets = {
+            vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &uboBuffer.descriptor),
+            vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, &cubemap->descriptor)
+        };
+        vkUpdateDescriptorSets(device->logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, nullptr);
+}
 void LightProbe::updateUBO(const UBO& ubo) {
     memcpy(uboBuffer.mapped, &ubo, sizeof(UBO));
 }
@@ -172,56 +141,61 @@ void LightProbe::CaptureCubeMap(VkFormat format, VkQueue queue) {
     VK_CHECK_RESULT(vkCreateImageView(device->logicalDevice, &lowResViewInfo, nullptr, &lowResCubemap->view));// 创建图像视图。
 
     // --- 创建高分辨率立方体贴图 ---
-    cubemap = std::make_shared<vks::TextureCubeMap>();
-    VkImageCreateInfo highResImageInfo = vks::initializers::imageCreateInfo();
-    highResImageInfo.imageType = VK_IMAGE_TYPE_2D;
-    highResImageInfo.format = format;
-    highResImageInfo.extent.width = width;
-    highResImageInfo.extent.height = height;
-    highResImageInfo.extent.depth = 1;
-    highResImageInfo.mipLevels = 1;
-    highResImageInfo.arrayLayers = 6;
-    highResImageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    highResImageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    highResImageInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-    highResImageInfo.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
 
-    VK_CHECK_RESULT(vkCreateImage(device->logicalDevice, &highResImageInfo, nullptr, &cubemap->image));
+    if (!cubemap) {
+        cubemap = std::make_shared<vks::TextureCubeMap>();
+        VkImageCreateInfo highResImageInfo = vks::initializers::imageCreateInfo();
+        highResImageInfo.imageType = VK_IMAGE_TYPE_2D;
+        highResImageInfo.format = format;
+        highResImageInfo.extent.width = width;
+        highResImageInfo.extent.height = height;
+        highResImageInfo.extent.depth = 1;
+        highResImageInfo.mipLevels = 1;
+        highResImageInfo.arrayLayers = 6;
+        highResImageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+        highResImageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+        highResImageInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        highResImageInfo.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
 
-    vkGetImageMemoryRequirements(device->logicalDevice, cubemap->image, &memReqs);
-    memAllocInfo.allocationSize = memReqs.size;
-    memAllocInfo.memoryTypeIndex = device->getMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    VK_CHECK_RESULT(vkAllocateMemory(device->logicalDevice, &memAllocInfo, nullptr, &cubemap->deviceMemory));
-    VK_CHECK_RESULT(vkBindImageMemory(device->logicalDevice, cubemap->image, cubemap->deviceMemory, 0));
+        VK_CHECK_RESULT(vkCreateImage(device->logicalDevice, &highResImageInfo, nullptr, &cubemap->image));
 
-    VkImageViewCreateInfo highResViewInfo = vks::initializers::imageViewCreateInfo();
-    highResViewInfo.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
-    highResViewInfo.format = format;
-    highResViewInfo.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 6 };
-    highResViewInfo.image = cubemap->image;
-    VK_CHECK_RESULT(vkCreateImageView(device->logicalDevice, &highResViewInfo, nullptr, &cubemap->view));// 创建图像视图。
+        vkGetImageMemoryRequirements(device->logicalDevice, cubemap->image, &memReqs);
+        memAllocInfo.allocationSize = memReqs.size;
+        memAllocInfo.memoryTypeIndex = device->getMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        VK_CHECK_RESULT(vkAllocateMemory(device->logicalDevice, &memAllocInfo, nullptr, &cubemap->deviceMemory));
+        VK_CHECK_RESULT(vkBindImageMemory(device->logicalDevice, cubemap->image, cubemap->deviceMemory, 0));
 
-    VkSamplerCreateInfo samplerInfo = vks::initializers::samplerCreateInfo();// 初始化采样器创建信息。
-    samplerInfo.magFilter = VK_FILTER_LINEAR;// 设置放大过滤为线性。
-    samplerInfo.minFilter = VK_FILTER_LINEAR;// 设置缩小过滤为线性。
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR; // 设置 Mipmap 模式为线性。
-    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;// 寻址模式为边缘裁剪。
-    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.maxAnisotropy = 1.0f;
-    samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;// 设置边界颜色为不透明白色。
-    samplerInfo.compareOp = VK_COMPARE_OP_NEVER;
-    samplerInfo.minLod = 0.0f;
-    samplerInfo.maxLod = 1.0f;
-    VK_CHECK_RESULT(vkCreateSampler(device->logicalDevice, &samplerInfo, nullptr, &cubemap->sampler));// 创建采样器并检查结果。
+        VkImageViewCreateInfo highResViewInfo = vks::initializers::imageViewCreateInfo();
+        highResViewInfo.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
+        highResViewInfo.format = format;
+        highResViewInfo.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 6 };
+        highResViewInfo.image = cubemap->image;
+        VK_CHECK_RESULT(vkCreateImageView(device->logicalDevice, &highResViewInfo, nullptr, &cubemap->view));// 创建图像视图。
 
-    // 设置描述符图像信息，用于着色器访问纹理。
-    cubemap->descriptor.sampler = cubemap->sampler;// 指定采样器。
-    cubemap->descriptor.imageView = cubemap->view;// 指定图像视图。
-    cubemap->descriptor.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;// 设置图像布局为着色器只读。
+        VkSamplerCreateInfo samplerInfo = vks::initializers::samplerCreateInfo();// 初始化采样器创建信息。
+        samplerInfo.magFilter = VK_FILTER_LINEAR;// 设置放大过滤为线性。
+        samplerInfo.minFilter = VK_FILTER_LINEAR;// 设置缩小过滤为线性。
+        samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR; // 设置 Mipmap 模式为线性。
+        samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;// 寻址模式为边缘裁剪。
+        samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        samplerInfo.maxAnisotropy = 1.0f;
+        samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;// 设置边界颜色为不透明白色。
+        samplerInfo.compareOp = VK_COMPARE_OP_NEVER;
+        samplerInfo.minLod = 0.0f;
+        samplerInfo.maxLod = 1.0f;
+        VK_CHECK_RESULT(vkCreateSampler(device->logicalDevice, &samplerInfo, nullptr, &cubemap->sampler));// 创建采样器并检查结果。
+
+        // 设置描述符图像信息，用于着色器访问纹理。
+        cubemap->descriptor.sampler = cubemap->sampler;// 指定采样器。
+        cubemap->descriptor.imageView = cubemap->view;// 指定图像视图。
+        cubemap->descriptor.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;// 设置图像布局为着色器只读。
+    }
+
     lowResCubemap->descriptor.sampler = cubemap->sampler;
     lowResCubemap->descriptor.imageView = lowResCubemap->view;
     lowResCubemap->descriptor.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    UpdateBindings(); // 更新描述符集
 
     // --- 创建渲染通行证（支持多视图和深度缓冲） ---
     std::vector<VkAttachmentDescription> attachmentDescriptions(2);
@@ -300,6 +274,50 @@ void LightProbe::CaptureCubeMap(VkFormat format, VkQueue queue) {
     VkRenderPass renderPass;// 渲染通行证句柄。
     VK_CHECK_RESULT(vkCreateRenderPass(device->logicalDevice, &renderPassInfo, nullptr, &renderPass));
 
+    // --- 创建管线布局和渲染管线 ---
+    if (pipelineLayout != VK_NULL_HANDLE) {
+        vkDestroyPipelineLayout(device->logicalDevice, pipelineLayout, nullptr);
+        pipelineLayout = VK_NULL_HANDLE;
+    }
+    if (pipeline != VK_NULL_HANDLE) {
+        vkDestroyPipeline(device->logicalDevice, pipeline, nullptr);
+        pipeline = VK_NULL_HANDLE;
+    }
+
+    {
+        VkPipelineLayoutCreateInfo pipelineLayoutCI = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayout, 1); // 初始化管线布局。
+        VK_CHECK_RESULT(vkCreatePipelineLayout(device->logicalDevice, &pipelineLayoutCI, nullptr, &pipelineLayout)); // 创建管线布局。
+
+        VkPipelineInputAssemblyStateCreateInfo inputAssemblyState = vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE); // 设置三角形列表拓扑。
+        VkPipelineRasterizationStateCreateInfo rasterizationState = vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE); // 设置填充模式，背面剔除，逆时针为正面。
+        VkPipelineColorBlendAttachmentState blendAttachmentState = vks::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE); // 设置颜色混合，启用所有通道。
+        VkPipelineColorBlendStateCreateInfo colorBlendState = vks::initializers::pipelineColorBlendStateCreateInfo(1, &blendAttachmentState); // 设置颜色混合状态。
+        VkPipelineDepthStencilStateCreateInfo depthStencilState = vks::initializers::pipelineDepthStencilStateCreateInfo(VK_TRUE, VK_TRUE, VK_COMPARE_OP_LESS_OR_EQUAL); // 启用深度和模板测试。
+        VkPipelineViewportStateCreateInfo viewportState = vks::initializers::pipelineViewportStateCreateInfo(1, 1); // 设置一个视口和剪刀。
+        VkPipelineMultisampleStateCreateInfo multisampleState = vks::initializers::pipelineMultisampleStateCreateInfo(VK_SAMPLE_COUNT_1_BIT); // 禁用多重采样。
+        std::vector<VkDynamicState> dynamicStateEnables = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR }; // 启用动态视口和剪刀。
+        VkPipelineDynamicStateCreateInfo dynamicState = vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables); // 设置动态状态。
+
+        std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages;
+        shaderStages[0] = iLoader->LoadShader("lightprobe/scene.vert.spv", VK_SHADER_STAGE_VERTEX_BIT); // 加载顶点着色器。
+        shaderStages[1] = iLoader->LoadShader("lightprobe/scene.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT); // 加载片段着色器。
+
+        VkGraphicsPipelineCreateInfo pipelineCI = vks::initializers::pipelineCreateInfo(pipelineLayout, renderPass);
+        pipelineCI.pInputAssemblyState = &inputAssemblyState;
+        pipelineCI.pRasterizationState = &rasterizationState;
+        pipelineCI.pColorBlendState = &colorBlendState;
+        pipelineCI.pMultisampleState = &multisampleState;
+        pipelineCI.pViewportState = &viewportState;
+        pipelineCI.pDepthStencilState = &depthStencilState;
+        pipelineCI.pDynamicState = &dynamicState;
+        pipelineCI.stageCount = 2;
+        pipelineCI.pStages = shaderStages.data();
+        pipelineCI.pVertexInputState = vkglTF::Vertex::getPipelineVertexInputState({ vkglTF::VertexComponent::Position, vkglTF::VertexComponent::Normal, vkglTF::VertexComponent::UV });
+
+        VK_CHECK_RESULT(vkCreateGraphicsPipelines(device->logicalDevice, VK_NULL_HANDLE, 1, &pipelineCI, nullptr, &pipeline));
+    }
+
+
     // 创建深度缓冲：分配图像、内存和视图，用于多视图深度测试。
     VkImageCreateInfo depthImageInfo = vks::initializers::imageCreateInfo();  // 初始化图像创建信息。
     depthImageInfo.imageType = VK_IMAGE_TYPE_2D;  // 图像类型：2D（但结合arrayLayers=6和CUBE_COMPATIBLE_BIT，形成立方体贴图）。
@@ -345,23 +363,6 @@ void LightProbe::CaptureCubeMap(VkFormat format, VkQueue queue) {
     VkFramebuffer framebuffer;  // 帧缓冲句柄。
     VK_CHECK_RESULT(vkCreateFramebuffer(device->logicalDevice, &fbInfo, nullptr, &framebuffer));  // 创建帧缓冲。
 
-    // 创建渲染管线：定义从顶点到片段的完整渲染流程。
-    VkGraphicsPipelineCreateInfo pipelineCI = vks::initializers::pipelineCreateInfo(pipelineLayout, renderPass);  // 初始化图形管线创建信息，使用管线布局和渲染通行证（pipelineLayout假设已创建）。
-    pipelineCI.pVertexInputState = vkglTF::Vertex::getPipelineVertexInputState({ vkglTF::VertexComponent::Position, vkglTF::VertexComponent::Normal, vkglTF::VertexComponent::UV });  // 顶点输入状态：位置、法线、UV（来自glTF模型）。
-    std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages;  // 着色器阶段数组：2个（顶点 + 片段）。
-    shaderStages[0] = iLoader->LoadShader("lightprobe/scene.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);  // 顶点着色器：从SPIR-V文件加载，阶段为顶点。
-    shaderStages[1] = iLoader->LoadShader("lightprobe/scene.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);  // 片段着色器：从SPIR-V文件加载，阶段为片段。
-    pipelineCI.stageCount = 2;  // 着色器阶段数量：2。
-    pipelineCI.pStages = shaderStages.data();  // 指针到阶段数组。
-    pipelineCI.pInputAssemblyState = &vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);  // 输入装配：三角形列表，无原始重启。
-    pipelineCI.pRasterizationState = &vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE);  // 光栅化：填充模式，背面剔除，逆时针正面。
-    pipelineCI.pColorBlendState = &vks::initializers::pipelineColorBlendStateCreateInfo(1, &vks::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE));  // 颜色混合：1个附件，无混合（0xf表示所有通道启用）。
-    pipelineCI.pMultisampleState = &vks::initializers::pipelineMultisampleStateCreateInfo(VK_SAMPLE_COUNT_1_BIT);  // 多采样：禁用。
-    pipelineCI.pViewportState = &vks::initializers::pipelineViewportStateCreateInfo(1, 1);  // 视口状态：1个视口和1个剪刀。
-    pipelineCI.pDepthStencilState = &vks::initializers::pipelineDepthStencilStateCreateInfo(VK_TRUE, VK_TRUE, VK_COMPARE_OP_LESS_OR_EQUAL);  // 深度/模板：启用深度测试和写入，小于等于比较。
-    pipelineCI.pDynamicState = &vks::initializers::pipelineDynamicStateCreateInfo({ VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR });  // 动态状态：允许运行时设置视口和剪刀。
-    VK_CHECK_RESULT(vkCreateGraphicsPipelines(device->logicalDevice, VK_NULL_HANDLE, 1, &pipelineCI, nullptr, &pipeline));  // 创建管线（1个），句柄存储在pipeline。
-
     // --- 渲染：捕获低分辨率cubemap（多视图） ---
     // 这个部分记录命令缓冲，执行多视图渲染到低分辨率立方体贴图，用于光探针（Light Probe）捕获。
     VkCommandBuffer cmdBuf = device->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);  // 创建主命令缓冲，一次性使用（true表示开始记录）。
@@ -381,16 +382,25 @@ void LightProbe::CaptureCubeMap(VkFormat format, VkQueue queue) {
     UBO ubo = {};  // 初始化UBO结构体（假设定义为包含projection和view的结构体）。
     ubo.projection = projection;  // 设置投影。
     for (uint32_t face = 0; face < 6; ++face) {
-        ubo.view = viewMatrices[face];  // 为每个面设置视图矩阵。
-        updateUBO(ubo);  // 更新UBO（可能涉及vkCmdPushConstants或描述符更新）。
+        ubo.view[face] = viewMatrices[face];  // 为每个面设置视图矩阵。
+        
     }
+    updateUBO(ubo);  // 更新UBO（涉及描述符更新）。
 
     VkRenderPassBeginInfo rpBeginInfo = vks::initializers::renderPassBeginInfo();  // 初始化渲染通行证开始信息。
     rpBeginInfo.renderPass = renderPass;  // 渲染通行证。
     rpBeginInfo.framebuffer = framebuffer;  // 帧缓冲。
     rpBeginInfo.renderArea.extent.width = lowReswidth;  // 渲染区域宽度。
     rpBeginInfo.renderArea.extent.height = lowResheight;  // 渲染区域高度。
-    std::array<VkClearValue, 2> clearValues = { {{0.0f, 0.0f, 0.0f, 1.0f}}, {{1.0f, 0}} };  // 清除值数组：颜色{0,0,0,1}（黑色），深度{1.0, 0}（最大深度，无模板）。
+    std::array<VkClearValue, 2> clearValues;
+    clearValues[0].color.float32[0] = 0.0f; // 设置颜色清除值（
+    clearValues[0].color.float32[1] = 0.0f;
+    clearValues[0].color.float32[2] = 0.0f;
+    clearValues[0].color.float32[3] = 1.0f;//表示完全不透明（Alpha = 1.0）黑色
+
+    clearValues[1].depthStencil.depth = 1.0f; // 设置深度清除值为 1.0。清除深度缓冲区到 1.0f 表示将所有像素的深度初始化为最远值。
+    clearValues[1].depthStencil.stencil = 0.0f; // 设置模板清除值为 0。
+
     rpBeginInfo.clearValueCount = 2;  // 清除值数量：2。
     rpBeginInfo.pClearValues = clearValues.data();  // 指针到清除值。
 
@@ -403,7 +413,8 @@ void LightProbe::CaptureCubeMap(VkFormat format, VkQueue queue) {
     vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);  // 绑定描述符集（集0，1个描述符，假设descriptorSet已创建）。
     drawScene(cmdBuf);  // 绘制场景（自定义函数，记录绘制命令，多视图会自动渲染到6个层）。
     vkCmdEndRenderPass(cmdBuf);  // 结束渲染通行证。
-
+    // 提交命令缓冲
+    device->flushCommandBuffer(cmdBuf, queue);
     // --- 使用计算着色器上采样 ---
     // 上采样低分辨率立方体贴图到高分辨率，使用自定义计算通行证。
     UpsampleCubeMapPass upsamplePass(device, iLoader);  // 创建上采样通行证（自定义类，使用计算着色器）。

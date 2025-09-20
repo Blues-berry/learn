@@ -477,7 +477,7 @@ void MainPass::Draw(VkCommandBuffer cmd, VkFramebuffer framebuffer, uint32_t wid
     vkCmdEndRenderPass(cmd); // 结束渲染通道。
 }
 
-void MainPass::UpdateBinngs()
+void MainPass::UpdateBindings()
 {
     
     // 更新描述符集绑定。

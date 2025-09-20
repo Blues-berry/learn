@@ -9,7 +9,7 @@
 #include <string>
 #include "VulkanTexture.h"
 struct UBO {
-    glm::mat4 view;
+    glm::mat4 view[6];
     glm::mat4 projection;
 };
 class LightProbe {
@@ -25,6 +25,7 @@ public:
     void prepare();
     void CaptureCubeMap(VkFormat format, VkQueue queue);
     void GenSH(VkCommandBuffer cmdBuffer, VkQueue queue);
+    void UpdateBindings();
 
 private:
     void updateUBO(const struct UBO& ubo);

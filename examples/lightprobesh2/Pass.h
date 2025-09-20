@@ -84,7 +84,7 @@ public:
     
     void Draw(VkCommandBuffer cmd, VkFramebuffer framebuffer, uint32_t width, uint32_t height, std::function<void(VkCommandBuffer)> &&encoder);
 
-    void UpdateBinngs();
+    void UpdateBindings();
 
     VkDescriptorSet descriptorSet;
     VkDescriptorSetLayout descriptorSetLayout;
