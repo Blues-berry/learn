@@ -9,6 +9,8 @@
 #include "Pass.h"
 #include "ILoader.h"
 #include "PreviewModel.h"
+#include "PlyParser.h"
+#include "GaussianSplatting.h"
 #include <fstream>
 
 
@@ -17,14 +19,14 @@ class VulkanExample : public VulkanExampleBase, public IExampleInterfasce
 public:
     VulkanExample() : VulkanExampleBase()
     {
-        camera.type = Camera::CameraType::firstperson;//ÉèÖÃÏà»úÎªµÚÒ»ÈË³ÆÄ£Ê½¡£
-        camera.movementSpeed = 4.0f;//ÉèÖÃÏà»úÒÆ¶¯ËÙ¶ÈÎª4.0µ¥Î»/Ãë¡£
-        camera.setPerspective(60.0f, (float)width / (float)height, 0.1f, 256.0f);//ÉèÖÃÍ¸ÊÓÍ¶Ó°£¬ÊÓ³¡½Ç60¶È£¬¿í¸ß±È»ùÓÚ´°¿Ú³ß´ç£¬½ü²Ã¼ôÃæ0.1£¬Ô¶²Ã¼ôÃæ256.0¡£
-        camera.rotationSpeed = 0.25f;//ÉèÖÃÏà»úÐý×ªËÙ¶ÈÎª0.25¡£
+        camera.type = Camera::CameraType::firstperson;//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Îªï¿½ï¿½Ò»ï¿½Ë³ï¿½Ä£Ê½ï¿½ï¿½
+        camera.movementSpeed = 4.0f;//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Æ¶ï¿½ï¿½Ù¶ï¿½Îª4.0ï¿½ï¿½Î»/ï¿½ë¡£
+        camera.setPerspective(60.0f, (float)width / (float)height, 0.1f, 256.0f);//ï¿½ï¿½ï¿½ï¿½Í¸ï¿½ï¿½Í¶Ó°ï¿½ï¿½ï¿½Ó³ï¿½ï¿½ï¿½60ï¿½È£ï¿½ï¿½ï¿½ß±È»ï¿½ï¿½Ú´ï¿½ï¿½Ú³ß´ç£¬ï¿½ï¿½ï¿½Ã¼ï¿½ï¿½ï¿½0.1ï¿½ï¿½Ô¶ï¿½Ã¼ï¿½ï¿½ï¿½256.0ï¿½ï¿½
+        camera.rotationSpeed = 0.25f;//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½×ªï¿½Ù¶ï¿½Îª0.25ï¿½ï¿½
 
-        // ÉèÖÃÏà»ú³õÊ¼Î»ÖÃºÍ³¯Ïò
+        // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê¼Î»ï¿½ÃºÍ³ï¿½ï¿½ï¿½
         camera.setRotation({ -3.75f, 180.0f, 0.0f });
-        camera.setPosition({ 0.55f, 0.85f, 12.0f });//ÉèÖÃÏà»ú³õÊ¼Î»ÖÃÎª(0.55, 0.85, 12.0)¡£
+        camera.setPosition({ 0.55f, 0.85f, 12.0f });//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê¼Î»ï¿½ï¿½Îª(0.55, 0.85, 12.0)ï¿½ï¿½
 
         // Enable extension required for multiview
         enabledDeviceExtensions.push_back(VK_KHR_MULTIVIEW_EXTENSION_NAME);
@@ -137,6 +139,10 @@ private:
     std::vector<std::string> previewModelNames;
     int32_t modelIndex = 0;
 
+    // ply
+    std::shared_ptr<PlyObject>  plyObject;
+    std::shared_ptr<GaussianSplattingCacheFile> plyCache;
+
     // pipeline
     bool globalDirty = true;
     MainPass::GlobalUbo mainPassData = {};
@@ -148,6 +154,7 @@ private:
     // scene
     std::unique_ptr<Skybox> skybox;
     std::unique_ptr<PreviewModel> previewModel;
+    std::unique_ptr<GaussianSplattingItem> gsItem;
 };
 
 void VulkanExample::LoadAssets()
@@ -165,6 +172,13 @@ void VulkanExample::LoadAssets()
 
     skyboxModel = std::make_shared<vkglTF::Model>();
     skyboxModel->loadFromFile(getAssetPath() + "models/cube.gltf", vulkanDevice, queue, glTFLoadingFlags);
+
+    plyCache = std::make_shared<GaussianSplattingCacheFile>();
+    if (!plyCache->LoadFromFile(getAssetPath() + "models/demo_office_gs.cache")) {
+        plyObject = std::make_shared<PlyObject>();
+        plyObject->LoadFromFile(getAssetPath() + "models/demo_office_gs.ply");
+        plyCache = nullptr;
+    }
 }
 
 void VulkanExample::PrepareScene()
@@ -177,6 +191,15 @@ void VulkanExample::PrepareScene()
     previewModel = std::make_unique<PreviewModel>(vulkanDevice, this);
     previewModel->PreparePSO(renderPass, mainPass->descriptorSetLayout);
     previewModel->UpdateModel(previewModels[modelIndex]);
+
+    gsItem = std::make_unique<GaussianSplattingItem>(vulkanDevice, this);
+    gsItem->PreparePSO(renderPass, mainPass->descriptorSetLayout);
+    if (plyCache) {
+        gsItem->LoadFromCache(plyCache, queue);
+    }
+    else {
+        gsItem->SetData(plyObject, queue, getAssetPath() + "models/demo_office_gs.cache");
+    }
 }
 
 void VulkanExample::UpdateSkyBox()
@@ -243,7 +266,6 @@ void VulkanExample::PreparePasses()
         genIBL->Draw(cmdBuf);
         vulkanDevice->flushCommandBuffer(cmdBuf, queue);
     }
-
     mainPass->UpdateBinngs();
 }
 
@@ -273,9 +295,11 @@ void VulkanExample::drawFrame(VkCommandBuffer cmd)
 {
     mainPass->Draw(cmd, frameBuffers[currentBuffer], width, height, [this](VkCommandBuffer cmd) {
 
-        skybox->Draw(cmd, mainPass->descriptorSet);
+        //skybox->Draw(cmd, mainPass->descriptorSet);
 
-        previewModel->Draw(cmd, mainPass->descriptorSet);
+        //previewModel->Draw(cmd, mainPass->descriptorSet);
+
+        gsItem->Draw(cmd, mainPass->descriptorSet);
         
         drawUI(cmd);
         });
