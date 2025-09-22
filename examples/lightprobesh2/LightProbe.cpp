@@ -5,8 +5,8 @@
 
 
 
-LightProbe::LightProbe(vks::VulkanDevice* device_, IExampleInterfasce* example, glm::vec3 position_, uint32_t width_, uint32_t height_)
-    : device(device_), iLoader(example), position(position_), width(width_), height(height_)
+LightProbe::LightProbe(vks::VulkanDevice* device_, IExampleInterfasce* example, uint32_t width_, uint32_t height_)
+    : device(device_), iLoader(example), width(width_), height(height_)
 {
 }
 LightProbe::~LightProbe() {
@@ -49,7 +49,7 @@ LightProbe::~LightProbe() {
 }
 void LightProbe::SetExternalCubeMap(std::shared_ptr<vks::TextureCubeMap>& cubemap_) {
     cubemap = cubemap_;
-    UpdateBindings(); // 更新描述符集
+    // UpdateBindings(); // 更新描述符集
 }
 
 void LightProbe::prepare() {
@@ -83,7 +83,7 @@ void LightProbe::prepare() {
 }
 void LightProbe::UpdateBindings()
 {
-    if (!cubemap || !cubemap->descriptor.sampler || !cubemap->descriptor.imageView) {
+    if (!cubemap || !cubemap->descriptor.sampler || !cubemap->descriptor.imageView|| !cubemap->descriptor.imageLayout) {
             throw std::runtime_error("Cubemap texture not properly initialized!");
         }
         std::vector<VkWriteDescriptorSet> writeDescriptorSets = {
@@ -285,36 +285,32 @@ void LightProbe::CaptureCubeMap(VkFormat format, VkQueue queue) {
     }
 
     {
-        VkPipelineLayoutCreateInfo pipelineLayoutCI = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayout, 1); // 初始化管线布局。
-        VK_CHECK_RESULT(vkCreatePipelineLayout(device->logicalDevice, &pipelineLayoutCI, nullptr, &pipelineLayout)); // 创建管线布局。
-
-        VkPipelineInputAssemblyStateCreateInfo inputAssemblyState = vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE); // 设置三角形列表拓扑。
-        VkPipelineRasterizationStateCreateInfo rasterizationState = vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE); // 设置填充模式，背面剔除，逆时针为正面。
-        VkPipelineColorBlendAttachmentState blendAttachmentState = vks::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE); // 设置颜色混合，启用所有通道。
-        VkPipelineColorBlendStateCreateInfo colorBlendState = vks::initializers::pipelineColorBlendStateCreateInfo(1, &blendAttachmentState); // 设置颜色混合状态。
-        VkPipelineDepthStencilStateCreateInfo depthStencilState = vks::initializers::pipelineDepthStencilStateCreateInfo(VK_TRUE, VK_TRUE, VK_COMPARE_OP_LESS_OR_EQUAL); // 启用深度和模板测试。
-        VkPipelineViewportStateCreateInfo viewportState = vks::initializers::pipelineViewportStateCreateInfo(1, 1); // 设置一个视口和剪刀。
-        VkPipelineMultisampleStateCreateInfo multisampleState = vks::initializers::pipelineMultisampleStateCreateInfo(VK_SAMPLE_COUNT_1_BIT); // 禁用多重采样。
-        std::vector<VkDynamicState> dynamicStateEnables = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR }; // 启用动态视口和剪刀。
-        VkPipelineDynamicStateCreateInfo dynamicState = vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables); // 设置动态状态。
-
-        std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages;
-        shaderStages[0] = iLoader->LoadShader("lightprobe/scene.vert.spv", VK_SHADER_STAGE_VERTEX_BIT); // 加载顶点着色器。
-        shaderStages[1] = iLoader->LoadShader("lightprobe/scene.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT); // 加载片段着色器。
-
-        VkGraphicsPipelineCreateInfo pipelineCI = vks::initializers::pipelineCreateInfo(pipelineLayout, renderPass);
-        pipelineCI.pInputAssemblyState = &inputAssemblyState;
-        pipelineCI.pRasterizationState = &rasterizationState;
-        pipelineCI.pColorBlendState = &colorBlendState;
-        pipelineCI.pMultisampleState = &multisampleState;
-        pipelineCI.pViewportState = &viewportState;
-        pipelineCI.pDepthStencilState = &depthStencilState;
-        pipelineCI.pDynamicState = &dynamicState;
-        pipelineCI.stageCount = 2;
-        pipelineCI.pStages = shaderStages.data();
-        pipelineCI.pVertexInputState = vkglTF::Vertex::getPipelineVertexInputState({ vkglTF::VertexComponent::Position, vkglTF::VertexComponent::Normal, vkglTF::VertexComponent::UV });
-
-        VK_CHECK_RESULT(vkCreateGraphicsPipelines(device->logicalDevice, VK_NULL_HANDLE, 1, &pipelineCI, nullptr, &pipeline));
+    VkPipelineLayoutCreateInfo pipelineLayoutCI = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayout, 1); // 初始化管线布局。
+    VK_CHECK_RESULT(vkCreatePipelineLayout(device->logicalDevice, &pipelineLayoutCI, nullptr, &pipelineLayout)); // 创建管线布局。
+    VkPipelineInputAssemblyStateCreateInfo inputAssemblyState = vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE); // 设置三角形列表拓扑。
+    VkPipelineRasterizationStateCreateInfo rasterizationState = vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE); // 设置填充模式，背面剔除，逆时针为正面。
+    VkPipelineColorBlendAttachmentState blendAttachmentState = vks::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE); // 设置颜色混合，启用所有通道。
+    VkPipelineColorBlendStateCreateInfo colorBlendState = vks::initializers::pipelineColorBlendStateCreateInfo(1, &blendAttachmentState); // 设置颜色混合状态。
+    VkPipelineDepthStencilStateCreateInfo depthStencilState = vks::initializers::pipelineDepthStencilStateCreateInfo(VK_TRUE, VK_TRUE, VK_COMPARE_OP_LESS_OR_EQUAL); // 启用深度和模板测试。
+    VkPipelineViewportStateCreateInfo viewportState = vks::initializers::pipelineViewportStateCreateInfo(1, 1); // 设置一个视口和剪刀。
+    VkPipelineMultisampleStateCreateInfo multisampleState = vks::initializers::pipelineMultisampleStateCreateInfo(VK_SAMPLE_COUNT_1_BIT); // 禁用多重采样。
+    std::vector<VkDynamicState> dynamicStateEnables = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR }; // 启用动态视口和剪刀。
+    VkPipelineDynamicStateCreateInfo dynamicState = vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables); // 设置动态状态。
+    std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages; shaderStages[0] = iLoader->LoadShader("lightprobesh2/genbrdflut.vert.spv", VK_SHADER_STAGE_VERTEX_BIT); // 加载顶点着色器。
+    shaderStages[0] = iLoader->LoadShader("lightprobesh2/scene.vert.spv", VK_SHADER_STAGE_VERTEX_BIT); // 加载顶点着色器。
+    shaderStages[1] = iLoader->LoadShader("lightprobesh2/scene.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT); // 加载片段着色器。
+    VkGraphicsPipelineCreateInfo pipelineCI = vks::initializers::pipelineCreateInfo(pipelineLayout, renderPass);
+    pipelineCI.pInputAssemblyState = &inputAssemblyState;
+    pipelineCI.pRasterizationState = &rasterizationState;
+    pipelineCI.pColorBlendState = &colorBlendState;
+    pipelineCI.pMultisampleState = &multisampleState;
+    pipelineCI.pViewportState = &viewportState;
+    pipelineCI.pDepthStencilState = &depthStencilState;
+    pipelineCI.pDynamicState = &dynamicState;
+    pipelineCI.stageCount = 2;
+    pipelineCI.pStages = shaderStages.data();
+    pipelineCI.pVertexInputState = vkglTF::Vertex::getPipelineVertexInputState({ vkglTF::VertexComponent::Position, vkglTF::VertexComponent::Normal, vkglTF::VertexComponent::UV });
+    VK_CHECK_RESULT(vkCreateGraphicsPipelines(device->logicalDevice, VK_NULL_HANDLE, 1, &pipelineCI, nullptr, &pipeline));
     }
 
 
@@ -428,9 +424,9 @@ void LightProbe::CaptureCubeMap(VkFormat format, VkQueue queue) {
     vkDestroyImageView(device->logicalDevice, lowResCubemap->view, nullptr);  // 销毁低分辨率cubemap视图。
     vkFreeMemory(device->logicalDevice, lowResCubemap->deviceMemory, nullptr);  // 释放cubemap内存。
     vkDestroyImage(device->logicalDevice, lowResCubemap->image, nullptr);  // 销毁cubemap图像。
-    vkDestroyImageView(device->logicalDevice, depthView, nullptr);  // 销毁深度视图。
-    vkFreeMemory(device->logicalDevice, depthMemory, nullptr);  // 释放深度内存。
-    vkDestroyImage(device->logicalDevice, depthImage, nullptr);  // 销毁深度图像。
+    //vkDestroyImageView(device->logicalDevice, depthView, nullptr);  // 销毁深度视图。转移到析构函数了
+    //vkFreeMemory(device->logicalDevice, depthMemory, nullptr);  // 释放深度内存。转移到析构函数了
+    //vkDestroyImage(device->logicalDevice, depthImage, nullptr);  // 销毁深度图像。转移到析构函数了
 }
 
 void LightProbe::GenSH(VkCommandBuffer cmdBuffer, VkQueue queue) {

@@ -8,27 +8,30 @@
 #include <cstdint>
 #include <string>
 #include "VulkanTexture.h"
-struct UBO {
-    glm::mat4 view[6];
-    glm::mat4 projection;
-};
+
 class LightProbe {
 public:
+    struct UBO {
+    glm::mat4 view[6];
+    glm::mat4 projection;
+    };
     struct SHCoefficients {
         glm::vec4 shCoeffs[9];
     };
     VkDescriptorBufferInfo shCoeffs;
-    LightProbe(vks::VulkanDevice* device_, IExampleInterfasce* example, glm::vec3 position_, uint32_t width_ = 1024, uint32_t height_ = 1024);
+    LightProbe(vks::VulkanDevice* device_, IExampleInterfasce* example, uint32_t width_ = 1024, uint32_t height_ = 1024);
     ~LightProbe();
-
+    void SetPosition(const glm::vec3& position_) { position = position_; }
+     // 获取内部的立方体贴图
+    std::shared_ptr<vks::TextureCubeMap> GetCubemap() const { return cubemap; }
     void SetExternalCubeMap(std::shared_ptr<vks::TextureCubeMap>& cubemap_);
     void prepare();
     void CaptureCubeMap(VkFormat format, VkQueue queue);
     void GenSH(VkCommandBuffer cmdBuffer, VkQueue queue);
     void UpdateBindings();
-
-private:
     void updateUBO(const struct UBO& ubo);
+private:
+   
     void drawScene(VkCommandBuffer cmdBuf);
 
     vks::VulkanDevice* device;
