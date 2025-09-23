@@ -3,6 +3,7 @@
 #include "VulkanTexture.h"
 #include "Pass.h"
 #include "UpsampleCubeMapPass.h"
+#include "Skybox.h"
 #include <glm/glm.hpp>
 #include <memory>
 #include <cstdint>
@@ -26,6 +27,8 @@ public:
     std::shared_ptr<vks::TextureCubeMap> GetCubemap() const { return cubemap; }
     void setmodel(std::shared_ptr<vkglTF::Model> model_) { model = model_; }
     void SetExternalCubeMap(std::shared_ptr<vks::TextureCubeMap>& cubemap_);
+    void setSkybox(Skybox* skybox_) { skybox = skybox_; }
+    void setPreviewModel(PreviewModel* previewModel_) { previewModel = previewModel_; }
     void prepare();
     void CaptureCubeMap(VkFormat format, VkQueue queue);
     void GenSH(VkCommandBuffer cmdBuffer, VkQueue queue);
@@ -42,6 +45,8 @@ private:
     uint32_t lowReswidth = 128, lowResheight = 128;
     std::shared_ptr<vks::TextureCubeMap> cubemap;
     std::shared_ptr<vkglTF::Model> model; // 假设场景模型
+    Skybox* skybox = nullptr; // 可选的天空盒对象
+    PreviewModel* previewModel = nullptr; // 可选的预览模型对象
 
     VkPipeline pipeline = VK_NULL_HANDLE;
     VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;

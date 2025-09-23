@@ -97,8 +97,24 @@ void LightProbe::updateUBO(const UBO& ubo) {
 }
 
 void LightProbe::drawScene(VkCommandBuffer cmdBuf) {
-    if (model) {
+    // 先绘制预览模型
+    if (previewModel) {
+        previewModel->Draw(cmdBuf, descriptorSet);
+    }
+    // 如果没有预览模型但有普通模型，则绘制普通模型
+    else if (model) {
         model->draw(cmdBuf);
+    }
+    
+    // 如果有天空盒，则绘制天空盒
+    if (skybox) {
+        // 保存当前管线和描述符集绑定状态
+        VkPipeline currentPipeline;
+        VkPipelineLayout currentLayout;
+        uint32_t currentSetCount;
+        
+        // 绘制天空盒
+        skybox->Draw(cmdBuf, descriptorSet);
     }
 }
 

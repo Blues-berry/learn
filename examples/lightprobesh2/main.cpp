@@ -387,6 +387,8 @@ void VulkanExample::CaptureCubemap(const glm::vec3& position) {
     probe = std::make_unique<LightProbe>(vulkanDevice, this, 1024, 1024); // 创建光照探针对象。
     probe->prepare();
     probe->SetPosition(position);  // 使用相机位置
+    probe->setSkybox(skybox.get());  // 设置天空盒引用
+    probe->setPreviewModel(previewModel.get());  // 设置预览模型引用
     // 不要 SetExternalCubeMap
     // 正确初始化UBO
     LightProbe::UBO ubo = {};
