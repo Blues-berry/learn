@@ -24,6 +24,7 @@ public:
     void SetPosition(const glm::vec3& position_) { position = position_; }
      // 获取内部的立方体贴图
     std::shared_ptr<vks::TextureCubeMap> GetCubemap() const { return cubemap; }
+    void setmodel(std::shared_ptr<vkglTF::Model> model_) { model = model_; }
     void SetExternalCubeMap(std::shared_ptr<vks::TextureCubeMap>& cubemap_);
     void prepare();
     void CaptureCubeMap(VkFormat format, VkQueue queue);

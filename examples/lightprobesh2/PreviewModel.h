@@ -35,6 +35,7 @@ public:
 	void PreparePSO(VkRenderPass renderPass, VkDescriptorSetLayout passLayout);
 
 	void ShowUI(vks::UIOverlay* overlay);
+    std::shared_ptr<vkglTF::Model> getModel() const { return model; }
 
 private:
 	void PreparePerBatchResource();

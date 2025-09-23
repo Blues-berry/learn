@@ -91,8 +91,24 @@ void UpsampleCubeMapPass::Generate(VkQueue queue, uint32_t lowWidth, uint32_t lo
     barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
     vkCmdPipelineBarrier(cmdBuf, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 
+    // 创建栅栏用于同步
+    VkFence fence;
+    VkFenceCreateInfo fenceInfo = vks::initializers::fenceCreateInfo();
+    vkCreateFence(device->logicalDevice, &fenceInfo, nullptr, &fence);
+    
+    // 提交命令缓冲区（使用设备特定的flushCommandBuffer方法）
     device->flushCommandBuffer(cmdBuf, queue);
+    
+    // 提交一个空的提交信息到队列，附加栅栏，用于等待命令缓冲区完成
+    VkSubmitInfo submitInfo = vks::initializers::submitInfo();
+    submitInfo.commandBufferCount = 0;  // 不提交新的命令缓冲区
+    submitInfo.pCommandBuffers = nullptr;
+    
+    vkQueueSubmit(queue, 1, &submitInfo, fence);
+    vkWaitForFences(device->logicalDevice, 1, &fence, VK_TRUE, UINT64_MAX);
+    vkDestroyFence(device->logicalDevice, fence, nullptr);
 }
+
 
 void UpsampleCubeMapPass::Dispatch(VkCommandBuffer cmd) {
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);

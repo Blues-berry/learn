@@ -296,7 +296,7 @@ void LightProbe::CaptureCubeMap(VkFormat format, VkQueue queue) {
     VkPipelineMultisampleStateCreateInfo multisampleState = vks::initializers::pipelineMultisampleStateCreateInfo(VK_SAMPLE_COUNT_1_BIT); // 禁用多重采样。
     std::vector<VkDynamicState> dynamicStateEnables = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR }; // 启用动态视口和剪刀。
     VkPipelineDynamicStateCreateInfo dynamicState = vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables); // 设置动态状态。
-    std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages; shaderStages[0] = iLoader->LoadShader("lightprobesh2/genbrdflut.vert.spv", VK_SHADER_STAGE_VERTEX_BIT); // 加载顶点着色器。
+    std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages; 
     shaderStages[0] = iLoader->LoadShader("lightprobesh2/scene.vert.spv", VK_SHADER_STAGE_VERTEX_BIT); // 加载顶点着色器。
     shaderStages[1] = iLoader->LoadShader("lightprobesh2/scene.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT); // 加载片段着色器。
     VkGraphicsPipelineCreateInfo pipelineCI = vks::initializers::pipelineCreateInfo(pipelineLayout, renderPass);
@@ -411,11 +411,34 @@ void LightProbe::CaptureCubeMap(VkFormat format, VkQueue queue) {
     vkCmdEndRenderPass(cmdBuf);  // 结束渲染通行证。
     // 提交命令缓冲
     device->flushCommandBuffer(cmdBuf, queue);
+
+
+
+    // 创建一个栅栏并等待命令缓冲区完成执行
+    VkFence fence;
+    VkFenceCreateInfo fenceInfo = vks::initializers::fenceCreateInfo();
+    vkCreateFence(device->logicalDevice, &fenceInfo, nullptr, &fence);
+
+    VkSubmitInfo submitInfo = vks::initializers::submitInfo();
+    vkQueueSubmit(queue, 1, &submitInfo, fence);
+    vkWaitForFences(device->logicalDevice, 1, &fence, VK_TRUE, UINT64_MAX);
+    vkDestroyFence(device->logicalDevice, fence, nullptr);
+
     // --- 使用计算着色器上采样 ---
     // 上采样低分辨率立方体贴图到高分辨率，使用自定义计算通行证。
     UpsampleCubeMapPass upsamplePass(device, iLoader);  // 创建上采样通行证（自定义类，使用计算着色器）。
     upsamplePass.SetCubeMaps(lowResCubemap, cubemap);  // 设置输入（低分辨率）和输出（高分辨率）立方体贴图（cubemap假设已创建）。
     upsamplePass.Generate(queue, lowReswidth, lowResheight, width, height);  // 生成：提交到队列，从低分辨率尺寸上采样到高分辨率（width/height假设已定义）。
+
+
+    // 等待上采样操作完成
+    VkFence upsampleFence;
+    vkCreateFence(device->logicalDevice, &fenceInfo, nullptr, &upsampleFence);
+    vkQueueSubmit(queue, 1, &submitInfo, upsampleFence);
+    vkWaitForFences(device->logicalDevice, 1, &upsampleFence, VK_TRUE, UINT64_MAX);
+    vkDestroyFence(device->logicalDevice, upsampleFence, nullptr);
+
+
 
     // --- 清理 ---
     // 释放资源：帧缓冲、渲染通行证、低分辨率cubemap视图/内存/图像、深度视图/内存/图像。
@@ -424,9 +447,7 @@ void LightProbe::CaptureCubeMap(VkFormat format, VkQueue queue) {
     vkDestroyImageView(device->logicalDevice, lowResCubemap->view, nullptr);  // 销毁低分辨率cubemap视图。
     vkFreeMemory(device->logicalDevice, lowResCubemap->deviceMemory, nullptr);  // 释放cubemap内存。
     vkDestroyImage(device->logicalDevice, lowResCubemap->image, nullptr);  // 销毁cubemap图像。
-    //vkDestroyImageView(device->logicalDevice, depthView, nullptr);  // 销毁深度视图。转移到析构函数了
-    //vkFreeMemory(device->logicalDevice, depthMemory, nullptr);  // 释放深度内存。转移到析构函数了
-    //vkDestroyImage(device->logicalDevice, depthImage, nullptr);  // 销毁深度图像。转移到析构函数了
+
 }
 
 void LightProbe::GenSH(VkCommandBuffer cmdBuffer, VkQueue queue) {
