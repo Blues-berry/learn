@@ -9,7 +9,7 @@
 #include <cstdint>
 #include <string>
 #include "VulkanTexture.h"
-
+#include "PreviewModel.h"
 class LightProbe {
 public:
     struct UBO {
