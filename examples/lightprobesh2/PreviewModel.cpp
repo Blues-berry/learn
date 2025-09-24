@@ -17,7 +17,6 @@ void PreviewModel::Destroy()
 	localBuffer.destroy();
 	materialBuffer.destroy();
 	model = nullptr;
-
 	if (descriptorPool != VK_NULL_HANDLE)
 	{
 		vkDestroyDescriptorPool(device->logicalDevice, descriptorPool, nullptr);
@@ -30,32 +29,36 @@ void PreviewModel::Destroy()
 		descriptorSetLayout = VK_NULL_HANDLE;
 	}
 
-	if (pipelineLayout != VK_NULL_HANDLE)
-	{
-		vkDestroyPipelineLayout(device->logicalDevice, pipelineLayout, nullptr);
-		pipelineLayout = VK_NULL_HANDLE;
+	for (auto& tech : techniques) {
+		if (tech.pipelineLayout != VK_NULL_HANDLE)
+		{
+			vkDestroyPipelineLayout(device->logicalDevice, tech.pipelineLayout, nullptr);
+			tech.pipelineLayout = VK_NULL_HANDLE;
+		}
+
+		if (tech.pso != VK_NULL_HANDLE)
+		{
+			vkDestroyPipeline(device->logicalDevice, tech.pso, nullptr);
+			tech.pso = VK_NULL_HANDLE;
+		}
 	}
 
-	if (pso != VK_NULL_HANDLE)
-	{
-		vkDestroyPipeline(device->logicalDevice, pso, nullptr);
-		pso = VK_NULL_HANDLE;
-	}
 }
 
-void PreviewModel::Draw(VkCommandBuffer cmd, VkDescriptorSet globalSet)
+void PreviewModel::Draw(VkCommandBuffer cmd, VkDescriptorSet globalSet, ETechnique tech)
 {
 	if (!model)
 	{
 		return;
 	}
 
+	uint32_t techIdx = (uint32_t)tech;
 	std::vector<VkDescriptorSet> sets = {
 		globalSet, descriptorSet
 	};
 
-	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, static_cast<uint32_t>(sets.size()), sets.data(), 0, NULL);
-	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pso);
+	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, techniques[techIdx].pipelineLayout, 0, static_cast<uint32_t>(sets.size()), sets.data(), 0, NULL);
+	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, techniques[techIdx].pso);
 	model->draw(cmd);
 }
 
@@ -106,7 +109,7 @@ void PreviewModel::UpdateSet()
 	vkUpdateDescriptorSets(device->logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, NULL);
 }
 
-void PreviewModel::PreparePSO(VkRenderPass renderPass, VkDescriptorSetLayout passLayout)
+void PreviewModel::PreparePSO(VkRenderPass renderPass, VkDescriptorSetLayout passLayout, ETechnique technique)
 {
 	VkDevice rawDevice = device->logicalDevice;
 
@@ -148,13 +151,13 @@ void PreviewModel::PreparePSO(VkRenderPass renderPass, VkDescriptorSetLayout pas
 	// Pipeline layout 初始化管线布局创建信息，指定描述符集布局。
 	VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(setLayotus.data(), static_cast<uint32_t>(setLayotus.size()));
 	// 创建管线布局。
-	VK_CHECK_RESULT(vkCreatePipelineLayout(rawDevice, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout));
+	VK_CHECK_RESULT(vkCreatePipelineLayout(rawDevice, &pipelineLayoutCreateInfo, nullptr, &techniques[(uint32_t)technique].pipelineLayout));
 	// 定义两个着色器阶段（顶点和片段）。
 	std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages;
 
 	// Pipelines
 	// 初始化图形管线创建信息，指定管线布局和渲染通道。
-	VkGraphicsPipelineCreateInfo pipelineCI = vks::initializers::pipelineCreateInfo(pipelineLayout, renderPass);
+	VkGraphicsPipelineCreateInfo pipelineCI = vks::initializers::pipelineCreateInfo(techniques[(uint32_t)technique].pipelineLayout, renderPass);
 	// 设置输入组装状态。
 	pipelineCI.pInputAssemblyState = &inputAssemblyState;
 	// 设置光栅化状态。
@@ -180,7 +183,7 @@ void PreviewModel::PreparePSO(VkRenderPass renderPass, VkDescriptorSetLayout pas
 
 	shaderStages[0] = iLoader->LoadShader("lightprobesh2/lightprobesh.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
 	shaderStages[1] = iLoader->LoadShader("lightprobesh2/lightprobesh.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
-	VK_CHECK_RESULT(vkCreateGraphicsPipelines(rawDevice, VK_NULL_HANDLE, 1, &pipelineCI, nullptr, &pso));
+	VK_CHECK_RESULT(vkCreateGraphicsPipelines(rawDevice, VK_NULL_HANDLE, 1, &pipelineCI, nullptr, &techniques[(uint32_t)technique].pso));
 }
 
 void PreviewModel::ShowUI(vks::UIOverlay* overlay)

@@ -4,8 +4,54 @@
 
 namespace vks {
     struct VulkanDevice;
-    struct TextureCubeMap;
+    class TextureCubeMap;
 }
+
+class CaptureScenePass {
+public:
+    explicit CaptureScenePass(vks::VulkanDevice* device_, IExampleInterfasce* example, VkFormat format, uint32_t width, uint32_t height);
+    ~CaptureScenePass();
+
+    struct GlobalUbo {
+        glm::mat4 viewproj[6];
+        glm::vec4 cameraPos[6];
+        glm::vec4 mainLight;
+        float exposure = 4.5f;
+        float gamma = 2.2f;
+    };
+
+    void UpdateGlobal(const GlobalUbo& ubo);
+
+    void Draw(VkCommandBuffer cmd, std::function<void(VkCommandBuffer)>&& encoder);
+
+    VkRenderPass renderPass;
+    VkDescriptorSet descriptorSet;
+    VkDescriptorSetLayout descriptorSetLayout;
+private:
+    void PreparePerPassResource();
+    void PrepareFrameBuffer();
+    void UpdateBindings();
+
+    vks::VulkanDevice* device;
+    IExampleInterfasce* iLoader;
+
+    uint32_t width;
+    uint32_t height;
+
+    std::shared_ptr<RenderTargetCube> cube;
+    std::shared_ptr<DepthStencil> depthStencil;
+
+    std::shared_ptr<ResourceView> colorView;
+    std::shared_ptr<ResourceView> dsView;
+
+    std::vector<VkClearValue> clearValue;
+
+    VkDescriptorPool descriptorPool;
+
+    VkFramebuffer framebuffer;
+    VkRenderPassBeginInfo beginInfo;
+    vks::Buffer globalBuffer;
+};
 
 class UpsampleCubeMapPass : public ComputePass {
 public:

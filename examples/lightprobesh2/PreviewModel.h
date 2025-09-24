@@ -2,6 +2,7 @@
 
 #include "VulkanglTFModel.h"
 #include "VulkanUIOverlay.h"
+#include "Pass.h"
 #include "ILoader.h"
 #include "glm/glm.hpp"
 
@@ -31,8 +32,8 @@ public:
 
 	void UpdateModel(const std::shared_ptr<vkglTF::Model>& model);
 	void Destroy();
-	void Draw(VkCommandBuffer cmd, VkDescriptorSet globalSet);
-	void PreparePSO(VkRenderPass renderPass, VkDescriptorSetLayout passLayout);
+	void Draw(VkCommandBuffer cmd, VkDescriptorSet globalSet, ETechnique tech);
+	void PreparePSO(VkRenderPass renderPass, VkDescriptorSetLayout passLayout, ETechnique technique);
 
 	void ShowUI(vks::UIOverlay* overlay);
     std::shared_ptr<vkglTF::Model> getModel() const { return model; }
@@ -45,18 +46,16 @@ private:
 	IExampleInterfasce* iLoader;
 	std::shared_ptr<vkglTF::Model> model;
 
+	VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
 	VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
 	VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
-	VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
-	VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
+	std::array<Technique, (uint32_t)ETechnique::NUM> techniques;
 
 	LocalBuffer localData;
 	vks::Buffer localBuffer;
 
 	MaterialBuffer materialData;
 	vks::Buffer materialBuffer;
-
-	VkPipeline pso = VK_NULL_HANDLE;
 
 	bool materialDirty = false;
 };

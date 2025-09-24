@@ -191,7 +191,6 @@ private:
     bool globalDirty = true;
     // 全局数据脏标志，表示是否需要更新全局数据。
     MainPass::GlobalUbo mainPassData = {};
-    LightProbe::UBO probeUbo = {};
     // 主渲染通道的统一缓冲区对象（UBO）。
     std::unique_ptr<MainPass> mainPass;
     // 主渲染通道对象。
@@ -200,7 +199,6 @@ private:
     std::unique_ptr<GenSHComputePass> shGenPass;
     // 球谐（SH）计算通道。
     std::unique_ptr<GenIBLPass> genIBL;
-    // 图像基照明（IBL）生成通道。
 
     // 场景相关成员。
     std::unique_ptr<Skybox> skybox;
@@ -235,11 +233,11 @@ void VulkanExample::PrepareScene()
     // 准备场景，初始化天空盒和预览模型。
     skybox = std::make_unique<Skybox>(vulkanDevice, this); // 创建天空盒对象。
     skybox->SetModel(skyboxModel); // 设置天空盒模型。
-    skybox->PreparePSO(renderPass, mainPass->descriptorSetLayout); // 准备天空盒的管线状态对象（PSO）。
+    skybox->PreparePSO(renderPass, mainPass->descriptorSetLayout, ETechnique::MAIN); // 准备天空盒的管线状态对象（PSO）。
     skybox->UpdateCubemap(cubeMaps[skyboxIndex]); // 设置初始立方体贴图。
 
     previewModel = std::make_unique<PreviewModel>(vulkanDevice, this); // 创建预览模型对象。
-    previewModel->PreparePSO(renderPass, mainPass->descriptorSetLayout); // 准备预览模型的 PSO。
+    previewModel->PreparePSO(renderPass, mainPass->descriptorSetLayout, ETechnique::MAIN); // 准备预览模型的 PSO。
     previewModel->UpdateModel(previewModels[modelIndex]); // 设置初始预览模型。
 }
 
@@ -349,11 +347,15 @@ void VulkanExample::prepareData()
 
 void VulkanExample::drawFrame(VkCommandBuffer cmd)
 {
+    if (probe) {
+        probe->CaptureCubeMap(queue, cmd);
+    }
+
     // 绘制单帧。
     mainPass->Draw(cmd, frameBuffers[currentBuffer], width, height, [this](VkCommandBuffer cmd) {
         // 匿名函数：记录绘制命令。
-        skybox->Draw(cmd, mainPass->descriptorSet); // 绘制天空盒。
-        previewModel->Draw(cmd, mainPass->descriptorSet); // 绘制预览模型。
+        skybox->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); // 绘制天空盒。
+        previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); // 绘制预览模型。
         drawUI(cmd); // 绘制 UI（基类方法）。
     });
 }
@@ -385,124 +387,22 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
 void VulkanExample::CaptureCubemap(const glm::vec3& position) {
     
     probe = std::make_unique<LightProbe>(vulkanDevice, this, 1024, 1024); // 创建光照探针对象。
-    probe->prepare();
     probe->SetPosition(position);  // 使用相机位置
     probe->setSkybox(skybox.get());  // 设置天空盒引用
     probe->setPreviewModel(previewModel.get());  // 设置预览模型引用
-    // 不要 SetExternalCubeMap
-    // 正确初始化UBO
-    LightProbe::UBO ubo = {};
-    // 设置投影矩阵
-    ubo.projection = glm::perspective(glm::radians(90.0f), 1.0f, 0.1f, 256.0f);
-    // 设置视图矩阵
-    std::array<glm::mat4, 6> viewMatrices = {
-        glm::lookAt(position, position + glm::vec3(1.0f, 0.0f, 0.0f), glm::vec3(0.0f, -1.0f, 0.0f)),  // +X面
-        glm::lookAt(position, position + glm::vec3(-1.0f, 0.0f, 0.0f), glm::vec3(0.0f, -1.0f, 0.0f)),  // -X面
-        glm::lookAt(position, position + glm::vec3(0.0f, 1.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f)),  // +Y面
-        glm::lookAt(position, position + glm::vec3(0.0f, -1.0f, 0.0f), glm::vec3(0.0f, 0.0f, -1.0f)),  // -Y面
-        glm::lookAt(position, position + glm::vec3(0.0f, 0.0f, 1.0f), glm::vec3(0.0f, -1.0f, 0.0f)),  // +Z面
-        glm::lookAt(position, position + glm::vec3(0.0f, 0.0f, -1.0f), glm::vec3(0.0f, -1.0f, 0.0f))   // -Z面
-    };
-    for (uint32_t face = 0; face < 6; ++face) {
-        ubo.view[face] = viewMatrices[face];
-    }
-    probe->updateUBO(ubo);  // 使用正确初始化的UBO
+
     probe->setmodel(previewModel->getModel());
-
-        // 创建一个栅栏用于同步
-    VkFence fence;
-    VkFenceCreateInfo fenceInfo = vks::initializers::fenceCreateInfo();
-    vkCreateFence(vulkanDevice->logicalDevice, &fenceInfo, nullptr, &fence);
         // 捕获立方体贴图
-    probe->CaptureCubeMap(VK_FORMAT_R16G16B16A16_SFLOAT, queue);
+    probe->CaptureCubeMap(queue);
     
-     // 等待 CaptureCubeMap 完成
-    VkSubmitInfo submitInfo = vks::initializers::submitInfo();
-    vkQueueSubmit(queue, 1, &submitInfo, fence);
-    vkWaitForFences(vulkanDevice->logicalDevice, 1, &fence, VK_TRUE, UINT64_MAX);
-    vkResetFences(vulkanDevice->logicalDevice, 1, &fence);
-   // 生成球谐系数
-    VkCommandBuffer cmdBuf = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
-    probe->GenSH(cmdBuf, queue);  // 启用 GenSH
-    vulkanDevice->flushCommandBuffer(cmdBuf, queue);
-    
-    // 等待 GenSH 完成
-    vkQueueSubmit(queue, 1, &submitInfo, fence);
-    vkWaitForFences(vulkanDevice->logicalDevice, 1, &fence, VK_TRUE, UINT64_MAX);
-    vkResetFences(vulkanDevice->logicalDevice, 1, &fence);
-    vkDestroyFence(vulkanDevice->logicalDevice, fence, nullptr);
-
-
-    // 获取捕获的立方体贴图，并创建一个新的副本
-    auto capturedCubemap = std::make_shared<vks::TextureCubeMap>();
-    auto originalCubemap = probe->GetCubemap();
-    
-    // 复制图像创建信息
-    VkImageCreateInfo imageInfo = {};
-    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.format = VK_FORMAT_R16G16B16A16_SFLOAT;
-    imageInfo.extent.width = 1024;
-    imageInfo.extent.height = 1024;
-    imageInfo.extent.depth = 1;
-    imageInfo.mipLevels = 1;
-    imageInfo.arrayLayers = 6;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
-    imageInfo.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
-    
-    // 创建新图像
-    VK_CHECK_RESULT(vkCreateImage(vulkanDevice->logicalDevice, &imageInfo, nullptr, &capturedCubemap->image));
-    
-    // 分配内存
-    VkMemoryRequirements memReqs;
-    vkGetImageMemoryRequirements(vulkanDevice->logicalDevice, capturedCubemap->image, &memReqs);
-    VkMemoryAllocateInfo memAllocInfo = {};
-    memAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    memAllocInfo.allocationSize = memReqs.size;
-    memAllocInfo.memoryTypeIndex = vulkanDevice->getMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    VK_CHECK_RESULT(vkAllocateMemory(vulkanDevice->logicalDevice, &memAllocInfo, nullptr, &capturedCubemap->deviceMemory));
-    VK_CHECK_RESULT(vkBindImageMemory(vulkanDevice->logicalDevice, capturedCubemap->image, capturedCubemap->deviceMemory, 0));
-    
-    // 创建图像视图
-    VkImageViewCreateInfo viewInfo = {};
-    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
-    viewInfo.format = VK_FORMAT_R16G16B16A16_SFLOAT;
-    viewInfo.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 6 };
-    viewInfo.image = capturedCubemap->image;
-    VK_CHECK_RESULT(vkCreateImageView(vulkanDevice->logicalDevice, &viewInfo, nullptr, &capturedCubemap->view));
-    
-    // 创建采样器
-    VkSamplerCreateInfo samplerInfo = {};
-    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.magFilter = VK_FILTER_LINEAR;
-    samplerInfo.minFilter = VK_FILTER_LINEAR;
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.maxAnisotropy = 1.0f;
-    samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
-    samplerInfo.compareOp = VK_COMPARE_OP_NEVER;
-    samplerInfo.minLod = 0.0f;
-    samplerInfo.maxLod = 1.0f;
-    VK_CHECK_RESULT(vkCreateSampler(vulkanDevice->logicalDevice, &samplerInfo, nullptr, &capturedCubemap->sampler));
-    
-    // 设置描述符
-    capturedCubemap->descriptor.sampler = capturedCubemap->sampler;
-    capturedCubemap->descriptor.imageView = capturedCubemap->view;
-    capturedCubemap->descriptor.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    
-    // 添加新 cubemap
-    cubeMaps.push_back(capturedCubemap);
-    cubemapNames.push_back("Captured_" + std::to_string(cubeMaps.size() - 1));
-    skyboxIndex = cubeMaps.size() - 1;  // 更新索引
-    // 等待一个额外的帧，确保资源完全准备好
-    // 这可以确保驱动程序有足够的时间处理资源
-    vkDeviceWaitIdle(vulkanDevice->logicalDevice);
-    UpdateSkyBox();  // 更新天空盒、SH、IBL
-    lightProbes.push_back(std::move(probe));  // 保留 probe，防止采样器被销毁
+    //// 添加新 cubemap
+    //cubeMaps.push_back(capturedCubemap);
+    //cubemapNames.push_back("Captured_" + std::to_string(cubeMaps.size() - 1));
+    //skyboxIndex = cubeMaps.size() - 1;  // 更新索引
+    //// 等待一个额外的帧，确保资源完全准备好
+    //// 这可以确保驱动程序有足够的时间处理资源
+    //vkDeviceWaitIdle(vulkanDevice->logicalDevice);
+    //UpdateSkyBox();  // 更新天空盒、SH、IBL
+    //lightProbes.push_back(std::move(probe));  // 保留 probe，防止采样器被销毁
 }
 VULKAN_EXAMPLE_MAIN()

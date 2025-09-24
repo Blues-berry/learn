@@ -3,6 +3,7 @@
 #include "VulkanglTFModel.h"
 #include "VulkanTexture.h"
 #include "ILoader.h"
+#include "Pass.h"
 
 namespace vls
 {
@@ -21,9 +22,9 @@ public:
 
     void SetModel(const std::shared_ptr<vkglTF::Model> &model_);
     void UpdateCubemap(const std::shared_ptr<vks::TextureCubeMap>& tex);
-    void PreparePSO(VkRenderPass renderPass, VkDescriptorSetLayout passLayout);
+    void PreparePSO(VkRenderPass renderPass, VkDescriptorSetLayout passLayout, ETechnique technique);
     void Destroy();
-    void Draw(VkCommandBuffer cmd, VkDescriptorSet globalSet);
+    void Draw(VkCommandBuffer cmd, VkDescriptorSet globalSet, ETechnique technique);
     void Update(const glm::mat4& view);
 
 private:
@@ -35,14 +36,13 @@ private:
 
     std::shared_ptr<vkglTF::Model> model;
 
+    VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
     VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
     VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
-    VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
-    VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
+    std::array<Technique, (uint32_t)ETechnique::NUM> techniques;
+
 
     LocalBuffer localData;
     vks::Buffer localBuffer;
     std::shared_ptr<vks::TextureCubeMap> cubemap;
-
-    VkPipeline pso = VK_NULL_HANDLE;
 };

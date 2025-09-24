@@ -11,6 +11,68 @@ namespace vks
     struct VulkanDevice;
 }
 
+struct Technique {
+    VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
+    VkPipeline pso = VK_NULL_HANDLE;
+};
+
+enum class ETechnique : uint32_t {
+    MAIN = 0,
+    CAPTURE_SCENE = 1,
+    NUM
+};
+
+class RenderAttachment {
+public:
+    RenderAttachment(vks::VulkanDevice* device_, VkImageType type, VkFormat format, VkImageUsageFlags usage, uint32_t width, uint32_t height, uint32_t layer);
+    virtual ~RenderAttachment();
+
+    VkImage GetImage() const { return image; }
+    VkFormat GetFormat() const { return format; }
+
+    vks::VulkanDevice* device;
+private:
+    uint32_t width;
+    uint32_t height;
+    uint32_t layer;
+    VkFormat format;
+    VkImageType type;
+    VkImage image;
+    VkDeviceMemory deviceMemory;
+};
+
+class DepthStencil : public RenderAttachment {
+public:
+    DepthStencil(vks::VulkanDevice* device_, VkFormat format, uint32_t width, uint32_t height, uint32_t layer = 1);
+    ~DepthStencil() override = default;
+};
+
+class RenderTarget2D : public RenderAttachment {
+public:
+    RenderTarget2D(vks::VulkanDevice* device_, VkFormat format, uint32_t width, uint32_t height, uint32_t layer = 1);
+    ~RenderTarget2D() override = default;
+};
+
+class RenderTargetCube : public RenderTarget2D {
+public:
+    RenderTargetCube(vks::VulkanDevice* device_, VkFormat format, uint32_t width, uint32_t height);
+    ~RenderTargetCube() override = default;
+};
+
+class ResourceView {
+public:
+    ResourceView(const std::shared_ptr<RenderAttachment>& attachment, VkImageViewType type, uint32_t firstSlice, uint32_t sliceCount, VkImageAspectFlags flags);
+    ~ResourceView();
+
+    VkImageView GetView() const { return imageView; }
+private:
+    void CreateView();
+
+    std::shared_ptr<RenderAttachment> attachment;
+    VkImageViewCreateInfo viewCI;
+    VkImageView imageView = VK_NULL_HANDLE;
+};
+
 class ComputePass
 {
 public:

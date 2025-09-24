@@ -925,3 +925,89 @@ void GenIBLPass::FeedPrefilteredMap(VkDescriptorImageInfo& descriptor)
     descriptor.sampler = irradiance[0]->GetDefaultSampler(); // 设置采样器。
     descriptor.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL; // 设置图像布局为着色器只读。
 }
+
+
+RenderAttachment::RenderAttachment(vks::VulkanDevice* device_, VkImageType t, VkFormat fmt, VkImageUsageFlags usage, uint32_t w, uint32_t h, uint32_t l)
+    : device(device_)
+    , width(w)
+    , height(h)
+    , layer(l)
+    , format(fmt)
+    , type(t)
+{
+    // 创建帧缓冲区，用于 BRDF 查找表渲染。
+    VkImageCreateInfo imageCI = vks::initializers::imageCreateInfo(); // 初始化图像创建信息。
+    imageCI.imageType = type; // 设置图像类型
+    imageCI.format = format; // 设置图像格式。
+    imageCI.extent.width = width; // 设置图像宽度。
+    imageCI.extent.height = height; // 设置图像高度。
+    imageCI.extent.depth = 1; // 设置图像深度为 1。
+    imageCI.mipLevels = 1; // 设置单级 Mipmap。
+    imageCI.arrayLayers = layer; // 设置单层。
+    imageCI.samples = VK_SAMPLE_COUNT_1_BIT; // 设置单采样。
+    imageCI.tiling = VK_IMAGE_TILING_OPTIMAL; // 设置图像平铺为最优。
+    imageCI.usage = usage; // 设置图像用途为颜色附件和采样。
+    VK_CHECK_RESULT(vkCreateImage(device->logicalDevice, &imageCI, nullptr, &image)); // 创建图像。
+
+    VkMemoryAllocateInfo memAlloc = vks::initializers::memoryAllocateInfo(); // 初始化内存分配信息。
+    VkMemoryRequirements memReqs = {}; // 初始化内存需求。
+    vkGetImageMemoryRequirements(device->logicalDevice, image, &memReqs); // 获取图像内存需求。
+    memAlloc.allocationSize = memReqs.size; // 设置分配大小。
+    memAlloc.memoryTypeIndex = device->getMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT); // 获取设备本地内存类型。
+    VK_CHECK_RESULT(vkAllocateMemory(device->logicalDevice, &memAlloc, nullptr, &deviceMemory)); // 分配内存。
+    VK_CHECK_RESULT(vkBindImageMemory(device->logicalDevice, image, deviceMemory, 0)); // 绑定图像内存。
+}
+
+RenderAttachment::~RenderAttachment()
+{
+    if (image != VK_NULL_HANDLE) {
+        vkDestroyImage(device->logicalDevice, image, nullptr);
+    }
+    if (deviceMemory != VK_NULL_HANDLE) {
+        vkFreeMemory(device->logicalDevice, deviceMemory, nullptr);
+    }
+}
+
+DepthStencil::DepthStencil(vks::VulkanDevice* device_, VkFormat format, uint32_t width, uint32_t height, uint32_t layer)
+    : RenderAttachment(device_, VK_IMAGE_TYPE_2D, format, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, width, height, layer)
+{
+}
+
+RenderTarget2D::RenderTarget2D(vks::VulkanDevice* device_, VkFormat fmt, uint32_t width, uint32_t height, uint32_t layer)
+    : RenderAttachment(device_, VK_IMAGE_TYPE_2D, fmt, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, width, height, layer)
+{
+}
+
+RenderTargetCube::RenderTargetCube(vks::VulkanDevice* device_, VkFormat fmt, uint32_t width, uint32_t height)
+    : RenderTarget2D(device_, fmt, width, height, 6)
+{
+}
+
+ResourceView::ResourceView(const std::shared_ptr<RenderAttachment>& att, VkImageViewType type, uint32_t firstSlice, uint32_t sliceCount, VkImageAspectFlags flags)
+    : attachment(att)
+    , viewCI{vks::initializers::imageViewCreateInfo()}
+{
+    viewCI.viewType = type;
+    viewCI.format = attachment->GetFormat();
+    viewCI.subresourceRange.aspectMask = flags;
+    viewCI.subresourceRange.baseMipLevel = 0;
+    viewCI.subresourceRange.levelCount = 1;
+    viewCI.subresourceRange.baseArrayLayer = firstSlice;
+    viewCI.subresourceRange.layerCount = sliceCount;
+    viewCI.image = attachment->GetImage();
+
+    CreateView();
+}
+
+ResourceView::~ResourceView()
+{
+    if (attachment && imageView != VK_NULL_HANDLE) {
+        vkDestroyImageView(attachment->device->logicalDevice, imageView, nullptr);
+    }
+}
+
+void ResourceView::CreateView()
+{
+    VK_CHECK_RESULT(vkCreateImageView(attachment->device->logicalDevice, &viewCI, nullptr, &imageView));
+
+}
