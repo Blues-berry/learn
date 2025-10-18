@@ -1,146 +1,14 @@
-/*
-* Vulkan Example - glTF scene loading and rendering
-*
-* Copyright (C) 2020-2023 by Sascha Willems - www.saschawillems.de
-*
-* This code is licensed under the MIT license (MIT)[](http://opensource.org/licenses/MIT)
-*/
+#include "gltfload.h"
 
-/*
- * Shows how to load and display a simple scene from a glTF file
- * Note that this isn't a complete glTF loader and only basic functions are shown here
- * This means no complex materials, no animations, no skins, etc.
- * For details on how glTF 2.0 works, see the official spec at https://github.com/KhronosGroup/glTF/tree/master/specification/2.0
- *
- * Other samples will load models using a dedicated model loader with more features (see base/VulkanglTFModel.hpp)
- *
- * If you are looking for a complete glTF implementation, check out https://github.com/SaschaWillems/Vulkan-glTF-PBR/
- */
 
-// 定义宏以启用 tinygltf 的实现
-#define TINYGLTF_IMPLEMENTATION
-// 定义宏以启用 stb_image 的实现，用于图像加载
-#define STB_IMAGE_IMPLEMENTATION
-// 定义宏以禁用 tinygltf 的图像写入功能
-#define TINYGLTF_NO_STB_IMAGE_WRITE
-// 如果是 Android 平台，定义宏以从资产加载 glTF
-#ifdef VK_USE_PLATFORM_ANDROID_KHR
-#define TINYGLTF_ANDROID_LOAD_FROM_ASSETS
-#endif
-// 包含 tinygltf 头文件，用于 glTF 文件解析
-#include "tiny_gltf.h"
 
-// 包含 Vulkan 示例基类头文件，提供 Vulkan 初始化和渲染基础
-#include "vulkanexamplebase.h"
-
-// 定义 VulkanglTFModel 类，用于存储和渲染 glTF 模型
-// Contains everything required to render a glTF model in Vulkan
-// This class is heavily simplified (compared to glTF's feature set) but retains the basic glTF structure
-class VulkanglTFModel
-{
-public:
-	// The class requires some Vulkan objects so it can create it's own resources
-	// 指向 Vulkan 设备的指针，用于资源创建
-	vks::VulkanDevice* vulkanDevice;
-	// 复制队列，用于数据上传到 GPU
-	VkQueue copyQueue;
-
-	// The vertex layout for the samples' model
-	// 定义顶点结构，包括位置、法线、UV 和颜色
-	struct Vertex {
-		glm::vec3 pos;
-		glm::vec3 normal;
-		glm::vec2 uv;
-		glm::vec3 color;
-	};
-
-	// Single vertex buffer for all primitives
-	// 所有图元的单一顶点缓冲区
-	struct {
-		VkBuffer buffer;
-		VkDeviceMemory memory;
-	} vertices;
-
-	// Single index buffer for all primitives
-	// 所有图元的单一索引缓冲区
-	struct {
-		int count;
-		VkBuffer buffer;
-		VkDeviceMemory memory;
-	} indices;
-
-	// The following structures roughly represent the glTF scene structure
-	// To keep things simple, they only contain those properties that are required for this sample
-	// 前向声明 Node 结构
-	struct Node;
-
-	// A primitive contains the data for a single draw call
-	// 图元结构，包含绘制调用所需的数据
-	struct Primitive {
-		uint32_t firstIndex;  // 第一个索引偏移
-		uint32_t indexCount;  // 索引数量
-		int32_t materialIndex;  // 材质索引
-	};
-
-	// Contains the node's (optional) geometry and can be made up of an arbitrary number of primitives
-	// 网格结构，包含多个图元
-	struct Mesh {
-		std::vector<Primitive> primitives;
-		
- 	};
-
-	// A node represents an object in the glTF scene graph
-	// 节点结构，表示 glTF 场景图中的对象
-	struct Node {
-		Node* parent;  // 父节点
-		std::vector<Node*> children;  // 子节点列表
-		Mesh mesh;  // 网格数据
-		glm::mat4 matrix;  // 变换矩阵
-		// 析构函数，递归删除子节点
-		~Node() {
-			for (auto& child : children) {
-				delete child;
-			}
-		}
-	};
-
-	// A glTF material stores information in e.g. the texture that is attached to it and colors
-	// 材质结构，存储基础颜色因子和纹理索引
-	struct Material {
-		glm::vec4 baseColorFactor = glm::vec4(1.0f);
-		uint32_t baseColorTextureIndex;
-	};
-
-	// Contains the texture for a single glTF image
-	// Images may be reused by texture objects and are as such separated
-	// 图像结构，包含纹理和描述符集
-	struct Image {
-		vks::Texture2D texture;
-		// We also store (and create) a descriptor set that's used to access this texture from the fragment shader
-		VkDescriptorSet descriptorSet;
-	};
-
-	// A glTF texture stores a reference to the image and a sampler
-	// In this sample, we are only interested in the image
-	// 纹理结构，仅引用图像索引
-	struct Texture {
-		int32_t imageIndex;
-	};
-
-	/*
-		Model data
-	*/
-	// 图像列表
-	std::vector<Image> images;
-	// 纹理列表
-	std::vector<Texture> textures;
-	// 材质列表
-	std::vector<Material> materials;
-	// 节点列表（顶级节点）
-	std::vector<Node*> nodes;
-
-	// 析构函数，释放所有资源
-	~VulkanglTFModel()
+VulkanglTFModel::VulkanglTFModel(vks::VulkanDevice* dev, IExampleInterfasce* example): vulkanDevice(dev), iLoader(example){
+	// 初始化shaderData.buffer
+	shaderData.buffer.buffer = VK_NULL_HANDLE;
+	shaderData.buffer.memory = VK_NULL_HANDLE;
+	shaderData.buffer.mapped = nullptr;
+}
+VulkanglTFModel::~VulkanglTFModel()
 	{
 		// 释放节点
 		for (auto node : nodes) {
@@ -153,6 +21,32 @@ public:
 		// 销毁索引缓冲区
 		vkDestroyBuffer(vulkanDevice->logicalDevice, indices.buffer, nullptr);
 		vkFreeMemory(vulkanDevice->logicalDevice, indices.memory, nullptr);
+		// 销毁uniform buffer
+		if (shaderData.buffer.buffer != VK_NULL_HANDLE) {
+			shaderData.buffer.destroy();
+		}
+		// 销毁管线布局
+		if (pipelineLayout != VK_NULL_HANDLE) {
+			vkDestroyPipelineLayout(vulkanDevice->logicalDevice, pipelineLayout, nullptr);
+		}
+		// 销毁描述符池
+		if (descriptorPool != VK_NULL_HANDLE) {
+			vkDestroyDescriptorPool(vulkanDevice->logicalDevice, descriptorPool, nullptr);
+		}
+		// 销毁描述符集布局
+		if (descriptorSetLayouts.matrices != VK_NULL_HANDLE) {
+			vkDestroyDescriptorSetLayout(vulkanDevice->logicalDevice, descriptorSetLayouts.matrices, nullptr);
+		}
+		if (descriptorSetLayouts.textures != VK_NULL_HANDLE) {
+			vkDestroyDescriptorSetLayout(vulkanDevice->logicalDevice, descriptorSetLayouts.textures, nullptr);
+		}
+		// 销毁管线
+		if (pipelines.solid != VK_NULL_HANDLE) {
+			vkDestroyPipeline(vulkanDevice->logicalDevice, pipelines.solid, nullptr);
+		}
+		if (pipelines.wireframe != VK_NULL_HANDLE) {
+			vkDestroyPipeline(vulkanDevice->logicalDevice, pipelines.wireframe, nullptr);
+		}
 		// 销毁所有图像资源
 		for (Image image : images) {
 			vkDestroyImageView(vulkanDevice->logicalDevice, image.texture.view, nullptr);
@@ -161,20 +55,26 @@ public:
 			vkFreeMemory(vulkanDevice->logicalDevice, image.texture.deviceMemory, nullptr);
 		}
 	}
-
-	/*
-		glTF loading functions
-
-		The following functions take a glTF input model loaded via tinyglTF and convert all required data into our own structure
-	*/
-
-	// 加载图像
-	void loadImages(tinygltf::Model& input)
+void VulkanglTFModel::loadImages(tinygltf::Model& input)
 	{
 		// Images can be stored inside the glTF (which is the case for the sample model), so instead of directly
 		// loading them from disk, we fetch them from the glTF loader and upload the buffers
+		std::cout << "Loading " << input.images.size() << " images..." << std::endl;
 		// 调整图像数组大小
 		images.resize(input.images.size());
+		// 初始化所有图像对象
+		for (size_t i = 0; i < images.size(); i++) {
+			images[i].texture.sampler = VK_NULL_HANDLE;
+			images[i].texture.view = VK_NULL_HANDLE;
+			images[i].texture.image = VK_NULL_HANDLE;
+			images[i].texture.deviceMemory = VK_NULL_HANDLE;
+			images[i].descriptorSet = VK_NULL_HANDLE;
+		}
+		// 检查输入图像是否有效
+		if (input.images.empty()) {
+			std::cerr << "Warning: No images in input model" << std::endl;
+			return;
+		}
 		// 遍历所有图像
 		for (size_t i = 0; i < input.images.size(); i++) {
 			// 用引用获取临时变量，减少开销
@@ -206,16 +106,30 @@ public:
 			}
 			// Load texture from image buffer
 			// 从缓冲加载纹理到 Vulkan
-			images[i].texture.fromBuffer(buffer, bufferSize, VK_FORMAT_R8G8B8A8_UNORM, glTFImage.width, glTFImage.height, vulkanDevice, copyQueue);
+			try {
+				images[i].texture.fromBuffer(buffer, bufferSize, VK_FORMAT_R8G8B8A8_UNORM, glTFImage.width, glTFImage.height, vulkanDevice, copyQueue);
+				std::cout << "Loaded image " << i << " successfully" << std::endl;
+			} catch (const std::exception& e) {
+				std::cerr << "Error loading image " << i << ": " << e.what() << std::endl;
+				// 继续处理下一个图像
+				continue;
+			}
+			
+			// fromBuffer函数已经创建了sampler和view，并调用了updateDescriptor
+			// 所以我们不需要在这里再次创建它们
+			
+			// 初始化描述符集为空句柄，将在setupDescriptors中分配
+			images[i].descriptorSet = VK_NULL_HANDLE;
 			// 如果转换了缓冲，释放它
 			if (deleteBuffer) {
 				delete[] buffer;
+				buffer = nullptr;
 			}
 		}
 	}
 
 	// 加载纹理引用
-	void loadTextures(tinygltf::Model& input)
+void VulkanglTFModel::loadTextures(tinygltf::Model& input)
 	{
 		// 调整纹理数组大小
 		textures.resize(input.textures.size());
@@ -226,7 +140,7 @@ public:
 	}
 
 	// 加载材质
-	void loadMaterials(tinygltf::Model& input)
+void VulkanglTFModel::loadMaterials(tinygltf::Model& input)
 	{
 		// 调整材质数组大小
 		materials.resize(input.materials.size());
@@ -248,7 +162,7 @@ public:
 	}
 
 	// 递归加载节点
-	void loadNode(const tinygltf::Node& inputNode, const tinygltf::Model& input, VulkanglTFModel::Node* parent, std::vector<uint32_t>& indexBuffer, std::vector<VulkanglTFModel::Vertex>& vertexBuffer)
+void VulkanglTFModel::loadNode(const tinygltf::Node& inputNode, const tinygltf::Model& input, VulkanglTFModel::Node* parent, std::vector<uint32_t>& indexBuffer, std::vector<VulkanglTFModel::Vertex>& vertexBuffer)
 	{
 		// 创建新节点
 		VulkanglTFModel::Node* node = new VulkanglTFModel::Node{};
@@ -402,7 +316,7 @@ public:
 
 	// Draw a single node including child nodes (if present)
 	// 绘制单个节点，包括子节点
-	void drawNode(VkCommandBuffer commandBuffer, VkPipelineLayout pipelineLayout, VulkanglTFModel::Node* node)
+void VulkanglTFModel::drawNode(VkCommandBuffer commandBuffer, VkPipelineLayout pipelineLayout, VulkanglTFModel::Node* node)
 	{
 		// 如果节点有图元
 		if (node->mesh.primitives.size() > 0) {
@@ -424,6 +338,19 @@ public:
 					// Get the texture index for this primitive
 					// 获取纹理
 					VulkanglTFModel::Texture texture = textures[materials[primitive.materialIndex].baseColorTextureIndex];
+					
+					// 检查纹理索引是否有效
+					if (texture.imageIndex >= images.size()) {
+						std::cerr << "Error: Invalid texture index: " << texture.imageIndex << std::endl;
+						continue;
+					}
+					
+					// 检查描述符集是否已准备好
+					if (images[texture.imageIndex].descriptorSet == VK_NULL_HANDLE) {
+						std::cerr << "Error: Descriptor set not ready for texture index: " << texture.imageIndex << std::endl;
+						continue;
+					}
+					
 					// Bind the descriptor for the current primitive's texture
 					// 绑定纹理描述符集
 					vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 1, 1, &images[texture.imageIndex].descriptorSet, 0, nullptr);
@@ -440,7 +367,7 @@ public:
 
 	// Draw the glTF scene starting at the top-level-nodes
 	// 绘制整个场景
-	void draw(VkCommandBuffer commandBuffer, VkPipelineLayout pipelineLayout)
+void VulkanglTFModel::draw(VkCommandBuffer commandBuffer, VkPipelineLayout pipelineLayout)
 	{
 		// All vertices and indices are stored in single buffers, so we only need to bind once
 		// 绑定顶点和索引缓冲
@@ -453,84 +380,7 @@ public:
 			drawNode(commandBuffer, pipelineLayout, node);
 		}
 	}
-
-};
-
-// 定义 VulkanExample 类，继承自 VulkanExampleBase
-class VulkanExample : public VulkanExampleBase
-{
-public:
-	// 是否启用线框模式
-	bool wireframe = false;
-
-	// glTF 模型实例
-	VulkanglTFModel glTFModel;
-
-	// 着色器数据结构，包括 uniform 缓冲
-	struct ShaderData {
-		vks::Buffer buffer;
-		struct Values {
-			glm::mat4 projection;  // 投影矩阵
-			glm::mat4 model;  // 模型视图矩阵
-			glm::vec4 lightPos = glm::vec4(5.0f, 5.0f, -5.0f, 1.0f);  // 光源位置
-			glm::vec4 viewPos;  // 视图位置
-		} values;
-	} shaderData;
-
-	// 管道结构，包含实心和线框管道
-	struct Pipelines {
-		VkPipeline solid{ VK_NULL_HANDLE };
-		VkPipeline wireframe{ VK_NULL_HANDLE };
-	} pipelines;
-
-	// 管道布局
-	VkPipelineLayout pipelineLayout{ VK_NULL_HANDLE };
-	// 描述符集（用于矩阵）
-	VkDescriptorSet descriptorSet{ VK_NULL_HANDLE };
-
-	// 描述符集布局结构
-	struct DescriptorSetLayouts {
-		VkDescriptorSetLayout matrices{ VK_NULL_HANDLE };
-		VkDescriptorSetLayout textures{ VK_NULL_HANDLE };
-	} descriptorSetLayouts;
-
-	// 构造函数，初始化相机等
-	VulkanExample() : VulkanExampleBase()
-	{
-		title = "glTF model rendering";
-		camera.type = Camera::CameraType::lookat;
-		camera.flipY = true;
-		camera.setPosition(glm::vec3(0.0f, -0.1f, -1.0f));
-		camera.setRotation(glm::vec3(0.0f, 45.0f, 0.0f));
-		camera.setPerspective(60.0f, (float)width / (float)height, 0.1f, 256.0f);
-	}
-
-	// 析构函数，释放资源
-	~VulkanExample()
-	{
-		if (device) {
-			vkDestroyPipeline(device, pipelines.solid, nullptr);
-			if (pipelines.wireframe != VK_NULL_HANDLE) {
-				vkDestroyPipeline(device, pipelines.wireframe, nullptr);
-			}
-			vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
-			vkDestroyDescriptorSetLayout(device, descriptorSetLayouts.matrices, nullptr);
-			vkDestroyDescriptorSetLayout(device, descriptorSetLayouts.textures, nullptr);
-			shaderData.buffer.destroy();
-		}
-	}
-
-	// 启用特性（线框模式）
-	virtual void getEnabledFeatures()
-	{
-		// Fill mode non solid is required for wireframe display
-		if (deviceFeatures.fillModeNonSolid) {
-			enabledFeatures.fillModeNonSolid = VK_TRUE;
-		};
-	}
-
-	// 构建命令缓冲
-	void buildCommandBuffers()
+void VulkanglTFModel::buildCommandBuffers(VkCommandBuffer cmd)
 	{
 		VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
 
@@ -539,7 +389,7 @@ public:
 		clearValues[1].depthStencil = { 1.0f, 0 };
 
 		VkRenderPassBeginInfo renderPassBeginInfo = vks::initializers::renderPassBeginInfo();
-		renderPassBeginInfo.renderPass = renderPass;
+		renderPassBeginInfo.renderPass = pass;
 		renderPassBeginInfo.renderArea.offset.x = 0;
 		renderPassBeginInfo.renderArea.offset.y = 0;
 		renderPassBeginInfo.renderArea.extent.width = width;
@@ -559,23 +409,24 @@ public:
 			vkCmdSetScissor(drawCmdBuffers[i], 0, 1, &scissor);
 			// Bind scene matrices descriptor to set 0
 			vkCmdBindDescriptorSets(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
-			vkCmdBindPipeline(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, wireframe ? pipelines.wireframe : pipelines.solid);
-			glTFModel.draw(drawCmdBuffers[i], pipelineLayout);
-			drawUI(drawCmdBuffers[i]);
+			vkCmdBindPipeline(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.solid);
+			this->draw(drawCmdBuffers[i], pipelineLayout);
+			
 			vkCmdEndRenderPass(drawCmdBuffers[i]);
 			VK_CHECK_RESULT(vkEndCommandBuffer(drawCmdBuffers[i]));
 		}
 	}
 
-	// 加载 glTF 文件
-	void loadglTFFile(std::string filename)
+
+void VulkanglTFModel::loadglTFFile(VkQueue queue,std::string filename)
 	{
 		tinygltf::Model glTFInput;
 		tinygltf::TinyGLTF gltfContext;
 		std::string error, warning;
 	
-		this->device = device;
+		// Pass some Vulkan resources required for setup and rendering to the glTF model loading class
 
+		this->copyQueue = queue;
 #if defined(__ANDROID__)
 		// On Android all assets are packed with the apk in a compressed form, so we need to open them using the asset manager
 		// We let tinygltf handle this, by passing the asset manager of our app
@@ -584,22 +435,22 @@ public:
 		// 使用 tinygltf 加载文件
 		bool fileLoaded = gltfContext.LoadASCIIFromFile(&glTFInput, &error, &warning, filename);
 
-		// Pass some Vulkan resources required for setup and rendering to the glTF model loading class
-		glTFModel.vulkanDevice = vulkanDevice;
-		glTFModel.copyQueue = queue;
+
 
 		std::vector<uint32_t> indexBuffer;
 		std::vector<VulkanglTFModel::Vertex> vertexBuffer;
 
 		// 如果加载成功
 		if (fileLoaded) {
-			glTFModel.loadImages(glTFInput);
-			glTFModel.loadMaterials(glTFInput);
-			glTFModel.loadTextures(glTFInput);
+			std::cout << "Loading images..." << std::endl;
+			this->loadImages(glTFInput);
+			std::cout << "Loaded " << this->images.size() << " images" << std::endl;
+			this->loadMaterials(glTFInput);
+			this->loadTextures(glTFInput);
 			const tinygltf::Scene& scene = glTFInput.scenes[0];
 			for (size_t i = 0; i < scene.nodes.size(); i++) {
 				const tinygltf::Node node = glTFInput.nodes[scene.nodes[i]];
-				glTFModel.loadNode(node, glTFInput, nullptr, indexBuffer, vertexBuffer);
+				this->loadNode(node, glTFInput, nullptr, indexBuffer, vertexBuffer);
 			}
 		}
 		else {
@@ -614,7 +465,7 @@ public:
 		// 计算缓冲大小
 		size_t vertexBufferSize = vertexBuffer.size() * sizeof(VulkanglTFModel::Vertex);
 		size_t indexBufferSize = indexBuffer.size() * sizeof(uint32_t);
-		glTFModel.indices.count = static_cast<uint32_t>(indexBuffer.size());
+		this->indices.count = static_cast<uint32_t>(indexBuffer.size());
 
 		// 暂存缓冲结构
 		struct StagingBuffer {
@@ -647,15 +498,15 @@ public:
 			VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
 			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
 			vertexBufferSize,
-			&glTFModel.vertices.buffer,
-			&glTFModel.vertices.memory));
+			&this->vertices.buffer,
+			&this->vertices.memory));
 		// 创建设备本地索引缓冲
 		VK_CHECK_RESULT(vulkanDevice->createBuffer(
 			VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
 			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
 			indexBufferSize,
-			&glTFModel.indices.buffer,
-			&glTFModel.indices.memory));
+			&this->indices.buffer,
+			&this->indices.memory));
 
 		// Copy data from staging buffers (host) do device local buffer (gpu)
 		// 创建命令缓冲进行复制
@@ -666,7 +517,7 @@ public:
 		vkCmdCopyBuffer(
 			copyCmd,
 			vertexStaging.buffer,
-			glTFModel.vertices.buffer,
+			this->vertices.buffer,
 			1,
 			&copyRegion);
 
@@ -674,7 +525,7 @@ public:
 		vkCmdCopyBuffer(
 			copyCmd,
 			indexStaging.buffer,
-			glTFModel.indices.buffer,
+			this->indices.buffer,
 			1,
 			&copyRegion);
 
@@ -683,64 +534,14 @@ public:
 
 		// Free staging resources
 		// 释放暂存资源
-		vkDestroyBuffer(device, vertexStaging.buffer, nullptr);
-		vkFreeMemory(device, vertexStaging.memory, nullptr);
-		vkDestroyBuffer(device, indexStaging.buffer, nullptr);
-		vkFreeMemory(device, indexStaging.memory, nullptr);
-	}
-
-	// 加载资产
-	void loadAssets()
-	{
-		loadglTFFile(getAssetPath() + "models/FlightHelmet/glTF/FlightHelmet.gltf");
-	}
-
-	// 设置描述符
-	void setupDescriptors()
-	{
-		/*
-			This sample uses separate descriptor sets (and layouts) for the matrices and materials (textures)
-		*/
-
-		// 描述符池大小
-		std::vector<VkDescriptorPoolSize> poolSizes = {
-			vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1),
-			// One combined image sampler per model image/texture
-			vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, static_cast<uint32_t>(glTFModel.images.size())),
-		};
-		// One set for matrices and one per model image/texture
-		const uint32_t maxSetCount = static_cast<uint32_t>(glTFModel.images.size()) + 1;
-		VkDescriptorPoolCreateInfo descriptorPoolInfo = vks::initializers::descriptorPoolCreateInfo(poolSizes, maxSetCount);
-		VK_CHECK_RESULT(vkCreateDescriptorPool(device, &descriptorPoolInfo, nullptr, &descriptorPool));
-
-		// Descriptor set layout for passing matrices
-		// 矩阵描述符集布局
-		VkDescriptorSetLayoutBinding setLayoutBinding = vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 0);
-		VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCI = vks::initializers::descriptorSetLayoutCreateInfo(&setLayoutBinding, 1);
-		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorSetLayoutCI, nullptr, &descriptorSetLayouts.matrices));
-		// Descriptor set layout for passing material textures
-		// 纹理描述符集布局
-		setLayoutBinding = vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 0);
-		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorSetLayoutCI, nullptr, &descriptorSetLayouts.textures));
-
-		// Descriptor set for scene matrices
-		// 分配矩阵描述符集
-		VkDescriptorSetAllocateInfo allocInfo = vks::initializers::descriptorSetAllocateInfo(descriptorPool, &descriptorSetLayouts.matrices, 1);
-		VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSet));
-		VkWriteDescriptorSet writeDescriptorSet = vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &shaderData.buffer.descriptor);
-		vkUpdateDescriptorSets(device, 1, &writeDescriptorSet, 0, nullptr);
-		// Descriptor sets for materials
-		// 为每个图像分配纹理描述符集
-		for (auto& image : glTFModel.images) {
-			const VkDescriptorSetAllocateInfo allocInfo = vks::initializers::descriptorSetAllocateInfo(descriptorPool, &descriptorSetLayouts.textures, 1);
-			VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &image.descriptorSet));
-			VkWriteDescriptorSet writeDescriptorSet = vks::initializers::writeDescriptorSet(image.descriptorSet, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 0, &image.texture.descriptor);
-			vkUpdateDescriptorSets(device, 1, &writeDescriptorSet, 0, nullptr);
-		}
+		vkDestroyBuffer(*vulkanDevice, vertexStaging.buffer, nullptr);
+		vkFreeMemory(*vulkanDevice, vertexStaging.memory, nullptr);
+		vkDestroyBuffer(*vulkanDevice, indexStaging.buffer, nullptr);
+		vkFreeMemory(*vulkanDevice, indexStaging.memory, nullptr);
 	}
 
 	// 准备管道
-	void preparePipelines()
+void VulkanglTFModel::preparePipelines(VkRenderPass renderPass,VkPipelineCache pipelineCache)
 	{
 		// Layout
 		// The pipeline layout uses both descriptor sets (set 0 = matrices, set 1 = material)
@@ -751,7 +552,7 @@ public:
 		// Push constant ranges are part of the pipeline layout
 		pipelineLayoutCI.pushConstantRangeCount = 1;
 		pipelineLayoutCI.pPushConstantRanges = &pushConstantRange;
-		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCI, nullptr, &pipelineLayout));
+		VK_CHECK_RESULT(vkCreatePipelineLayout(vulkanDevice->logicalDevice, &pipelineLayoutCI, nullptr, &pipelineLayout));
 
 		// Pipeline
 		VkPipelineInputAssemblyStateCreateInfo inputAssemblyStateCI = vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
@@ -782,10 +583,10 @@ public:
 
 		// 加载着色器
 		const std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages = {
-			loadShader(getShadersPath() + "gltfloading/mesh.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
-			loadShader(getShadersPath() + "gltfloading/mesh.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT)
-		};
+            iLoader->LoadShader("gltfloading/mesh.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
+            iLoader->LoadShader("gltfloading/mesh.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT)
 
+		};
 		// 创建管道信息
 		VkGraphicsPipelineCreateInfo pipelineCI = vks::initializers::pipelineCreateInfo(pipelineLayout, renderPass, 0);
 		pipelineCI.pVertexInputState = &vertexInputStateCI;
@@ -801,66 +602,142 @@ public:
 
 		// Solid rendering pipeline
 		// 创建实心管道
-		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipelines.solid));
+		VK_CHECK_RESULT(vkCreateGraphicsPipelines(vulkanDevice->logicalDevice, pipelineCache, 1, &pipelineCI, nullptr, &pipelines.solid));
 
-		// Wire frame rendering pipeline
-		// 如果支持，创建线框管道
-		if (deviceFeatures.fillModeNonSolid) {
-			rasterizationStateCI.polygonMode = VK_POLYGON_MODE_LINE;
-			rasterizationStateCI.lineWidth = 1.0f;
-			VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipelines.wireframe));
-		}
 	}
 
-	// Prepare and initialize uniform buffer containing shader uniforms
-	// 准备 uniform 缓冲
-	void prepareUniformBuffers()
-	{
-		// Vertex shader uniform buffer block
-		VK_CHECK_RESULT(vulkanDevice->createBuffer(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &shaderData.buffer, sizeof(shaderData.values)));
-		// Map persistent
-		VK_CHECK_RESULT(shaderData.buffer.map());
-	}
+	// 设置描述符
+void VulkanglTFModel::prepareUniformBuffers()
+{
+	// 创建uniform buffer
+	VkBufferCreateInfo bufferInfo = {};
+	bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	bufferInfo.size = sizeof(shaderData.values);
+	bufferInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+	bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	
+	VkMemoryAllocateInfo allocInfo = {};
+	allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+	allocInfo.allocationSize = 0;
+	allocInfo.memoryTypeIndex = 0;
+	
+	// 创建buffer
+	VK_CHECK_RESULT(vkCreateBuffer(vulkanDevice->logicalDevice, &bufferInfo, nullptr, &shaderData.buffer.buffer));
 
-	// 更新 uniform 缓冲
-	void updateUniformBuffers()
-	{
-		shaderData.values.projection = camera.matrices.perspective;
-		shaderData.values.model = camera.matrices.view;
-		shaderData.values.viewPos = camera.viewPos;
+	// 获取内存需求
+	VkMemoryRequirements memRequirements;
+	vkGetBufferMemoryRequirements(vulkanDevice->logicalDevice, shaderData.buffer.buffer, &memRequirements);
+	allocInfo.allocationSize = memRequirements.size;
+	
+	// 查找合适的内存类型
+	VkMemoryPropertyFlags properties = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+	allocInfo.memoryTypeIndex = vulkanDevice->getMemoryType(memRequirements.memoryTypeBits, properties);
+	
+	// 分配内存
+	VK_CHECK_RESULT(vkAllocateMemory(vulkanDevice->logicalDevice, &allocInfo, nullptr, &shaderData.buffer.memory));
+	VK_CHECK_RESULT(vkBindBufferMemory(vulkanDevice->logicalDevice, shaderData.buffer.buffer, shaderData.buffer.memory, 0));
+	
+	// 映射内存
+	VK_CHECK_RESULT(vkMapMemory(vulkanDevice->logicalDevice, shaderData.buffer.memory, 0, memRequirements.size, 0, &shaderData.buffer.mapped));
+}
+
+void VulkanglTFModel::updateUniformBuffers()
+{
+	if (shaderData.buffer.mapped) {
+		// 更新uniform数据
 		memcpy(shaderData.buffer.mapped, &shaderData.values, sizeof(shaderData.values));
 	}
+}
 
-	// 准备函数
-	void prepare()
+void VulkanglTFModel::setupDescriptors(VkRenderPass renderPass)
 	{
-		VulkanExampleBase::prepare();
-		loadAssets();
-		prepareUniformBuffers();
-		setupDescriptors();
-		preparePipelines();
-		buildCommandBuffers();
-		prepared = true;
-	}
+		/*
+			This sample uses separate descriptor sets (and layouts) for the matrices and materials (textures)
+		*/
 
-	// 渲染函数
-	virtual void render()
-	{
-		updateUniformBuffers();
-		renderFrame();
-	
-	}
+		// 检查图像容器是否有效
+		if (!this->images.data()) {
+			std::cerr << "Error: images vector is not properly initialized" << std::endl;
+			return;
+		}
+		
+		// 描述符池大小
+		uint32_t imageCount = static_cast<uint32_t>(this->images.size());
+		std::vector<VkDescriptorPoolSize> poolSizes = {
+			vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1),
+			// One combined image sampler per model image/texture
+			vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, imageCount),
+		};
+		// One set for matrices and one per model image/texture
+		const uint32_t maxSetCount = imageCount + 1;
+		VkDescriptorPoolCreateInfo descriptorPoolInfo = vks::initializers::descriptorPoolCreateInfo(poolSizes, maxSetCount);
+		VK_CHECK_RESULT(vkCreateDescriptorPool(vulkanDevice->logicalDevice, &descriptorPoolInfo, nullptr, &descriptorPool));
 
-	// UI 更新
-	virtual void OnUpdateUIOverlay(vks::UIOverlay *overlay)
-	{
-		if (overlay->header("Settings")) {
-			if (overlay->checkBox("Wireframe", &wireframe)) {
-				buildCommandBuffers();
+		// Descriptor set layout for passing matrices
+		// 矩阵描述符集布局
+		VkDescriptorSetLayoutBinding setLayoutBinding = vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 0);
+		VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCI = vks::initializers::descriptorSetLayoutCreateInfo(&setLayoutBinding, 1);
+		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(vulkanDevice->logicalDevice, &descriptorSetLayoutCI, nullptr, &descriptorSetLayouts.matrices));
+		// Descriptor set layout for passing material textures
+		// 纹理描述符集布局
+		setLayoutBinding = vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 0);
+		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(vulkanDevice->logicalDevice, &descriptorSetLayoutCI, nullptr, &descriptorSetLayouts.textures));
+
+		// Descriptor set for scene matrices
+		// 分配矩阵描述符集
+		VkDescriptorSetAllocateInfo allocInfo = vks::initializers::descriptorSetAllocateInfo(descriptorPool, &descriptorSetLayouts.matrices, 1);
+		VK_CHECK_RESULT(vkAllocateDescriptorSets(vulkanDevice->logicalDevice, &allocInfo, &descriptorSet));
+		VkWriteDescriptorSet writeDescriptorSet = vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &shaderData.buffer.descriptor);
+		vkUpdateDescriptorSets(vulkanDevice->logicalDevice, 1, &writeDescriptorSet, 0, nullptr);
+		// Descriptor sets for materials
+		// 为每个图像分配纹理描述符集
+		// 检查图像容器是否为空
+		// if (this->images.empty()) {
+		// 	std::cerr << "Warning: No images to process" << std::endl;
+		// 	return;
+		// }
+		// 检查图像容器是否已分配
+		// if (!this->images.data()) {
+		// 	std::cerr << "Error: images vector is not properly allocated" << std::endl;
+		// 	return;
+		// }
+		
+		// std::cout << "Processing " << imageCount << " images" << std::endl;
+		for (size_t i = 0; i < this->images.size(); i++) {
+			if (i >= this->images.size()) {
+				std::cerr << "Error: Index out of bounds" << std::endl;
+				break;
 			}
+			auto& image = this->images[i];
+			// 检查纹理是否已准备好
+			if (image.texture.sampler == VK_NULL_HANDLE || image.texture.view == VK_NULL_HANDLE) {
+				std::cerr << "Error: Texture not properly loaded for image " << i << std::endl;
+				continue;
+			}
+			
+			const VkDescriptorSetAllocateInfo allocInfo = vks::initializers::descriptorSetAllocateInfo(descriptorPool, &descriptorSetLayouts.textures, 1);
+			VkResult result = vkAllocateDescriptorSets(vulkanDevice->logicalDevice, &allocInfo, &image.descriptorSet);
+			if (result != VK_SUCCESS) {
+				std::cerr << "Error: Failed to allocate descriptor set for texture: " << result << std::endl;
+				continue;
+			}
+			
+			VkWriteDescriptorSet writeDescriptorSet = vks::initializers::writeDescriptorSet(image.descriptorSet, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 0, &image.texture.descriptor);
+			vkUpdateDescriptorSets(vulkanDevice->logicalDevice, 1, &writeDescriptorSet, 0, nullptr);
 		}
 	}
-};
 
-// 主函数宏
-VULKAN_EXAMPLE_MAIN()
+void VulkanglTFModel::prepare(VkRenderPass renderPass,VkPipelineCache pipelineCache,VkCommandBuffer cmd)
+	{
+		// 设置渲染通道
+		pass = renderPass;
+		
+		// 准备uniform buffers
+		prepareUniformBuffers();
+
+		// 设置描述符
+		setupDescriptors(renderPass);
+		preparePipelines(renderPass,pipelineCache);
+		// buildCommandBuffers(cmd); // 不再需要，因为我们将在主渲染循环中绘制
+		// prepared = true;
+	}	

@@ -66,7 +66,6 @@ void LightProbe::CaptureCubeMap(VkQueue queue, VkCommandBuffer cmd)
     }
     
 }
-
 void LightProbe::GenSH(VkCommandBuffer cmdBuffer, VkQueue queue)
 {
     GenSHComputePass shPass(device, iLoader);
