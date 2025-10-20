@@ -10,6 +10,7 @@
 #include <glm/glm.hpp>
 #include "tiny_gltf.h"
 #include "vulkanexamplebase.h"
+#include "ILoader.h"
 
 namespace vks {
     class Texture2D;
@@ -90,6 +91,20 @@ namespace gltf {
             VkDeviceMemory memory;
         } indices;
 
+        struct DescriptorSetLayouts {
+		VkDescriptorSetLayout matrices{ VK_NULL_HANDLE };
+		VkDescriptorSetLayout textures{ VK_NULL_HANDLE };
+	        } descriptorSetLayouts;
+
+    // 管道布局
+	VkPipelineLayout pipelineLayout{ VK_NULL_HANDLE };
+	// 描述符集（用于矩阵）
+	VkDescriptorSet descriptorSet{ VK_NULL_HANDLE };
+
+	struct Pipelines {
+		VkPipeline solid{ VK_NULL_HANDLE };
+		VkPipeline wireframe{ VK_NULL_HANDLE };
+	} pipelines;
         // 模型数据
         std::vector<Image> images;  // 图像列表
         std::vector<Texture> textures;  // 纹理列表
@@ -98,14 +113,15 @@ namespace gltf {
 
         // 析构函数，释放所有资源
         ~Model();
-
+        Model(vks::VulkanDevice* dev, IExampleInterfasce* example);
         // 加载glTF文件
         bool loadFromFile(const std::string& filename, vks::VulkanDevice* device, VkQueue queue, uint32_t glTFLoadingFlags);
 
         // 绘制整个场景
         void draw(VkCommandBuffer commandBuffer, VkPipelineLayout pipelineLayout, glm::mat4 offsetMatrix = glm::mat4(1.0f));
-
+        void preparePipelines(VkPipelineCache pipelineCache,VkRenderPass renderPass);
     private:
+    	IExampleInterfasce* iLoader;
         // 加载图像
         void loadImages(tinygltf::Model& input);
         // 加载纹理引用

@@ -244,7 +244,7 @@ void VulkanExample::LoadAssets()
     LoadPreviewModel("venus", "models/venus.gltf", glTFLoadingFlags); // 加载维纳斯模型。
 
     // 创建glTF模型实例
-    gltfModel = std::make_shared<gltf::Model>(); // 创建glTF模型对象。
+    gltfModel = std::make_shared<gltf::Model>(vulkanDevice, this); // 创建glTF模型对象。
     std::string modelPath = getAssetPath() + "models/FlightHelmet/glTF/FlightHelmet.gltf";
     if (gltfModel->loadFromFile(modelPath, vulkanDevice, queue, glTFLoadingFlags)) {
         // 如果加载成功，可以在这里添加对模型的初始化代码
@@ -346,7 +346,7 @@ void VulkanExample::PreparePasses()
         genIBL->Draw(cmdBuf); // 绘制 IBL 贴图。
         vulkanDevice->flushCommandBuffer(cmdBuf, queue); // 提交并刷新命令缓冲区。
     }
-
+    gltfModel->preparePipelines(pipelineCache, renderPass); // 准备 glTF 模型的渲染管线。
     mainPass->UpdateBindings(); // 更新主渲染通道的描述符绑定。
 }
 
@@ -405,7 +405,7 @@ void VulkanExample::drawFrame(VkCommandBuffer cmd)
             
             VkPipelineLayout pipelineLayout;
             VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCI, nullptr, &pipelineLayout));
-            
+            //vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gltfModel->pipelines.solid);  // 或 previewModel->techniques[(uint32_t)ETechnique::MAIN].pso，如果兼容
             // 为头盔模型添加位置偏移，避免与预览模型重叠
             glm::mat4 helmetOffset = glm::translate(glm::mat4(1.0f), glm::vec3(20.0f, 20.0f, 0.0f)); // 向右偏移2个单位
             gltfModel->draw(cmd, pipelineLayout, helmetOffset);

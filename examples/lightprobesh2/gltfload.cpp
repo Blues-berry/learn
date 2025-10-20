@@ -15,6 +15,11 @@
 
 namespace gltf {
 
+    
+    Model::Model(vks::VulkanDevice* dev, IExampleInterfasce* example) : vulkanDevice(dev), iLoader(example){
+
+
+    }
     Model::~Model()
     {
         // 释放节点
@@ -431,5 +436,79 @@ namespace gltf {
             drawNode(commandBuffer, pipelineLayout, child);
         }
     }
+	// 准备管道
+	void Model::preparePipelines(VkPipelineCache pipelineCache,VkRenderPass renderPass)
+	{
+		// Layout
+		// The pipeline layout uses both descriptor sets (set 0 = matrices, set 1 = material)
+		std::array<VkDescriptorSetLayout, 2> setLayouts = { descriptorSetLayouts.matrices, descriptorSetLayouts.textures };
+		VkPipelineLayoutCreateInfo pipelineLayoutCI = vks::initializers::pipelineLayoutCreateInfo(setLayouts.data(), static_cast<uint32_t>(setLayouts.size()));
+		// We will use push constants to push the local matrices of a primitive to the vertex shader
+		VkPushConstantRange pushConstantRange = vks::initializers::pushConstantRange(VK_SHADER_STAGE_VERTEX_BIT, sizeof(glm::mat4), 0);
+		// Push constant ranges are part of the pipeline layout
+		pipelineLayoutCI.pushConstantRangeCount = 1;
+		pipelineLayoutCI.pPushConstantRanges = &pushConstantRange;
+		VK_CHECK_RESULT(vkCreatePipelineLayout(vulkanDevice->logicalDevice, &pipelineLayoutCI, nullptr, &pipelineLayout));
+
+		// Pipeline
+		VkPipelineInputAssemblyStateCreateInfo inputAssemblyStateCI = vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
+		VkPipelineRasterizationStateCreateInfo rasterizationStateCI = vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE, 0);
+		VkPipelineColorBlendAttachmentState blendAttachmentStateCI = vks::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE);
+		VkPipelineColorBlendStateCreateInfo colorBlendStateCI = vks::initializers::pipelineColorBlendStateCreateInfo(1, &blendAttachmentStateCI);
+		VkPipelineDepthStencilStateCreateInfo depthStencilStateCI = vks::initializers::pipelineDepthStencilStateCreateInfo(VK_TRUE, VK_TRUE, VK_COMPARE_OP_LESS_OR_EQUAL);
+		VkPipelineViewportStateCreateInfo viewportStateCI = vks::initializers::pipelineViewportStateCreateInfo(1, 1, 0);
+		VkPipelineMultisampleStateCreateInfo multisampleStateCI = vks::initializers::pipelineMultisampleStateCreateInfo(VK_SAMPLE_COUNT_1_BIT, 0);
+		const std::vector<VkDynamicState> dynamicStateEnables = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+		VkPipelineDynamicStateCreateInfo dynamicStateCI = vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables);
+		// Vertex input bindings and attributes
+		// 顶点输入绑定和属性
+		const std::vector<VkVertexInputBindingDescription> vertexInputBindings = {
+			vks::initializers::vertexInputBindingDescription(0, sizeof(Vertex), VK_VERTEX_INPUT_RATE_VERTEX),
+		};
+		const std::vector<VkVertexInputAttributeDescription> vertexInputAttributes = {
+			vks::initializers::vertexInputAttributeDescription(0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, pos)),	// Location 0: Position
+			vks::initializers::vertexInputAttributeDescription(0, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, normal)),// Location 1: Normal
+			vks::initializers::vertexInputAttributeDescription(0, 2, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, uv)),	// Location 2: Texture coordinates
+			vks::initializers::vertexInputAttributeDescription(0, 3, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, color)),	// Location 3: Color
+		};
+		VkPipelineVertexInputStateCreateInfo vertexInputStateCI = vks::initializers::pipelineVertexInputStateCreateInfo();
+		vertexInputStateCI.vertexBindingDescriptionCount = static_cast<uint32_t>(vertexInputBindings.size());
+		vertexInputStateCI.pVertexBindingDescriptions = vertexInputBindings.data();
+		vertexInputStateCI.vertexAttributeDescriptionCount = static_cast<uint32_t>(vertexInputAttributes.size());
+		vertexInputStateCI.pVertexAttributeDescriptions = vertexInputAttributes.data();
+
+		// 加载着色器
+		// const std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages = {
+		// 	loadShader(getShadersPath() + "gltfloading/mesh.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
+		// 	loadShader(getShadersPath() + "gltfloading/mesh.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT)
+		// };
+	std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages;
+        	shaderStages[0] = iLoader->LoadShader("lightprobesh2/lightprobesh.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
+	shaderStages[1] = iLoader->LoadShader("lightprobesh2/lightprobesh.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
+		// 创建管道信息
+		VkGraphicsPipelineCreateInfo pipelineCI = vks::initializers::pipelineCreateInfo(pipelineLayout, renderPass, 0);
+		pipelineCI.pVertexInputState = &vertexInputStateCI;
+		pipelineCI.pInputAssemblyState = &inputAssemblyStateCI;
+		pipelineCI.pRasterizationState = &rasterizationStateCI;
+		pipelineCI.pColorBlendState = &colorBlendStateCI;
+		pipelineCI.pMultisampleState = &multisampleStateCI;
+		pipelineCI.pViewportState = &viewportStateCI;
+		pipelineCI.pDepthStencilState = &depthStencilStateCI;
+		pipelineCI.pDynamicState = &dynamicStateCI;
+		pipelineCI.stageCount = static_cast<uint32_t>(shaderStages.size());
+		pipelineCI.pStages = shaderStages.data();
+
+		// Solid rendering pipeline
+		// 创建实心管道
+		VK_CHECK_RESULT(vkCreateGraphicsPipelines(vulkanDevice->logicalDevice, pipelineCache, 1, &pipelineCI, nullptr, &pipelines.solid));
+
+		// Wire frame rendering pipeline
+		// // 如果支持，创建线框管道
+		// if (deviceFeatures.fillModeNonSolid) {
+		// 	rasterizationStateCI.polygonMode = VK_POLYGON_MODE_LINE;
+		// 	rasterizationStateCI.lineWidth = 1.0f;
+		// 	VK_CHECK_RESULT(vkCreateGraphicsPipelines(vulkanDevice->logicalDevice, pipelineCache, 1, &pipelineCI, nullptr, &pipelines.wireframe));
+		// }
+	}
 
 } // namespace gltf
