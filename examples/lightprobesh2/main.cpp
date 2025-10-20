@@ -54,7 +54,6 @@ public:
         // 设置相机初始位置和朝向。
         camera.setRotation({ -3.75f, 180.0f, 0.0f }); // 设置初始旋转（俯仰、偏航、滚转）。
         camera.setPosition({ 0.55f, 0.85f, 12.0f }); // 设置初始位置 (x, y, z)。
-
         // 启用多视图扩展（VK_KHR_multiview），用于同时渲染多个视角（如立方体贴图的 6 个面）。
         enabledDeviceExtensions.push_back(VK_KHR_MULTIVIEW_EXTENSION_NAME);
 
@@ -245,7 +244,7 @@ void VulkanExample::LoadAssets()
     LoadPreviewModel("venus", "models/venus.gltf", glTFLoadingFlags); // 加载维纳斯模型。
 
     // 创建glTF模型实例
-    auto gltfModel = std::make_shared<gltf::Model>(); // 创建glTF模型对象。
+    gltfModel = std::make_shared<gltf::Model>(); // 创建glTF模型对象。
     std::string modelPath = getAssetPath() + "models/FlightHelmet/glTF/FlightHelmet.gltf";
     if (gltfModel->loadFromFile(modelPath, vulkanDevice, queue, glTFLoadingFlags)) {
         // 如果加载成功，可以在这里添加对模型的初始化代码
