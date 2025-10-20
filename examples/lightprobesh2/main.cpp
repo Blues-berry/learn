@@ -395,23 +395,38 @@ void VulkanExample::drawFrame(VkCommandBuffer cmd)
         
         // 绘制glTF模型
         if (gltfModel) {
-            // 创建简单的pipeline布局
-            VkDescriptorSetLayout descriptorSetLayout = mainPass->descriptorSetLayout;
+        // glm::mat4 project;
+        // glm::mat4 view;
+        // glm::vec4 light[4];
+        // glm::vec4 cameraPos;
+            // 确保 mainPassData 包含 lightPos 和 viewPos
+        mainPassData.light[0] = glm::vec4(10.0f, 10.0f, 10.0f, 1.0f);  // 示例光源位置
+        mainPassData.cameraPos = glm::vec4(camera.position, 1.0f);  // 相机位置
+        mainPassData.view = camera.matrices.view;
+        mainPassData.project = camera.matrices.perspective;
+        mainPass->UpdateGlobal(mainPassData);
+            // vkCmdBindDescriptorSets(
+            //     cmd, 
+            //     VK_PIPELINE_BIND_POINT_GRAPHICS,
+            //     gltfModel->pipelineLayout, 
+            //     0, 
+            //     1, 
+            //     &gltfModel->descriptorSet,
+            //     0, 
+            //     nullptr);  // 绑定全局 set 到索引 0
+            // vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gltfModel->pipelines.solid);  // 或 previewModel->techniques[(uint32_t)ETechnique::MAIN].pso，如果兼容
+            // // 为头盔模型添加位置偏移，避免与预览模型重叠
+            // glm::mat4 helmetOffset = glm::translate(glm::mat4(1.0f), glm::vec3(1.0f, 1.0f, 0.0f)); // 向右偏移2个单位
+            // gltfModel->draw(cmd, gltfModel->pipelineLayout, helmetOffset);
             
-            VkPipelineLayoutCreateInfo pipelineLayoutCI = {};
-            pipelineLayoutCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-            pipelineLayoutCI.setLayoutCount = 1;
-            pipelineLayoutCI.pSetLayouts = &descriptorSetLayout;
-            
-            VkPipelineLayout pipelineLayout;
-            VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCI, nullptr, &pipelineLayout));
-            //vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gltfModel->pipelines.solid);  // 或 previewModel->techniques[(uint32_t)ETechnique::MAIN].pso，如果兼容
-            // 为头盔模型添加位置偏移，避免与预览模型重叠
-            glm::mat4 helmetOffset = glm::translate(glm::mat4(1.0f), glm::vec3(20.0f, 20.0f, 0.0f)); // 向右偏移2个单位
-            gltfModel->draw(cmd, pipelineLayout, helmetOffset);
-            
+
+
+         std::vector<VkDescriptorSet> sets = { mainPass->descriptorSet, gltfModel->descriptorSet };  // set 0: global, set 1: texture
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gltfModel->pipelineLayout, 0, static_cast<uint32_t>(sets.size()), sets.data(), 0, nullptr);
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gltfModel->pipelines.solid);
+        gltfModel->draw(cmd, gltfModel->pipelineLayout);
             // 清理pipeline布局
-            vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+            // vkDestroyPipelineLayout(device,gltfModel->pipelineLayout, nullptr);
         }
 
         

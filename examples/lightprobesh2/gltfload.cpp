@@ -442,13 +442,22 @@ namespace gltf {
 		// Layout
 		// The pipeline layout uses both descriptor sets (set 0 = matrices, set 1 = material)
 		std::array<VkDescriptorSetLayout, 2> setLayouts = { descriptorSetLayouts.matrices, descriptorSetLayouts.textures };
-		VkPipelineLayoutCreateInfo pipelineLayoutCI = vks::initializers::pipelineLayoutCreateInfo(setLayouts.data(), static_cast<uint32_t>(setLayouts.size()));
+		pipelineLayoutCI = vks::initializers::pipelineLayoutCreateInfo(setLayouts.data(), static_cast<uint32_t>(setLayouts.size()));
+
+
+
+
+
+
+        
 		// We will use push constants to push the local matrices of a primitive to the vertex shader
 		VkPushConstantRange pushConstantRange = vks::initializers::pushConstantRange(VK_SHADER_STAGE_VERTEX_BIT, sizeof(glm::mat4), 0);
 		// Push constant ranges are part of the pipeline layout
 		pipelineLayoutCI.pushConstantRangeCount = 1;
 		pipelineLayoutCI.pPushConstantRanges = &pushConstantRange;
 		VK_CHECK_RESULT(vkCreatePipelineLayout(vulkanDevice->logicalDevice, &pipelineLayoutCI, nullptr, &pipelineLayout));
+
+
 
 		// Pipeline
 		VkPipelineInputAssemblyStateCreateInfo inputAssemblyStateCI = vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
@@ -483,8 +492,8 @@ namespace gltf {
 		// 	loadShader(getShadersPath() + "gltfloading/mesh.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT)
 		// };
 	std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages;
-        	shaderStages[0] = iLoader->LoadShader("lightprobesh2/lightprobesh.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
-	shaderStages[1] = iLoader->LoadShader("lightprobesh2/lightprobesh.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
+        shaderStages[0] = iLoader->LoadShader("lightprobesh2/gltfmesh.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
+	    shaderStages[1] = iLoader->LoadShader("lightprobesh2/gltfmesh.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
 		// 创建管道信息
 		VkGraphicsPipelineCreateInfo pipelineCI = vks::initializers::pipelineCreateInfo(pipelineLayout, renderPass, 0);
 		pipelineCI.pVertexInputState = &vertexInputStateCI;

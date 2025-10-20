@@ -75,6 +75,8 @@ namespace gltf {
     public:
         // 指向Vulkan设备的指针，用于资源创建
         vks::VulkanDevice* vulkanDevice;
+        // 管道布局创建信息
+        VkPipelineLayoutCreateInfo pipelineLayoutCI;
         // 复制队列，用于数据上传到GPU
         VkQueue copyQueue;
 

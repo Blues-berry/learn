@@ -7,7 +7,7 @@ $ cmake --build build --config Debug
 HLSL编译 命令行使用python
 python .\compileshaders.py
 
-
+python .\compileshaders.py --project lightprobesh2
 radiance
 
 
