@@ -10,6 +10,20 @@
 #include "ILoader.h"
 #include "PreviewModel.h"
 #include <fstream>
+#include "tiny_gltf.h"
+#include "../base/VulkanTools.h"
+
+// 注意：不定义TINYGLTF_IMPLEMENTATION，因为它已经在base.lib中实现
+
+// 定义宏以启用 stb_image 的实现，用于图像加载
+#ifndef STB_IMAGE_IMPLEMENTATION
+#define STB_IMAGE_IMPLEMENTATION
+#endif
+
+// 定义宏以禁用 tinygltf 的图像写入功能
+#ifndef TINYGLTF_NO_STB_IMAGE_WRITE
+#define TINYGLTF_NO_STB_IMAGE_WRITE
+#endif
 
 // 包含必要的头文件：
 // - cstdint：提供标准整数类型（如 uint32_t）。
@@ -206,9 +220,12 @@ private:
     std::unique_ptr<Skybox> skybox;
     // 天空盒对象。
     std::unique_ptr<PreviewModel> previewModel;
-    std::unique_ptr<VulkanglTFModel> sceneModel;
+
     // 预览模型对象。
     std::unique_ptr<LightProbe> probe;
+    
+    // glTF模型对象
+    std::shared_ptr<gltf::Model> gltfModel;
 
   
 };
@@ -228,28 +245,11 @@ void VulkanExample::LoadAssets()
     LoadPreviewModel("venus", "models/venus.gltf", glTFLoadingFlags); // 加载维纳斯模型。
 
     // 创建VulkanglTFModel实例
-    sceneModel = std::make_unique<VulkanglTFModel>(vulkanDevice, this);
-
-    // 加载glTF文件
-    std::string modelPath = getAssetPath() + "models/FlightHelmet/glTF/FlightHelmet.gltf";
-    try {
-        sceneModel->loadglTFFile(queue, modelPath);
-        std::cout << "Successfully loaded model: " << modelPath << std::endl;
-    } catch (const std::exception& e) {
-        std::cerr << "Failed to load model: " << modelPath << std::endl;
-        std::cerr << "Error: " << e.what() << std::endl;
-        (void)e; // 抑制未使用变量警告
-        // 如果加载失败，尝试加载一个简单的立方体作为替代
-        try {
-            std::string fallbackPath = getAssetPath() + "models/cube.gltf";
-            sceneModel->loadglTFFile(queue, fallbackPath);
-            std::cout << "Successfully loaded fallback model: " << fallbackPath << std::endl;
-        } catch (const std::exception& e) {
-            std::cerr << "Failed to load fallback model as well: " << e.what() << std::endl;
-            (void)e; // 抑制未使用变量警告
-        }
+    auto gltfModel = std::make_shared<gltf::Model>(); // 创建glTF模型对象。
+    if (gltfModel->loadFromFile(getAssetPath() + "models/FlightHelmet/glTF/FlightHelmet.gltf", vulkanDevice, queue, glTFLoadingFlags)) {
+        // 如果加载成功，可以在这里添加对模型的初始化代码
+        // 例如设置描述符集等
     }
-
 
     skyboxModel = std::make_shared<vkglTF::Model>(); // 创建天空盒模型对象。
     skyboxModel->loadFromFile(getAssetPath() + "models/cube.gltf", vulkanDevice, queue, glTFLoadingFlags); // 加载立方体模型作为天空盒。
@@ -267,17 +267,6 @@ void VulkanExample::PrepareScene()
     previewModel->PreparePSO(renderPass, mainPass->descriptorSetLayout, ETechnique::MAIN); // 准备预览模型的 PSO。
     previewModel->UpdateModel(previewModels[modelIndex]); // 设置初始预览模型。
         // 准备VulkanglTFModel
-    if (sceneModel) {
-        // 设置VulkanglTFModel的成员变量
-        sceneModel->pass = renderPass;
-        sceneModel->width = width;
-        sceneModel->height = height;
-        sceneModel->drawCmdBuffers = drawCmdBuffers;
-        sceneModel->frameBuffers = frameBuffers;
-        
-        sceneModel->prepare(renderPass, pipelineCache, drawCmdBuffers[currentBuffer]);
-    }
-
 }
 
 void VulkanExample::UpdateSkyBox()
@@ -383,13 +372,7 @@ void VulkanExample::prepareData()
 
     skybox->Update(camera.matrices.view); // 更新天空盒的视图矩阵。
     
-    // 更新VulkanglTFModel的uniform buffer
-    if (sceneModel) {
-        sceneModel->shaderData.values.projection = camera.matrices.perspective;
-        sceneModel->shaderData.values.model = glm::mat4(1.0f); // 使用单位矩阵作为模型矩阵
-        sceneModel->shaderData.values.viewPos = glm::vec4(camera.position, 1.0f);
-        sceneModel->updateUniformBuffers(); // 使用VulkanglTFModel自身的更新函数
-    }
+
 }
 
 void VulkanExample::drawFrame(VkCommandBuffer cmd)
@@ -404,11 +387,24 @@ void VulkanExample::drawFrame(VkCommandBuffer cmd)
         skybox->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); // 绘制天空盒。
         previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); // 绘制预览模型。
         
-        // 绘制VulkanglTFModel
-        if (sceneModel) {
-            // 绘制模型，使用其自身的管线和布局
-            sceneModel->draw(cmd, sceneModel->pipelineLayout);
+        // 绘制glTF模型
+        if (gltfModel) {
+            // 创建临时pipeline布局
+            // 在实际应用中，应该使用从mainPass或其他地方获取的pipeline布局
+            VkPipelineLayoutCreateInfo pipelineLayoutCI = {};
+            pipelineLayoutCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+            pipelineLayoutCI.setLayoutCount = 0;
+            pipelineLayoutCI.pSetLayouts = nullptr;
+            
+            VkPipelineLayout tempPipelineLayout;
+            VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCI, nullptr, &tempPipelineLayout));
+            
+            gltfModel->draw(cmd, tempPipelineLayout);
+            
+            // 清理临时pipeline布局
+            vkDestroyPipelineLayout(device, tempPipelineLayout, nullptr);
         }
+
         
         drawUI(cmd); // 绘制 UI（基类方法）。
     });
