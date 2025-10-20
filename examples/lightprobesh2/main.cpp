@@ -244,11 +244,18 @@ void VulkanExample::LoadAssets()
     LoadPreviewModel("torusknot", "models/torusknot.gltf", glTFLoadingFlags); // 加载环面结模型。
     LoadPreviewModel("venus", "models/venus.gltf", glTFLoadingFlags); // 加载维纳斯模型。
 
-    // 创建VulkanglTFModel实例
+    // 创建glTF模型实例
     auto gltfModel = std::make_shared<gltf::Model>(); // 创建glTF模型对象。
-    if (gltfModel->loadFromFile(getAssetPath() + "models/FlightHelmet/glTF/FlightHelmet.gltf", vulkanDevice, queue, glTFLoadingFlags)) {
+    std::string modelPath = getAssetPath() + "models/FlightHelmet/glTF/FlightHelmet.gltf";
+    if (gltfModel->loadFromFile(modelPath, vulkanDevice, queue, glTFLoadingFlags)) {
         // 如果加载成功，可以在这里添加对模型的初始化代码
         // 例如设置描述符集等
+        std::cout << "Successfully loaded glTF model from: " << modelPath << std::endl;
+        std::cout << "Model has " << gltfModel->nodes.size() << " nodes" << std::endl;
+        std::cout << "Model has " << gltfModel->images.size() << " images" << std::endl;
+        std::cout << "Model has " << gltfModel->materials.size() << " materials" << std::endl;
+    } else {
+        std::cerr << "Failed to load glTF model from: " << modelPath << std::endl;
     }
 
     skyboxModel = std::make_shared<vkglTF::Model>(); // 创建天空盒模型对象。
@@ -389,20 +396,21 @@ void VulkanExample::drawFrame(VkCommandBuffer cmd)
         
         // 绘制glTF模型
         if (gltfModel) {
-            // 创建临时pipeline布局
-            // 在实际应用中，应该使用从mainPass或其他地方获取的pipeline布局
+            // 创建简单的pipeline布局
+            VkDescriptorSetLayout descriptorSetLayout = mainPass->descriptorSetLayout;
+            
             VkPipelineLayoutCreateInfo pipelineLayoutCI = {};
             pipelineLayoutCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-            pipelineLayoutCI.setLayoutCount = 0;
-            pipelineLayoutCI.pSetLayouts = nullptr;
+            pipelineLayoutCI.setLayoutCount = 1;
+            pipelineLayoutCI.pSetLayouts = &descriptorSetLayout;
             
-            VkPipelineLayout tempPipelineLayout;
-            VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCI, nullptr, &tempPipelineLayout));
+            VkPipelineLayout pipelineLayout;
+            VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCI, nullptr, &pipelineLayout));
             
-            gltfModel->draw(cmd, tempPipelineLayout);
+            gltfModel->draw(cmd, pipelineLayout);
             
-            // 清理临时pipeline布局
-            vkDestroyPipelineLayout(device, tempPipelineLayout, nullptr);
+            // 清理pipeline布局
+            vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
         }
 
         
