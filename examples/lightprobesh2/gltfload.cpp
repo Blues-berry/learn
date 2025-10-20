@@ -378,7 +378,7 @@ namespace gltf {
         }
     }
 
-    void Model::draw(VkCommandBuffer commandBuffer, VkPipelineLayout pipelineLayout)
+    void Model::draw(VkCommandBuffer commandBuffer, VkPipelineLayout pipelineLayout, glm::mat4 offsetMatrix)
     {
         // All vertices and indices are stored in single buffers, so we only need to bind once
         // 绑定顶点和索引缓冲
@@ -388,7 +388,11 @@ namespace gltf {
         // Render all nodes at top-level
         // 绘制所有顶级节点
         for (auto& node : nodes) {
+            // 应用偏移矩阵
+            node->matrix = offsetMatrix * node->matrix;
             drawNode(commandBuffer, pipelineLayout, node);
+            // 恢复原始矩阵，不影响后续绘制
+            node->matrix = glm::inverse(offsetMatrix) * node->matrix;
         }
     }
 

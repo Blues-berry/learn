@@ -103,7 +103,7 @@ namespace gltf {
         bool loadFromFile(const std::string& filename, vks::VulkanDevice* device, VkQueue queue, uint32_t glTFLoadingFlags);
 
         // 绘制整个场景
-        void draw(VkCommandBuffer commandBuffer, VkPipelineLayout pipelineLayout);
+        void draw(VkCommandBuffer commandBuffer, VkPipelineLayout pipelineLayout, glm::mat4 offsetMatrix = glm::mat4(1.0f));
 
     private:
         // 加载图像

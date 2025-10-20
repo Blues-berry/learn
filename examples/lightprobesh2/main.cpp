@@ -406,7 +406,9 @@ void VulkanExample::drawFrame(VkCommandBuffer cmd)
             VkPipelineLayout pipelineLayout;
             VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCI, nullptr, &pipelineLayout));
             
-            gltfModel->draw(cmd, pipelineLayout);
+            // 为头盔模型添加位置偏移，避免与预览模型重叠
+            glm::mat4 helmetOffset = glm::translate(glm::mat4(1.0f), glm::vec3(20.0f, 20.0f, 0.0f)); // 向右偏移2个单位
+            gltfModel->draw(cmd, pipelineLayout, helmetOffset);
             
             // 清理pipeline布局
             vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
