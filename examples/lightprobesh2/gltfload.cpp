@@ -17,8 +17,9 @@ namespace gltf {
 
     
     Model::Model(vks::VulkanDevice* dev, IExampleInterfasce* example) : vulkanDevice(dev), iLoader(example){
-
-
+        // 创建描述符集布局
+        createDescriptorSetLayouts();
+        // 创建描述符集将在外部进行
     }
     Model::~Model()
     {
@@ -42,8 +43,125 @@ namespace gltf {
         }
     }
 
+    void Model::createDescriptorSetLayouts()
+    {
+        // 矩阵描述符集布局
+        {
+            std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {
+                vks::initializers::descriptorSetLayoutBinding(
+                    VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                    VK_SHADER_STAGE_VERTEX_BIT,
+                    0,
+                    1
+                )
+            };
+
+            VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCI = vks::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings.data(), static_cast<uint32_t>(setLayoutBindings.size()));
+            VK_CHECK_RESULT(vkCreateDescriptorSetLayout(vulkanDevice->logicalDevice, &descriptorSetLayoutCI, nullptr, &descriptorSetLayouts.matrices));
+        }
+
+        // 纹理描述符集布局
+        {
+            std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {
+                vks::initializers::descriptorSetLayoutBinding(
+                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                    VK_SHADER_STAGE_FRAGMENT_BIT,
+                    0,
+                    1
+                )
+            };
+
+            VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCI = vks::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings.data(), static_cast<uint32_t>(setLayoutBindings.size()));
+            VK_CHECK_RESULT(vkCreateDescriptorSetLayout(vulkanDevice->logicalDevice, &descriptorSetLayoutCI, nullptr, &descriptorSetLayouts.textures));
+        }
+    }
+
+    void Model::createDescriptorSets(VkDescriptorPool descriptorPool)
+    {
+        // 首先创建描述符集布局
+        setupDescriptors(descriptorPool);
+        
+        // 创建描述符集
+        std::vector<VkDescriptorSetLayout> layouts(1, descriptorSetLayouts.matrices);
+
+        // 分配矩阵描述符集
+        VkDescriptorSetAllocateInfo allocInfo = vks::initializers::descriptorSetAllocateInfo(descriptorPool, layouts.data(), 1);
+        VK_CHECK_RESULT(vkAllocateDescriptorSets(vulkanDevice->logicalDevice, &allocInfo, &descriptorSet));
+
+        // 更新矩阵描述符集
+        VkDescriptorBufferInfo bufferInfo = { shaderData.buffer.buffer, 0, VK_WHOLE_SIZE };
+        VkWriteDescriptorSet writeDescriptorSet = vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &bufferInfo);
+        vkUpdateDescriptorSets(vulkanDevice->logicalDevice, 1, &writeDescriptorSet, 0, nullptr);
+
+        // 为每个图像分配纹理描述符集
+        for (auto& image : images) {
+            std::vector<VkDescriptorSetLayout> textureLayouts(1, descriptorSetLayouts.textures);
+            VkDescriptorSetAllocateInfo textureAllocInfo = vks::initializers::descriptorSetAllocateInfo(descriptorPool, textureLayouts.data(), 1);
+            VK_CHECK_RESULT(vkAllocateDescriptorSets(vulkanDevice->logicalDevice, &textureAllocInfo, &image.descriptorSet));
+
+            VkDescriptorImageInfo imageInfo = { image.texture.sampler, image.texture.view, image.texture.imageLayout };
+            VkWriteDescriptorSet writeImageDescriptorSet = vks::initializers::writeDescriptorSet(image.descriptorSet, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 0, &imageInfo);
+            vkUpdateDescriptorSets(vulkanDevice->logicalDevice, 1, &writeImageDescriptorSet, 0, nullptr);
+        }
+    }
+
+    void Model::setupDescriptors(VkDescriptorPool descriptorPool)
+    {
+        // 描述符池大小
+        std::vector<VkDescriptorPoolSize> poolSizes = {
+            vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1),
+            // One combined image sampler per model image/texture
+            vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, static_cast<uint32_t>(this->images.size())),
+        };
+        // One set for matrices and one per model image/texture
+        const uint32_t maxSetCount = static_cast<uint32_t>(this->images.size()) + 1;
+        VkDescriptorPoolCreateInfo descriptorPoolInfo = vks::initializers::descriptorPoolCreateInfo(poolSizes, maxSetCount);
+        VK_CHECK_RESULT(vkCreateDescriptorPool(vulkanDevice->logicalDevice, &descriptorPoolInfo, nullptr, &descriptorPool));
+
+        // Descriptor set layout for passing matrices
+        // 矩阵描述符集布局
+        std::vector<VkDescriptorSetLayoutBinding> matrixBindings = {
+            vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 0)
+        };
+        VkDescriptorSetLayoutCreateInfo matrixLayoutCI = vks::initializers::descriptorSetLayoutCreateInfo(matrixBindings.data(), static_cast<uint32_t>(matrixBindings.size()));
+        VK_CHECK_RESULT(vkCreateDescriptorSetLayout(vulkanDevice->logicalDevice, &matrixLayoutCI, nullptr, &descriptorSetLayouts.matrices));
+
+        // Descriptor set layout for passing material textures
+        // 纹理描述符集布局
+        std::vector<VkDescriptorSetLayoutBinding> textureBindings = {
+            vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 0)
+        };
+        VkDescriptorSetLayoutCreateInfo textureLayoutCI = vks::initializers::descriptorSetLayoutCreateInfo(textureBindings.data(), static_cast<uint32_t>(textureBindings.size()));
+        VK_CHECK_RESULT(vkCreateDescriptorSetLayout(vulkanDevice->logicalDevice, &textureLayoutCI, nullptr, &descriptorSetLayouts.textures));
+
+        // Descriptor set for scene matrices
+        // 分配矩阵描述符集
+        std::vector<VkDescriptorSetLayout> layouts(1, descriptorSetLayouts.matrices);
+        VkDescriptorSetAllocateInfo allocInfo = vks::initializers::descriptorSetAllocateInfo(descriptorPool, layouts.data(), 1);
+        VK_CHECK_RESULT(vkAllocateDescriptorSets(vulkanDevice->logicalDevice, &allocInfo, &descriptorSet));
+        VkDescriptorBufferInfo bufferInfo = { shaderData.buffer.buffer, 0, VK_WHOLE_SIZE };
+        VkWriteDescriptorSet writeDescriptorSet = vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &bufferInfo);
+        vkUpdateDescriptorSets(vulkanDevice->logicalDevice, 1, &writeDescriptorSet, 0, nullptr);
+
+        // Descriptor sets for materials
+        // 为每个图像分配纹理描述符集
+        for (size_t i = 0; i < this->images.size(); i++) {
+            std::vector<VkDescriptorSetLayout> layouts(1, descriptorSetLayouts.textures);
+            const VkDescriptorSetAllocateInfo allocInfo = vks::initializers::descriptorSetAllocateInfo(descriptorPool, layouts.data(), 1);
+            VK_CHECK_RESULT(vkAllocateDescriptorSets(vulkanDevice->logicalDevice, &allocInfo, &this->images[i].descriptorSet));
+            VkDescriptorImageInfo imageInfo = { this->images[i].texture.sampler, this->images[i].texture.view, this->images[i].texture.imageLayout };
+            VkWriteDescriptorSet writeImageDescriptorSet = vks::initializers::writeDescriptorSet(this->images[i].descriptorSet, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 0, &imageInfo);
+            vkUpdateDescriptorSets(vulkanDevice->logicalDevice, 1, &writeImageDescriptorSet, 0, nullptr);
+        }
+    }
+
     bool Model::loadFromFile(const std::string& filename, vks::VulkanDevice* device, VkQueue queue, uint32_t glTFLoadingFlags)
     {
+        if (device == nullptr) {
+            std::cerr << "Invalid VulkanDevice pointer!" << std::endl;
+            return false;
+        }
+
         tinygltf::Model glTFInput;
         tinygltf::TinyGLTF gltfContext;
         std::string error, warning;
@@ -55,18 +173,50 @@ namespace gltf {
         std::vector<uint32_t> indexBuffer;
         std::vector<Vertex> vertexBuffer;
 
-        // 使用 tinygltf 加载文件
-        bool fileLoaded = gltfContext.LoadASCIIFromFile(&glTFInput, &error, &warning, filename);
+        // 根据扩展名选择正确的加载方式（支持 .glb 和 .gltf）
+        auto endsWithIgnoreCase = [](const std::string& str, const std::string& suffix) {
+            if (suffix.size() > str.size()) return false;
+            for (size_t i = 0; i < suffix.size(); ++i) {
+                char a = (char)std::tolower(str[str.size() - suffix.size() + i]);
+                char b = (char)std::tolower(suffix[i]);
+                if (a != b) return false;
+            }
+            return true;
+        };
+
+        bool fileLoaded = false;
+        if (endsWithIgnoreCase(filename, ".glb")) {
+            fileLoaded = gltfContext.LoadBinaryFromFile(&glTFInput, &error, &warning, filename);
+        } else {
+            fileLoaded = gltfContext.LoadASCIIFromFile(&glTFInput, &error, &warning, filename);
+        }
+
+        if (!warning.empty()) {
+            std::cerr << "glTF loader warning: " << warning << std::endl;
+        }
 
         // 如果加载成功
         if (fileLoaded) {
+            // 加载顺序：先图像，再纹理，最后材质（材质依赖纹理）
             loadImages(glTFInput);
-            loadMaterials(glTFInput);
             loadTextures(glTFInput);
-            const tinygltf::Scene& scene = glTFInput.scenes[0];
-            for (size_t i = 0; i < scene.nodes.size(); i++) {
-                const tinygltf::Node node = glTFInput.nodes[scene.nodes[i]];
-                loadNode(node, glTFInput, nullptr, indexBuffer, vertexBuffer);
+            loadMaterials(glTFInput);
+
+            // 场景选择：优先使用 defaultScene，其次第一个场景；若无场景，则遍历所有根节点
+            int sceneIndex = glTFInput.defaultScene >= 0 ? glTFInput.defaultScene : 0;
+            if (!glTFInput.scenes.empty()) {
+                const tinygltf::Scene& scene = glTFInput.scenes[sceneIndex];
+                for (size_t i = 0; i < scene.nodes.size(); i++) {
+                    const tinygltf::Node node = glTFInput.nodes[scene.nodes[i]];
+                    loadNode(node, glTFInput, nullptr, indexBuffer, vertexBuffer);
+                }
+            } else {
+                // 没有定义场景时，遍历所有根节点（无父节点）
+                for (size_t i = 0; i < glTFInput.nodes.size(); ++i) {
+                    const tinygltf::Node& nodeRef = glTFInput.nodes[i];
+                    // 认为无父节点即为根节点（tinygltf不直接提供父信息，这里简单处理）
+                    loadNode(nodeRef, glTFInput, nullptr, indexBuffer, vertexBuffer);
+                }
             }
         }
         else {
@@ -78,82 +228,105 @@ namespace gltf {
         // We will be using one single vertex buffer and one single index buffer for the whole glTF scene
         // Primitives (of the glTF model) will then index into these using index offsets
 
-        // 计算缓冲大小
-        size_t vertexBufferSize = vertexBuffer.size() * sizeof(Vertex);
-        size_t indexBufferSize = indexBuffer.size() * sizeof(uint32_t);
+        // 计算缓冲大小（使用 VkDeviceSize）
+        VkDeviceSize vertexBufferSize = static_cast<VkDeviceSize>(vertexBuffer.size() * sizeof(Vertex));
+        VkDeviceSize indexBufferSize = static_cast<VkDeviceSize>(indexBuffer.size() * sizeof(uint32_t));
         indices.count = static_cast<uint32_t>(indexBuffer.size());
 
         // 暂存缓冲结构
         struct StagingBuffer {
-            VkBuffer buffer;
-            VkDeviceMemory memory;
+            VkBuffer buffer = VK_NULL_HANDLE;
+            VkDeviceMemory memory = VK_NULL_HANDLE;
         } vertexStaging, indexStaging;
 
-        // Create host visible staging buffers (source)
-        // 创建顶点暂存缓冲
-        VK_CHECK_RESULT(vulkanDevice->createBuffer(
-            VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-            vertexBufferSize,
-            &vertexStaging.buffer,
-            &vertexStaging.memory,
-            vertexBuffer.data()));
-        // Index data
-        // 创建索引暂存缓冲
-        VK_CHECK_RESULT(vulkanDevice->createBuffer(
-            VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-            indexBufferSize,
-            &indexStaging.buffer,
-            &indexStaging.memory,
-            indexBuffer.data()));
+        // 当存在数据时才创建缓冲与执行复制，避免零大小缓冲的非法情况
+        if (vertexBufferSize > 0) {
+            // 创建顶点暂存缓冲（源）
+            VK_CHECK_RESULT(vulkanDevice->createBuffer(
+                VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                vertexBufferSize,
+                &vertexStaging.buffer,
+                &vertexStaging.memory,
+                vertexBuffer.data()));
 
-        // Create device local buffers (target)
-        // 创建设备本地顶点缓冲
-        VK_CHECK_RESULT(vulkanDevice->createBuffer(
-            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-            vertexBufferSize,
-            &vertices.buffer,
-            &vertices.memory));
-        // 创建设备本地索引缓冲
-        VK_CHECK_RESULT(vulkanDevice->createBuffer(
-            VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-            indexBufferSize,
-            &indices.buffer,
-            &indices.memory));
+            // 创建设备本地顶点缓冲（目标）
+            VK_CHECK_RESULT(vulkanDevice->createBuffer(
+                VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                vertexBufferSize,
+                &vertices.buffer,
+                &vertices.memory));
+        } else {
+            vertices.buffer = VK_NULL_HANDLE;
+            vertices.memory = VK_NULL_HANDLE;
+        }
 
-        // Copy data from staging buffers (host) do device local buffer (gpu)
-        // 创建命令缓冲进行复制
-        VkCommandBuffer copyCmd = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
-        VkBufferCopy copyRegion = {};
+        if (indexBufferSize > 0) {
+            // 创建索引暂存缓冲（源）
+            VK_CHECK_RESULT(vulkanDevice->createBuffer(
+                VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                indexBufferSize,
+                &indexStaging.buffer,
+                &indexStaging.memory,
+                indexBuffer.data()));
 
-        copyRegion.size = vertexBufferSize;
-        vkCmdCopyBuffer(
-            copyCmd,
-            vertexStaging.buffer,
-            vertices.buffer,
-            1,
-            &copyRegion);
+            // 创建设备本地索引缓冲（目标）
+            VK_CHECK_RESULT(vulkanDevice->createBuffer(
+                VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                indexBufferSize,
+                &indices.buffer,
+                &indices.memory));
+        } else {
+            indices.buffer = VK_NULL_HANDLE;
+            indices.memory = VK_NULL_HANDLE;
+        }
 
-        copyRegion.size = indexBufferSize;
-        vkCmdCopyBuffer(
-            copyCmd,
-            indexStaging.buffer,
-            indices.buffer,
-            1,
-            &copyRegion);
+        // 复制数据：仅当有数据时执行
+        if (vertexBufferSize > 0 || indexBufferSize > 0) {
+            // 创建命令缓冲进行复制
+            VkCommandBuffer copyCmd = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
 
-        // 刷新命令缓冲
-        vulkanDevice->flushCommandBuffer(copyCmd, queue, true);
+            if (vertexBufferSize > 0) {
+                VkBufferCopy copyRegion = {};
+                copyRegion.srcOffset = 0;
+                copyRegion.dstOffset = 0;
+                copyRegion.size = vertexBufferSize;
+                vkCmdCopyBuffer(copyCmd, vertexStaging.buffer, vertices.buffer, 1, &copyRegion);
+            }
 
-        // Free staging resources
-        // 释放暂存资源
-        vkDestroyBuffer(device->logicalDevice, vertexStaging.buffer, nullptr);
-        vkFreeMemory(device->logicalDevice, vertexStaging.memory, nullptr);
-        vkDestroyBuffer(device->logicalDevice, indexStaging.buffer, nullptr);
-        vkFreeMemory(device->logicalDevice, indexStaging.memory, nullptr);
+            if (indexBufferSize > 0) {
+                VkBufferCopy copyRegion = {};
+                copyRegion.srcOffset = 0;
+                copyRegion.dstOffset = 0;
+                copyRegion.size = indexBufferSize;
+                vkCmdCopyBuffer(copyCmd, indexStaging.buffer, indices.buffer, 1, &copyRegion);
+            }
+
+            // 提交并刷新命令缓冲
+            vulkanDevice->flushCommandBuffer(copyCmd, queue, true);
+        }
+
+        // 加载结果检查
+        if (nodes.empty()) {
+            std::cerr << "No nodes loaded from GLTF file!" << std::endl;
+        }
+
+        // 释放暂存资源（仅当创建过）
+        if (vertexStaging.buffer != VK_NULL_HANDLE) {
+            vkDestroyBuffer(device->logicalDevice, vertexStaging.buffer, nullptr);
+        }
+        if (vertexStaging.memory != VK_NULL_HANDLE) {
+            vkFreeMemory(device->logicalDevice, vertexStaging.memory, nullptr);
+        }
+        if (indexStaging.buffer != VK_NULL_HANDLE) {
+            vkDestroyBuffer(device->logicalDevice, indexStaging.buffer, nullptr);
+        }
+        if (indexStaging.memory != VK_NULL_HANDLE) {
+            vkFreeMemory(device->logicalDevice, indexStaging.memory, nullptr);
+        }
 
         return true;
     }
@@ -383,21 +556,17 @@ namespace gltf {
         }
     }
 
-    void Model::draw(VkCommandBuffer commandBuffer, VkPipelineLayout pipelineLayout, glm::mat4 offsetMatrix)
+    void Model::draw(VkCommandBuffer commandBuffer, VkPipelineLayout pipelineLayout)
     {
         // All vertices and indices are stored in single buffers, so we only need to bind once
         // 绑定顶点和索引缓冲
         VkDeviceSize offsets[1] = { 0 };
-        vkCmdBindVertexBuffers(commandBuffer, 0, 1, &vertices.buffer, offsets);
+        vkCmdBindVertexBuffers(commandBuffer, 0, 1, &vertices.buffer, &offsets[0]);
         vkCmdBindIndexBuffer(commandBuffer, indices.buffer, 0, VK_INDEX_TYPE_UINT32);
         // Render all nodes at top-level
         // 绘制所有顶级节点
-        for (auto& node : nodes) {
-            // 应用偏移矩阵
-            node->matrix = offsetMatrix * node->matrix;
-            drawNode(commandBuffer, pipelineLayout, node);
-            // 恢复原始矩阵，不影响后续绘制
-            node->matrix = glm::inverse(offsetMatrix) * node->matrix;
+        for (size_t i = 0; i < nodes.size(); i++) {
+            drawNode(commandBuffer, pipelineLayout, nodes[i]);
         }
     }
 
@@ -418,11 +587,12 @@ namespace gltf {
             // 使用 push constant 传递矩阵
             vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &nodeMatrix);
             // 遍历图元
-            for (Primitive& primitive : node->mesh.primitives) {
+            for (size_t j = 0; j < node->mesh.primitives.size(); j++) {
+                const Primitive& primitive = node->mesh.primitives[j];
                 if (primitive.indexCount > 0) {
                     // Get the texture index for this primitive
                     // 获取纹理
-                    Texture texture = textures[materials[primitive.materialIndex].baseColorTextureIndex];
+                    const Texture& texture = textures[materials[primitive.materialIndex].baseColorTextureIndex];
                     // Bind the descriptor for the current primitive's texture
                     // 绑定纹理描述符集
                     vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 1, 1, &images[texture.imageIndex].descriptorSet, 0, nullptr);
@@ -432,8 +602,8 @@ namespace gltf {
             }
         }
         // 递归绘制子节点
-        for (auto& child : node->children) {
-            drawNode(commandBuffer, pipelineLayout, child);
+        for (size_t i = 0; i < node->children.size(); i++) {
+            drawNode(commandBuffer, pipelineLayout, node->children[i]);
         }
     }
 	// 准备管道

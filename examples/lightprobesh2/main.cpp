@@ -85,6 +85,12 @@ public:
 
         cubeMaps.clear(); // 清空立方体贴图列表。
 
+        // 销毁描述符池
+        if (descriptorPool != VK_NULL_HANDLE) {
+            vkDestroyDescriptorPool(device, descriptorPool, nullptr);
+            descriptorPool = VK_NULL_HANDLE;
+        }
+        
         // 清空渲染通道对象。
         mainPass = nullptr;
         shGenPass = nullptr;
@@ -225,6 +231,9 @@ private:
     
     // glTF模型对象
     std::shared_ptr<gltf::Model> gltfModel;
+    
+    // 描述符池
+    VkDescriptorPool descriptorPool{ VK_NULL_HANDLE };
 
   
 };
@@ -244,11 +253,12 @@ void VulkanExample::LoadAssets()
     LoadPreviewModel("venus", "models/venus.gltf", glTFLoadingFlags); // 加载维纳斯模型。
 
     // 创建glTF模型实例
-    gltfModel = std::make_shared<gltf::Model>(vulkanDevice, this); // 创建glTF模型对象。
+    gltfModel = std::make_shared<gltf::Model>(vulkanDevice, static_cast<IExampleInterfasce*>(this)); // 创建glTF模型对象。
     std::string modelPath = getAssetPath() + "models/FlightHelmet/glTF/FlightHelmet.gltf";
     if (gltfModel->loadFromFile(modelPath, vulkanDevice, queue, glTFLoadingFlags)) {
         // 如果加载成功，可以在这里添加对模型的初始化代码
-        // 例如设置描述符集等
+        // 创建描述符集
+        gltfModel->createDescriptorSets(descriptorPool);
         std::cout << "Successfully loaded glTF model from: " << modelPath << std::endl;
         std::cout << "Model has " << gltfModel->nodes.size() << " nodes" << std::endl;
         std::cout << "Model has " << gltfModel->images.size() << " images" << std::endl;
@@ -320,6 +330,14 @@ void VulkanExample::LoadCubeMap(const std::string& name, const std::string& cube
 
 void VulkanExample::PreparePasses()
 {
+    // 准备描述符池
+    std::vector<VkDescriptorPoolSize> poolSizes = {
+        vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1),
+        vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 32)
+    };
+    VkDescriptorPoolCreateInfo descriptorPoolInfo = vks::initializers::descriptorPoolCreateInfo(poolSizes, 33);
+    VK_CHECK_RESULT(vkCreateDescriptorPool(device, &descriptorPoolInfo, nullptr, &descriptorPool));
+    
     // 准备所有渲染通道。
     mainPass = std::make_unique<MainPass>(vulkanDevice); // 创建主渲染通道。
     mainPass->SetUp(renderPass); // 设置主渲染通道的渲染通道对象。
@@ -419,12 +437,16 @@ void VulkanExample::drawFrame(VkCommandBuffer cmd)
             // glm::mat4 helmetOffset = glm::translate(glm::mat4(1.0f), glm::vec3(1.0f, 1.0f, 0.0f)); // 向右偏移2个单位
             // gltfModel->draw(cmd, gltfModel->pipelineLayout, helmetOffset);
             
+            // 绑定全局 set 0 (MainPass 的 UBO)
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gltfModel->pipelineLayout, 0, 1, &mainPass->descriptorSet, 0, nullptr);
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gltfModel->pipelines.solid);
+
+            // 添加位置偏移，避免与预览模型重叠
+            glm::mat4 helmetOffset = glm::translate(glm::mat4(1.0f), glm::vec3(2.0f, 0.0f, 0.0f));  // 向右偏移 2 单位
+            gltfModel->draw(cmd, gltfModel->pipelineLayout);
 
 
-         std::vector<VkDescriptorSet> sets = { mainPass->descriptorSet, gltfModel->descriptorSet };  // set 0: global, set 1: texture
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gltfModel->pipelineLayout, 0, static_cast<uint32_t>(sets.size()), sets.data(), 0, nullptr);
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gltfModel->pipelines.solid);
-        gltfModel->draw(cmd, gltfModel->pipelineLayout);
+
             // 清理pipeline布局
             // vkDestroyPipelineLayout(device,gltfModel->pipelineLayout, nullptr);
         }

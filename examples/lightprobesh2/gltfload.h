@@ -38,13 +38,16 @@ namespace gltf {
         std::vector<Primitive> primitives;
     };
 
+    // 前向声明 Node 结构
+    struct Node;
+
+    // A node represents an object in the glTF scene graph
     // 节点结构，表示 glTF 场景图中的对象
     struct Node {
         Node* parent;  // 父节点
         std::vector<Node*> children;  // 子节点列表
         Mesh mesh;  // 网格数据
         glm::mat4 matrix;  // 变换矩阵
-
         // 析构函数，递归删除子节点
         ~Node() {
             for (auto& child : children) {
@@ -59,12 +62,15 @@ namespace gltf {
         uint32_t baseColorTextureIndex;
     };
 
+    // Contains the texture for a single glTF image
     // 图像结构，包含纹理和描述符集
     struct Image {
         vks::Texture2D texture;
+        // We also store (and create) a descriptor set that's used to access this texture from the fragment shader
         VkDescriptorSet descriptorSet;
     };
 
+    // A glTF texture stores a reference to the image and a sampler
     // 纹理结构，仅引用图像索引
     struct Texture {
         int32_t imageIndex;
@@ -73,6 +79,15 @@ namespace gltf {
     // glTF模型类，用于加载和渲染glTF模型
     class Model {
     public:
+    	struct ShaderData {
+		vks::Buffer buffer;
+		struct Values {
+			glm::mat4 projection;  // 投影矩阵
+			glm::mat4 model;  // 模型视图矩阵
+			glm::vec4 lightPos = glm::vec4(5.0f, 5.0f, -5.0f, 1.0f);  // 光源位置
+			glm::vec4 viewPos;  // 视图位置
+		} values;
+	} shaderData;
         // 指向Vulkan设备的指针，用于资源创建
         vks::VulkanDevice* vulkanDevice;
         // 管道布局创建信息
@@ -102,6 +117,9 @@ namespace gltf {
 	VkPipelineLayout pipelineLayout{ VK_NULL_HANDLE };
 	// 描述符集（用于矩阵）
 	VkDescriptorSet descriptorSet{ VK_NULL_HANDLE };
+    VkDescriptorSetLayout descriptorSetLayout{ VK_NULL_HANDLE };
+	// 描述符集（用于纹理）
+	VkDescriptorSet textureDescriptorSet{ VK_NULL_HANDLE };
 
 	struct Pipelines {
 		VkPipeline solid{ VK_NULL_HANDLE };
@@ -120,8 +138,13 @@ namespace gltf {
         bool loadFromFile(const std::string& filename, vks::VulkanDevice* device, VkQueue queue, uint32_t glTFLoadingFlags);
 
         // 绘制整个场景
-        void draw(VkCommandBuffer commandBuffer, VkPipelineLayout pipelineLayout, glm::mat4 offsetMatrix = glm::mat4(1.0f));
+        void draw(VkCommandBuffer commandBuffer, VkPipelineLayout pipelineLayout);
         void preparePipelines(VkPipelineCache pipelineCache,VkRenderPass renderPass);
+        
+        // 创建描述符集布局和描述符集
+        void createDescriptorSetLayouts();
+        void createDescriptorSets(VkDescriptorPool descriptorPool);
+        void setupDescriptors(VkDescriptorPool descriptorPool);
     private:
     	IExampleInterfasce* iLoader;
         // 加载图像
