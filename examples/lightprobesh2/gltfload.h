@@ -36,6 +36,7 @@ public:
 	void PreparePSO(VkRenderPass renderPass, VkDescriptorSetLayout passLayout, ETechnique technique);
 
 	void ShowUI(vks::UIOverlay* overlay);
+	void SetTransform(const glm::mat4& transform);
     std::shared_ptr<vkglTF::Model> getModel() const { return model; }
 
 private:

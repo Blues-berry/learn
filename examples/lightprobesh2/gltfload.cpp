@@ -109,6 +109,12 @@ void GltfModel::UpdateSet()
 	vkUpdateDescriptorSets(device->logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, NULL);
 }
 
+void GltfModel::SetTransform(const glm::mat4& transform)
+{
+	localData.transform = transform;
+	memcpy(localBuffer.mapped, &localData, sizeof(LocalBuffer));
+}
+
 void GltfModel::PreparePSO(VkRenderPass renderPass, VkDescriptorSetLayout passLayout, ETechnique technique)
 {
 	VkDevice rawDevice = device->logicalDevice;

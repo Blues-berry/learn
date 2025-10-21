@@ -1,6 +1,7 @@
 #include <cstdint>
 #include <glm/glm.hpp> 
 #include <glm/gtc/constants.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 #include "vulkanexamplebase.h"
 #include "VulkanglTFModel.h"
 #include "LightProbe.h"
@@ -290,6 +291,12 @@ void VulkanExample::PrepareScene()
     gltfModel = std::make_unique<GltfModel>(vulkanDevice, this); // 创建 glTF 模型对象。
     gltfModel->PreparePSO(renderPass, mainPass->descriptorSetLayout, ETechnique::MAIN); // 准备预览模型的 PSO。
     gltfModel->UpdateModel(gltfModels[gltfmodelIndex]); // 设置初始预览模型。
+    // 将 glTF 模型左移并放大两倍
+    {
+        glm::mat4 t = glm::translate(glm::mat4(1.0f), glm::vec3(-2.0f, 0.0f, 0.0f));
+        glm::mat4 s = glm::scale(glm::mat4(1.0f), glm::vec3(2.0f));
+        gltfModel->SetTransform(t * s);
+    }
 }
 
 void VulkanExample::UpdateSkyBox()
