@@ -247,7 +247,7 @@ void VulkanExample::LoadAssets()
 
     uint32_t glTFLoadingFlags = vkglTF::FileLoadingFlags::PreTransformVertices | vkglTF::FileLoadingFlags::FlipY; // 设置 glTF 加载标志：预变换顶点，翻转 Y 轴。
 
-    LoadPreviewModel("sphere", "models/sphere.gltf", glTFLoadingFlags); // 加载球体模型。
+    LoadPreviewModel("sphere", "models/FlightHelmet/glTF/FlightHelmet.gltf", glTFLoadingFlags); // 加载球体模型。
     LoadPreviewModel("teapot", "models/teapot.gltf", glTFLoadingFlags); // 加载茶壶模型。
     LoadPreviewModel("torusknot", "models/torusknot.gltf", glTFLoadingFlags); // 加载环面结模型。
     LoadPreviewModel("venus", "models/venus.gltf", glTFLoadingFlags); // 加载维纳斯模型。
@@ -258,7 +258,7 @@ void VulkanExample::LoadAssets()
     if (gltfModel->loadFromFile(modelPath, vulkanDevice, queue, glTFLoadingFlags)) {
         // 如果加载成功，可以在这里添加对模型的初始化代码
         // 创建描述符集
-        gltfModel->createDescriptorSets(descriptorPool);
+        //gltfModel->createDescriptorSets(descriptorPool);
         std::cout << "Successfully loaded glTF model from: " << modelPath << std::endl;
         std::cout << "Model has " << gltfModel->nodes.size() << " nodes" << std::endl;
         std::cout << "Model has " << gltfModel->images.size() << " images" << std::endl;
@@ -364,7 +364,7 @@ void VulkanExample::PreparePasses()
         genIBL->Draw(cmdBuf); // 绘制 IBL 贴图。
         vulkanDevice->flushCommandBuffer(cmdBuf, queue); // 提交并刷新命令缓冲区。
     }
-    gltfModel->preparePipelines(pipelineCache, renderPass); // 准备 glTF 模型的渲染管线。
+    //gltfModel->preparePipelines(pipelineCache, renderPass); // 准备 glTF 模型的渲染管线。
     mainPass->UpdateBindings(); // 更新主渲染通道的描述符绑定。
 }
 
@@ -438,12 +438,12 @@ void VulkanExample::drawFrame(VkCommandBuffer cmd)
             // gltfModel->draw(cmd, gltfModel->pipelineLayout, helmetOffset);
             
             // 绑定全局 set 0 (MainPass 的 UBO)
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gltfModel->pipelineLayout, 0, 1, &mainPass->descriptorSet, 0, nullptr);
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gltfModel->pipelines.solid);
+            // vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gltfModel->pipelineLayout, 0, 1, &mainPass->descriptorSet, 0, nullptr);
+            // vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gltfModel->pipelines.solid);
 
             // 添加位置偏移，避免与预览模型重叠
-            glm::mat4 helmetOffset = glm::translate(glm::mat4(1.0f), glm::vec3(2.0f, 0.0f, 0.0f));  // 向右偏移 2 单位
-            gltfModel->draw(cmd, gltfModel->pipelineLayout);
+            // glm::mat4 helmetOffset = glm::translate(glm::mat4(1.0f), glm::vec3(2.0f, 0.0f, 0.0f));  // 向右偏移 2 单位
+            // gltfModel->draw(cmd, gltfModel->pipelineLayout);
 
 
 
