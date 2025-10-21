@@ -244,6 +244,7 @@ private:
     
     // glTF模型对象
     std::unique_ptr<GltfModel> gltfModel;
+    std::vector<std::unique_ptr<GltfModel>> gltfClones;
     
     // 描述符池
     VkDescriptorPool descriptorPool{ VK_NULL_HANDLE };
@@ -267,6 +268,7 @@ void VulkanExample::LoadAssets()
 
    
     LoadgltfModel("FlightHelmet", "models/FlightHelmet/glTF/FlightHelmet.gltf", glTFLoadingFlags); // 
+    LoadgltfModel("CesiumMan", "models/CesiumMan/glTF/CesiumMan.gltf", glTFLoadingFlags); // 
     skyboxModel = std::make_shared<vkglTF::Model>(); // 创建天空盒模型对象。
     skyboxModel->loadFromFile(getAssetPath() + "models/cube.gltf", vulkanDevice, queue, glTFLoadingFlags); // 加载立方体模型作为天空盒。
     
@@ -291,11 +293,44 @@ void VulkanExample::PrepareScene()
     gltfModel = std::make_unique<GltfModel>(vulkanDevice, this); // 创建 glTF 模型对象。
     gltfModel->PreparePSO(renderPass, mainPass->descriptorSetLayout, ETechnique::MAIN); // 准备预览模型的 PSO。
     gltfModel->UpdateModel(gltfModels[gltfmodelIndex]); // 设置初始预览模型。
-    // 将 glTF 模型左移并放大两倍
+    // 将 glTF 模型左移并放大10倍
     {
-        glm::mat4 t = glm::translate(glm::mat4(1.0f), glm::vec3(-2.0f, 0.0f, 0.0f));
-        glm::mat4 s = glm::scale(glm::mat4(1.0f), glm::vec3(2.0f));
+        glm::mat4 t = glm::translate(glm::mat4(1.0f), glm::vec3(-20.0f, 0.0f, 0.0f));
+        glm::mat4 s = glm::scale(glm::mat4(1.0f), glm::vec3(50.0f));
         gltfModel->SetTransform(t * s);
+    }
+    // 复制3份 glTF 模型并放置在四周
+    {
+        // 右侧
+        {
+            auto clone = std::make_unique<GltfModel>(vulkanDevice, this);
+            clone->PreparePSO(renderPass, mainPass->descriptorSetLayout, ETechnique::MAIN);
+            clone->UpdateModel(gltfModels[gltfmodelIndex]);
+            glm::mat4 tR = glm::translate(glm::mat4(1.0f), glm::vec3(20.0f, 0.0f, 0.0f));
+            glm::mat4 sR = glm::scale(glm::mat4(1.0f), glm::vec3(50.0f));
+            clone->SetTransform(tR * sR);
+            gltfClones.emplace_back(std::move(clone));
+        }
+        // 前方
+        {
+            auto clone = std::make_unique<GltfModel>(vulkanDevice, this);
+            clone->PreparePSO(renderPass, mainPass->descriptorSetLayout, ETechnique::MAIN);
+            clone->UpdateModel(gltfModels[gltfmodelIndex]);
+            glm::mat4 tF = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -20.0f));
+            glm::mat4 sF = glm::scale(glm::mat4(1.0f), glm::vec3(50.0f));
+            clone->SetTransform(tF * sF);
+            gltfClones.emplace_back(std::move(clone));
+        }
+        // 后方
+        {
+            auto clone = std::make_unique<GltfModel>(vulkanDevice, this);
+            clone->PreparePSO(renderPass, mainPass->descriptorSetLayout, ETechnique::MAIN);
+            clone->UpdateModel(gltfModels[gltfmodelIndex]);
+            glm::mat4 tB = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 20.0f));
+            glm::mat4 sB = glm::scale(glm::mat4(1.0f), glm::vec3(50.0f));
+            clone->SetTransform(tB * sB);
+            gltfClones.emplace_back(std::move(clone));
+        }
     }
 }
 
@@ -432,6 +467,7 @@ void VulkanExample::drawFrame(VkCommandBuffer cmd)
         skybox->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); // 绘制天空盒。
         previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); // 绘制预览模型。
         gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
+        for (auto& m : gltfClones) { m->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
         // 绘制glTF模型
         if (gltfModel) {
         // glm::mat4 project;

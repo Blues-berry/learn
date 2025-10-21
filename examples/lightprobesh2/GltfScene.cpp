@@ -221,6 +221,23 @@ VkDescriptorImageInfo VulkanglTFScene::getTextureDescriptor(const size_t index)
 // Draw a single node including child nodes (if present)
 void VulkanglTFScene::drawNode(VkCommandBuffer commandBuffer, VkPipelineLayout pipelineLayout, VulkanglTFScene::Node* node)
 {
+	if (node->mesh.primitives.size() > 0) {
+		// Pass the node's matrix via push constants
+		PushConstant pushConstant;
+		pushConstant.nodeMatrix = node->matrix;
+		vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstant), &pushConstant);
+
+		for (VulkanglTFScene::Primitive& primitive : node->mesh.primitives) {
+			if (primitive.indexCount > 0) {
+				vkCmdDrawIndexed(commandBuffer, primitive.indexCount, 1, primitive.firstIndex, 0, 0);
+			}
+		}
+	}
+	for (auto& child : node->children) {
+		drawNode(commandBuffer, pipelineLayout, child);
+	}
+}
+{
 	if (!node->visible) {
 		return;
 	}
@@ -252,6 +269,11 @@ void VulkanglTFScene::drawNode(VkCommandBuffer commandBuffer, VkPipelineLayout p
 
 // Draw the glTF scene starting at the top-level-nodes
 void VulkanglTFScene::draw(VkCommandBuffer commandBuffer, VkPipelineLayout pipelineLayout)
+{
+	for (auto node : nodes) {
+		drawNode(commandBuffer, pipelineLayout, node);
+	}
+}
 {
 	// All vertices and indices are stored in single buffers, so we only need to bind once
 	VkDeviceSize offsets[1] = { 0 };

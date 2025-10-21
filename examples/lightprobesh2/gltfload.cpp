@@ -64,20 +64,28 @@ void GltfModel::Draw(VkCommandBuffer cmd, VkDescriptorSet globalSet, ETechnique 
 
 void GltfModel::PreparePerBatchResource()
 {
+	// 创建独立的描述符池，用于模型自己的资源
 	std::vector<VkDescriptorPoolSize> poolSizes = {
 		{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 },
 		{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 },
+        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 15 },
 	};
 	VkDescriptorPoolCreateInfo descriptorPoolInfo = vks::initializers::descriptorPoolCreateInfo(poolSizes, 1);
 	VK_CHECK_RESULT(vkCreateDescriptorPool(device->logicalDevice, &descriptorPoolInfo, nullptr, &descriptorPool));
 
+	// 创建独立的描述符集布局，用于模型自己的资源
 	std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {
+		// 绑定 0: 局部变换矩阵（顶点和片段着色器）
 		vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0),
+		// 绑定 1: 材质参数（片段着色器）
 		vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT, 1),
+		// 绑定 2: 模型纹理（片段着色器）
+		vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 2),
 	};
 	VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCI = vks::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings);
 	VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device->logicalDevice, &descriptorSetLayoutCI, nullptr, &descriptorSetLayout));
 
+	// 为模型分配描述符集
 	VkDescriptorSetAllocateInfo allocInfo = vks::initializers::descriptorSetAllocateInfo(descriptorPool, &descriptorSetLayout, 1);
 	VK_CHECK_RESULT(vkAllocateDescriptorSets(device->logicalDevice, &allocInfo, &descriptorSet));
 
@@ -106,6 +114,15 @@ void GltfModel::UpdateSet()
 	vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &localBuffer.descriptor),
 	vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, &materialBuffer.descriptor)
 	};
+
+    // // 添加纹理绑定（假设model有textures数组）
+    // std::vector<VkDescriptorImageInfo> imageInfos(15); // 默认填充dummy纹理
+    // for (size_t i = 0; i < model->textures.size() && i < 15; ++i) {
+    //     imageInfos[i] = { model->textures[i].sampler, model->textures[i].imageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+    // }
+    // VkWriteDescriptorSet textureWrite = vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2, nullptr, 15);
+    // textureWrite.pImageInfo = imageInfos.data();
+    // writeDescriptorSets.push_back(textureWrite);
 	vkUpdateDescriptorSets(device->logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, NULL);
 }
 
@@ -149,46 +166,38 @@ void GltfModel::PreparePSO(VkRenderPass renderPass, VkDescriptorSetLayout passLa
 	VkPipelineDynamicStateCreateInfo dynamicState =
 		vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables);
 
-	std::vector<VkDescriptorSetLayout> setLayotus = {
-		passLayout,
-		descriptorSetLayout
+	// 创建管线布局，包含两个描述符集布局：
+	// 1. 来自 mainpass 的全局描述符集布局 (passLayout)
+	// 2. 模型自己的描述符集布局 (descriptorSetLayout)
+	// 这样可以确保两者不会产生绑定冲突
+	std::vector<VkDescriptorSetLayout> setLayouts = {
+		passLayout,        // 绑定点 0: 来自 mainpass 的全局数据
+		descriptorSetLayout  // 绑定点 1: 模型自己的数据
 	};
 
-	// Pipeline layout 初始化管线布局创建信息，指定描述符集布局。
-	VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(setLayotus.data(), static_cast<uint32_t>(setLayotus.size()));
-	// 创建管线布局。
+	// 创建管线布局
+	VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(setLayouts.data(), static_cast<uint32_t>(setLayouts.size()));
 	VK_CHECK_RESULT(vkCreatePipelineLayout(rawDevice, &pipelineLayoutCreateInfo, nullptr, &techniques[(uint32_t)technique].pipelineLayout));
-	// 定义两个着色器阶段（顶点和片段）。
+
+	// 定义两个着色器阶段（顶点和片段）
 	std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages;
 
-	// Pipelines
-	// 初始化图形管线创建信息，指定管线布局和渲染通道。
+	// 创建图形管线
 	VkGraphicsPipelineCreateInfo pipelineCI = vks::initializers::pipelineCreateInfo(techniques[(uint32_t)technique].pipelineLayout, renderPass);
-	// 设置输入组装状态。
 	pipelineCI.pInputAssemblyState = &inputAssemblyState;
-	// 设置光栅化状态。
 	pipelineCI.pRasterizationState = &rasterizationState;
-	// 设置颜色混合状态。
 	pipelineCI.pColorBlendState = &colorBlendState;
-	// 设置深度和模板状态。
 	pipelineCI.pMultisampleState = &multisampleState;
-	// 设置视口状态。
 	pipelineCI.pViewportState = &viewportState;
-	// 设置深度和模板状态。
 	pipelineCI.pDepthStencilState = &depthStencilState;
-	// 设置动态状态。
 	pipelineCI.pDynamicState = &dynamicState;
-	// 设置着色器阶段数量（2）。
 	pipelineCI.stageCount = static_cast<uint32_t>(shaderStages.size());
-	// 设置着色器阶段数组。
 	pipelineCI.pStages = shaderStages.data();
-	// 设置顶点输入状态，包括位置、法线和UV坐标。
 	pipelineCI.pVertexInputState = vkglTF::Vertex::getPipelineVertexInputState({ vkglTF::VertexComponent::Position, vkglTF::VertexComponent::Normal, vkglTF::VertexComponent::UV });
 
-	// Skybox pipeline (background cube)
-
-	shaderStages[0] = iLoader->LoadShader("lightprobesh2/lightprobesh.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
-	shaderStages[1] = iLoader->LoadShader("lightprobesh2/lightprobesh.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
+	// 加载着色器
+	shaderStages[0] = iLoader->LoadShader("lightprobesh2/gltfmesh.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
+	shaderStages[1] = iLoader->LoadShader("lightprobesh2/gltfmesh.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
 	VK_CHECK_RESULT(vkCreateGraphicsPipelines(rawDevice, VK_NULL_HANDLE, 1, &pipelineCI, nullptr, &techniques[(uint32_t)technique].pso));
 }
 

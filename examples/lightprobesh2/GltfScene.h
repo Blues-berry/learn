@@ -21,6 +21,11 @@ public:
 	vks::VulkanDevice* vulkanDevice;
 	VkQueue copyQueue;
 
+	// Push constant structure for node transformation matrix
+	struct PushConstant {
+		glm::mat4 nodeMatrix;
+	};
+
 	// The vertex layout for the samples' model
 	struct Vertex {
 		glm::vec3 pos;

@@ -153,7 +153,7 @@ public:
 
     Evnironmemt environmemts = {};
 
-private:
+protected:
     void PreparePerPassResource();
     vks::VulkanDevice* device;
 
@@ -164,7 +164,12 @@ private:
     vks::Buffer globalBuffer;
 };
 
-
+class ScenePass:public MainPass
+{
+public:
+    
+    
+};
 class FullScreenPass
 {
 public:
