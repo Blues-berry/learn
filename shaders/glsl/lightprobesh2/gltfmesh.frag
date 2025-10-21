@@ -34,6 +34,12 @@ layout (set = 1, binding = 1) uniform Material
     int useReflection;
 } material;
 
+// Push constants: receive tint color
+layout(push_constant) uniform PushConstant {
+	mat4 modelOffset;
+	vec4 tint;
+} pc;
+
 layout (location = 0) out vec4 outColor;
 
 #define PI 3.1415926535897932384626433832795
@@ -194,5 +200,5 @@ void main()
 	// Gamma correction
 	color = pow(color, vec3(1.0f / global.gamma));
 
-	outColor = vec4(color, 1.0);
+	outColor = vec4(color, 1.0) * pc.tint;
 }

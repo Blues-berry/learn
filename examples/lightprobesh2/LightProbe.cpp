@@ -25,7 +25,13 @@ void LightProbe::drawScene(VkCommandBuffer cmdBuf)
         if (skybox) {
             skybox->Draw(cmd, capturePass->descriptorSet, ETechnique::CAPTURE_SCENE);
         }
+        if (gltfModel) {
+            gltfModel->Draw(cmd, capturePass->descriptorSet, ETechnique::CAPTURE_SCENE);
+        }
+
     });
+
+    
 }
 
 void LightProbe::setSkybox(Skybox* skybox_)

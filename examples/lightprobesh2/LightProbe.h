@@ -10,6 +10,7 @@
 #include <string>
 #include "VulkanTexture.h"
 #include "PreviewModel.h"
+#include "gltfload.h"
 class LightProbe {
 public:
     VkDescriptorBufferInfo shCoeffs;
@@ -36,7 +37,7 @@ private:
     std::shared_ptr<vkglTF::Model> model; // 假设场景模型
     Skybox* skybox = nullptr; // 可选的天空盒对象
     PreviewModel* previewModel = nullptr; // 可选的预览模型对象
-
+    GltfModel* gltfModel=nullptr;
     std::unique_ptr<CaptureScenePass> capturePass;
 };
 

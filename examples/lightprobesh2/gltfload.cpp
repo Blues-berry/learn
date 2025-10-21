@@ -1,5 +1,6 @@
 #include "gltfload.h"
 #include "VulkanDevice.h"
+#include <glm/gtc/matrix_transform.hpp>
 
 GltfModel::GltfModel(vks::VulkanDevice* dev, IExampleInterfasce* example) : device(dev), iLoader(example)
 {
@@ -59,7 +60,31 @@ void GltfModel::Draw(VkCommandBuffer cmd, VkDescriptorSet globalSet, ETechnique 
 
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, techniques[techIdx].pipelineLayout, 0, static_cast<uint32_t>(sets.size()), sets.data(), 0, NULL);
 	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, techniques[techIdx].pso);
-	model->draw(cmd);
+
+	struct PushConstantBlock {
+		glm::mat4 modelOffset;
+		glm::vec4 tint;
+	} pc;
+
+	const glm::vec3 offsets[4] = {
+		glm::vec3(-20.0f, 0.0f, 0.0f),  // 左
+		glm::vec3(20.0f,  0.0f, 0.0f),  // 右
+		glm::vec3(0.0f,   0.0f, -20.0f), // 后
+		glm::vec3(0.0f,   0.0f, 20.0f)  // 前
+	};
+	const float scale = 50.0f;
+	const glm::vec3 colors[3] = {
+		glm::vec3(1.0f, 0.3f, 0.3f),
+		glm::vec3(0.3f, 1.0f, 0.3f),
+		glm::vec3(0.3f, 0.5f, 1.0f)
+	};
+
+	for (int i = 0; i < 4; ++i) {
+		pc.modelOffset = glm::translate(glm::mat4(1.0f), offsets[i]) * glm::scale(glm::mat4(1.0f), glm::vec3(scale));
+		pc.tint = glm::vec4(colors[i % 3], 1.0f);
+		vkCmdPushConstants(cmd, techniques[techIdx].pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstantBlock), &pc);
+		model->draw(cmd);
+	}
 }
 
 void GltfModel::PreparePerBatchResource()
@@ -175,8 +200,15 @@ void GltfModel::PreparePSO(VkRenderPass renderPass, VkDescriptorSetLayout passLa
 		descriptorSetLayout  // 绑定点 1: 模型自己的数据
 	};
 
-	// 创建管线布局
+	// 创建管线布局（加入 Push Constant 范围：mat4 + vec4）
+	VkPushConstantRange pushConstantRange{};
+	pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+	pushConstantRange.offset = 0;
+	pushConstantRange.size = sizeof(glm::mat4) + sizeof(glm::vec4);
+
 	VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(setLayouts.data(), static_cast<uint32_t>(setLayouts.size()));
+	pipelineLayoutCreateInfo.pushConstantRangeCount = 1;
+	pipelineLayoutCreateInfo.pPushConstantRanges = &pushConstantRange;
 	VK_CHECK_RESULT(vkCreatePipelineLayout(rawDevice, &pipelineLayoutCreateInfo, nullptr, &techniques[(uint32_t)technique].pipelineLayout));
 
 	// 定义两个着色器阶段（顶点和片段）

@@ -296,42 +296,10 @@ void VulkanExample::PrepareScene()
     // 将 glTF 模型左移并放大10倍
     {
         glm::mat4 t = glm::translate(glm::mat4(1.0f), glm::vec3(-20.0f, 0.0f, 0.0f));
-        glm::mat4 s = glm::scale(glm::mat4(1.0f), glm::vec3(50.0f));
+        glm::mat4 s = glm::scale(glm::mat4(1.0f), glm::vec3(2.0f));
         gltfModel->SetTransform(t * s);
     }
-    // 复制3份 glTF 模型并放置在四周
-    {
-        // 右侧
-        {
-            auto clone = std::make_unique<GltfModel>(vulkanDevice, this);
-            clone->PreparePSO(renderPass, mainPass->descriptorSetLayout, ETechnique::MAIN);
-            clone->UpdateModel(gltfModels[gltfmodelIndex]);
-            glm::mat4 tR = glm::translate(glm::mat4(1.0f), glm::vec3(20.0f, 0.0f, 0.0f));
-            glm::mat4 sR = glm::scale(glm::mat4(1.0f), glm::vec3(50.0f));
-            clone->SetTransform(tR * sR);
-            gltfClones.emplace_back(std::move(clone));
-        }
-        // 前方
-        {
-            auto clone = std::make_unique<GltfModel>(vulkanDevice, this);
-            clone->PreparePSO(renderPass, mainPass->descriptorSetLayout, ETechnique::MAIN);
-            clone->UpdateModel(gltfModels[gltfmodelIndex]);
-            glm::mat4 tF = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -20.0f));
-            glm::mat4 sF = glm::scale(glm::mat4(1.0f), glm::vec3(50.0f));
-            clone->SetTransform(tF * sF);
-            gltfClones.emplace_back(std::move(clone));
-        }
-        // 后方
-        {
-            auto clone = std::make_unique<GltfModel>(vulkanDevice, this);
-            clone->PreparePSO(renderPass, mainPass->descriptorSetLayout, ETechnique::MAIN);
-            clone->UpdateModel(gltfModels[gltfmodelIndex]);
-            glm::mat4 tB = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 20.0f));
-            glm::mat4 sB = glm::scale(glm::mat4(1.0f), glm::vec3(50.0f));
-            clone->SetTransform(tB * sB);
-            gltfClones.emplace_back(std::move(clone));
-        }
-    }
+    // 使用 Push Constant 在 Draw 阶段复制 3 份并赋予不同颜色，移除克隆模型的创建
 }
 
 void VulkanExample::UpdateSkyBox()
@@ -410,6 +378,9 @@ void VulkanExample::PreparePasses()
     genIBL = std::make_unique<GenIBLPass>(vulkanDevice, this, 256); // 创建 IBL 生成通道，贴图尺寸为 256。
     genIBL->SetCubeMap(cubeMaps[skyboxIndex]); // 设置初始立方体贴图。
     genIBL->SetModel(skyboxModel); // 设置天空盒模型。
+    if (gltfModel) {
+        genIBL->SetModel(gltfModel->getModel()); // 设置 glTF 模型。
+    }
     genIBL->FeedIrradianceMap(mainPass->environmemts.irradianceCube); // 设置主渲染通道的辐照度贴图描述符。
     genIBL->FeedPrefilteredMap(mainPass->environmemts.prefilteredCube); // 设置主渲染通道的预过滤贴图描述符。
 
@@ -517,9 +488,12 @@ void VulkanExample::CaptureCubemap(const glm::vec3& position) {
     probe = std::make_unique<LightProbe>(vulkanDevice, this, 1024, 1024); // 创建光照探针对象。
     probe->SetPosition(position);  // 使用相机位置
     probe->setSkybox(skybox.get());  // 设置天空盒引用
-    probe->setPreviewModel(previewModel.get());  // 设置预览模型引用);  // 设置相机引用
-    probe->setmodel(previewModel->getModel());
-        // 捕获立方体贴图
+    probe->setPreviewModel(previewModel.get());  // 设置预览模型引用
+    probe->setmodel(previewModel->getModel());  // 设置预览模型
+    // if (gltfModel) {
+    //     probe->setmodel(gltfModel->getModel());  // 设置 glTF 模型引用
+    // }
+    // 捕获立方体贴图
     probe->CaptureCubeMap(queue);
     
     //// 添加新 cubemap
