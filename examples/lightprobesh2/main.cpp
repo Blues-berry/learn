@@ -82,6 +82,11 @@ public:
             previewModel->Destroy(); // 销毁预览模型对象。
             previewModel = nullptr; // 清空指针。
         }
+        if (gltfModel)
+        {
+            gltfModel->Destroy(); // 销毁预览模型对象。
+            gltfModel = nullptr; // 清空指针。
+        }
 
         cubeMaps.clear(); // 清空立方体贴图列表。
 
@@ -106,7 +111,8 @@ public:
 
     void LoadPreviewModel(const std::string& name, const std::string& cubemapPath, uint32_t glTFLoadingFlags);
     // 声明加载预览模型函数，指定名称、路径和 glTF 加载标志。
-
+    void LoadgltfModel(const std::string& name, const std::string& cubemapPath, uint32_t glTFLoadingFlags);
+    // 声明加载预览模型函数，指定名称、路径和 glTF 加载标志。
     void PrepareScene();
     // 声明准备场景函数，初始化天空盒和预览模型。
 
@@ -202,10 +208,16 @@ private:
     tinygltf::Model glTFInput;
     // 天空盒模型（通常为立方体）。
     std::vector<std::shared_ptr<vkglTF::Model>> previewModels;
+    std::vector<std::shared_ptr<vkglTF::Model>> gltfModels;
     // 预览模型列表。
     std::vector<std::string> previewModelNames;
     // 预览模型名称列表。
     int32_t modelIndex = 0;
+    // 当前使用的预览模型索引。
+
+    std::vector<std::string> gltfModelNames;
+    // 预览模型名称列表。
+    int32_t gltfmodelIndex = 0;
     // 当前使用的预览模型索引。
 
     // 渲染管线相关成员。
@@ -230,7 +242,7 @@ private:
     std::unique_ptr<LightProbe> probe;
     
     // glTF模型对象
-    std::shared_ptr<gltf::Model> gltfModel;
+    std::unique_ptr<GltfModel> gltfModel;
     
     // 描述符池
     VkDescriptorPool descriptorPool{ VK_NULL_HANDLE };
@@ -247,28 +259,19 @@ void VulkanExample::LoadAssets()
 
     uint32_t glTFLoadingFlags = vkglTF::FileLoadingFlags::PreTransformVertices | vkglTF::FileLoadingFlags::FlipY; // 设置 glTF 加载标志：预变换顶点，翻转 Y 轴。
 
-    LoadPreviewModel("sphere", "models/FlightHelmet/glTF/FlightHelmet.gltf", glTFLoadingFlags); // 加载球体模型。
+    LoadPreviewModel("sphere", "models/sphere.gltf", glTFLoadingFlags); // 加载球体模型。
     LoadPreviewModel("teapot", "models/teapot.gltf", glTFLoadingFlags); // 加载茶壶模型。
     LoadPreviewModel("torusknot", "models/torusknot.gltf", glTFLoadingFlags); // 加载环面结模型。
     LoadPreviewModel("venus", "models/venus.gltf", glTFLoadingFlags); // 加载维纳斯模型。
 
-    // 创建glTF模型实例
-    gltfModel = std::make_shared<gltf::Model>(vulkanDevice, static_cast<IExampleInterfasce*>(this)); // 创建glTF模型对象。
-    std::string modelPath = getAssetPath() + "models/FlightHelmet/glTF/FlightHelmet.gltf";
-    if (gltfModel->loadFromFile(modelPath, vulkanDevice, queue, glTFLoadingFlags)) {
-        // 如果加载成功，可以在这里添加对模型的初始化代码
-        // 创建描述符集
-        //gltfModel->createDescriptorSets(descriptorPool);
-        std::cout << "Successfully loaded glTF model from: " << modelPath << std::endl;
-        std::cout << "Model has " << gltfModel->nodes.size() << " nodes" << std::endl;
-        std::cout << "Model has " << gltfModel->images.size() << " images" << std::endl;
-        std::cout << "Model has " << gltfModel->materials.size() << " materials" << std::endl;
-    } else {
-        std::cerr << "Failed to load glTF model from: " << modelPath << std::endl;
-    }
-
+   
+    LoadgltfModel("FlightHelmet", "models/FlightHelmet/glTF/FlightHelmet.gltf", glTFLoadingFlags); // 
     skyboxModel = std::make_shared<vkglTF::Model>(); // 创建天空盒模型对象。
     skyboxModel->loadFromFile(getAssetPath() + "models/cube.gltf", vulkanDevice, queue, glTFLoadingFlags); // 加载立方体模型作为天空盒。
+    
+    // auto gltfModel = std::make_shared<vkglTF::Model>(); // 创建 glTF 模型对象。
+    // gltfModel->loadFromFile(getAssetPath() + "models/FlightHelmet/glTF/FlightHelmet.gltf", vulkanDevice, queue, glTFLoadingFlags); // 从文件加载模型。
+
 }
 
 void VulkanExample::PrepareScene()
@@ -283,6 +286,10 @@ void VulkanExample::PrepareScene()
     previewModel->PreparePSO(renderPass, mainPass->descriptorSetLayout, ETechnique::MAIN); // 准备预览模型的 PSO。
     previewModel->UpdateModel(previewModels[modelIndex]); // 设置初始预览模型。
         // 准备VulkanglTFModel
+        
+    gltfModel = std::make_unique<GltfModel>(vulkanDevice, this); // 创建 glTF 模型对象。
+    gltfModel->PreparePSO(renderPass, mainPass->descriptorSetLayout, ETechnique::MAIN); // 准备预览模型的 PSO。
+    gltfModel->UpdateModel(gltfModels[gltfmodelIndex]); // 设置初始预览模型。
 }
 
 void VulkanExample::UpdateSkyBox()
@@ -311,7 +318,15 @@ void VulkanExample::LoadPreviewModel(const std::string& name, const std::string&
     previewModels.emplace_back(model); // 添加到预览模型列表。
     previewModelNames.emplace_back(name); // 添加模型名称。
 }
+void VulkanExample::LoadgltfModel(const std::string& name, const std::string& cubemapPath, uint32_t glTFLoadingFlags)
+{
+    // 加载预览模型。
+    auto model = std::make_shared<vkglTF::Model>(); // 创建 glTF 模型对象。
+    model->loadFromFile(getAssetPath() + cubemapPath, vulkanDevice, queue, glTFLoadingFlags); // 从文件加载模型。
 
+    gltfModels.emplace_back(model); // 添加到预览模型列表。
+    gltfModelNames.emplace_back(name); // 添加模型名称。
+}
 void VulkanExample::LoadCubeMap(const std::string& name, const std::string& cubemapPath, VkFormat format)
 {
     // 加载立方体贴图。
@@ -364,7 +379,6 @@ void VulkanExample::PreparePasses()
         genIBL->Draw(cmdBuf); // 绘制 IBL 贴图。
         vulkanDevice->flushCommandBuffer(cmdBuf, queue); // 提交并刷新命令缓冲区。
     }
-    //gltfModel->preparePipelines(pipelineCache, renderPass); // 准备 glTF 模型的渲染管线。
     mainPass->UpdateBindings(); // 更新主渲染通道的描述符绑定。
 }
 
@@ -410,7 +424,7 @@ void VulkanExample::drawFrame(VkCommandBuffer cmd)
         // 匿名函数：记录绘制命令。
         skybox->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); // 绘制天空盒。
         previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); // 绘制预览模型。
-        
+        gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
         // 绘制glTF模型
         if (gltfModel) {
         // glm::mat4 project;
@@ -419,36 +433,11 @@ void VulkanExample::drawFrame(VkCommandBuffer cmd)
         // glm::vec4 cameraPos;
             // 确保 mainPassData 包含 lightPos 和 viewPos
         mainPassData.light[0] = glm::vec4(10.0f, 10.0f, 10.0f, 1.0f);  // 示例光源位置
-        mainPassData.cameraPos = glm::vec4(camera.position, 1.0f);  // 相机位置
+        mainPassData.cameraPos = glm::vec4(camera.position, 10.0f);  // 相机位置
         mainPassData.view = camera.matrices.view;
         mainPassData.project = camera.matrices.perspective;
         mainPass->UpdateGlobal(mainPassData);
-            // vkCmdBindDescriptorSets(
-            //     cmd, 
-            //     VK_PIPELINE_BIND_POINT_GRAPHICS,
-            //     gltfModel->pipelineLayout, 
-            //     0, 
-            //     1, 
-            //     &gltfModel->descriptorSet,
-            //     0, 
-            //     nullptr);  // 绑定全局 set 到索引 0
-            // vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gltfModel->pipelines.solid);  // 或 previewModel->techniques[(uint32_t)ETechnique::MAIN].pso，如果兼容
-            // // 为头盔模型添加位置偏移，避免与预览模型重叠
-            // glm::mat4 helmetOffset = glm::translate(glm::mat4(1.0f), glm::vec3(1.0f, 1.0f, 0.0f)); // 向右偏移2个单位
-            // gltfModel->draw(cmd, gltfModel->pipelineLayout, helmetOffset);
-            
-            // 绑定全局 set 0 (MainPass 的 UBO)
-            // vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gltfModel->pipelineLayout, 0, 1, &mainPass->descriptorSet, 0, nullptr);
-            // vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gltfModel->pipelines.solid);
 
-            // 添加位置偏移，避免与预览模型重叠
-            // glm::mat4 helmetOffset = glm::translate(glm::mat4(1.0f), glm::vec3(2.0f, 0.0f, 0.0f));  // 向右偏移 2 单位
-            // gltfModel->draw(cmd, gltfModel->pipelineLayout);
-
-
-
-            // 清理pipeline布局
-            // vkDestroyPipelineLayout(device,gltfModel->pipelineLayout, nullptr);
         }
 
         
@@ -485,8 +474,7 @@ void VulkanExample::CaptureCubemap(const glm::vec3& position) {
     probe = std::make_unique<LightProbe>(vulkanDevice, this, 1024, 1024); // 创建光照探针对象。
     probe->SetPosition(position);  // 使用相机位置
     probe->setSkybox(skybox.get());  // 设置天空盒引用
-    probe->setPreviewModel(previewModel.get());  // 设置预览模型引用
-
+    probe->setPreviewModel(previewModel.get());  // 设置预览模型引用);  // 设置相机引用
     probe->setmodel(previewModel->getModel());
         // 捕获立方体贴图
     probe->CaptureCubeMap(queue);
