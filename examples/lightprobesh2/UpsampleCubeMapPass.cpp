@@ -36,6 +36,11 @@ CaptureScenePass::~CaptureScenePass()
 {
     globalBuffer.destroy();
 
+    if (cubeSampler != VK_NULL_HANDLE) {
+        vkDestroySampler(device->logicalDevice, cubeSampler, nullptr);
+        cubeSampler = VK_NULL_HANDLE;
+    }
+
     if (renderPass != VK_NULL_HANDLE) {
         vkDestroyRenderPass(device->logicalDevice, renderPass, nullptr);
     }
@@ -142,9 +147,12 @@ void CaptureScenePass::PrepareFrameBuffer()
     framebufferCI.pAttachments = views.data(); // 指定图像视图。
     framebufferCI.width = width; // 设置宽度。
     framebufferCI.height = height; // 设置高度。
-    framebufferCI.layers = 1; // 设置单层。
+    framebufferCI.layers = 6; // 设置单层。
 
     VK_CHECK_RESULT(vkCreateFramebuffer(device->logicalDevice, &framebufferCI, nullptr, &framebuffer)); // 创建帧缓冲区。
+
+    // 为采样创建 CUBE 视图（供后续 IBL/其他Pass 采样使用）
+    cubeSampleView = std::make_shared<ResourceView>(cube, VK_IMAGE_VIEW_TYPE_CUBE, 0, 6, VK_IMAGE_ASPECT_COLOR_BIT);
 }
 
 void CaptureScenePass::PreparePerPassResource()
@@ -173,6 +181,18 @@ void CaptureScenePass::PreparePerPassResource()
     globalBuffer.map(); // 映射缓冲区以供主机访问。
 
     UpdateBindings();
+
+    // 创建默认采样器（线性过滤，clamp）
+    VkSamplerCreateInfo samplerCI = vks::initializers::samplerCreateInfo();
+    samplerCI.magFilter = VK_FILTER_LINEAR;
+    samplerCI.minFilter = VK_FILTER_LINEAR;
+    samplerCI.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    samplerCI.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerCI.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerCI.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerCI.minLod = 0.0f;
+    samplerCI.maxLod = 0.0f;
+    VK_CHECK_RESULT(vkCreateSampler(device->logicalDevice, &samplerCI, nullptr, &cubeSampler));
 }
 
 void CaptureScenePass::UpdateGlobal(const GlobalUbo& ubo)
@@ -194,7 +214,7 @@ void CaptureScenePass::Draw(VkCommandBuffer cmd, std::function<void(VkCommandBuf
     VkViewport viewport = vks::initializers::viewport((float)beginInfo.renderArea.extent.width, (float)beginInfo.renderArea.extent.height, 0.0f, 1.0f); // 设置视口。
     vkCmdSetViewport(cmd, 0, 1, &viewport); // 应用视口设置。
 
-    VkRect2D scissor = vks::initializers::rect2D(viewport.width, viewport.height, 0, 0); // 设置剪刀矩形。
+    VkRect2D scissor = vks::initializers::rect2D(static_cast<int32_t>(viewport.width), static_cast<int32_t>(viewport.height), 0, 0); // 设置剪刀矩形。
     vkCmdSetScissor(cmd, 0, 1, &scissor); // 应用剪刀矩形设置。
 
     encoder(cmd); // 调用用户提供的编码函数执行绘制。
@@ -209,6 +229,13 @@ void CaptureScenePass::UpdateBindings()
         vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &globalBuffer.descriptor), // 绑定 0：全局 UBO。
     };
     vkUpdateDescriptorSets(device->logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, NULL); // 更新描述符集。
+}
+
+void CaptureScenePass::FeedCubeDescriptor(VkDescriptorImageInfo& descriptor)
+{
+    descriptor.sampler = cubeSampler;
+    descriptor.imageView = cubeSampleView ? cubeSampleView->GetView() : VK_NULL_HANDLE;
+    descriptor.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 }
 
 UpsampleCubeMapPass::UpsampleCubeMapPass(vks::VulkanDevice* device_, IExampleInterfasce* example)

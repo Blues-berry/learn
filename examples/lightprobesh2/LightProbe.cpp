@@ -14,10 +14,10 @@ LightProbe::~LightProbe()
 {
 
 }
-void LightProbe::SetExternalCubeMap(std::shared_ptr<vks::TextureCubeMap>& cubemap_)
-{
-    cubemap = cubemap_;
-}
+// void LightProbe::SetExternalCubeMap(std::shared_ptr<vks::TextureCubeMap>& cubemap_)
+// {
+//     cubemap = cubemap_;
+// }
 
 void LightProbe::drawScene(VkCommandBuffer cmdBuf)
 {
@@ -42,35 +42,69 @@ void LightProbe::setSkybox(Skybox* skybox_)
 
 void LightProbe::CaptureCubeMap(VkQueue queue, VkCommandBuffer cmd)
 {
-    // 不要 SetExternalCubeMap
-// 正确初始化UBO
+    // --- 1. 准备 UBO（修复 viewproj）---
     CaptureScenePass::GlobalUbo ubo = {};
-    // 设置投影矩阵
     glm::mat4 projection = glm::perspective(glm::radians(90.0f), 1.0f, 0.1f, 256.0f);
-    // 设置视图矩阵
+
     std::array<glm::mat4, 6> viewMatrices = {
-        glm::lookAt(position, position + glm::vec3(1.0f, 0.0f, 0.0f), glm::vec3(0.0f, -1.0f, 0.0f)),  // +X面
-        glm::lookAt(position, position + glm::vec3(-1.0f, 0.0f, 0.0f), glm::vec3(0.0f, -1.0f, 0.0f)),  // -X面
-        glm::lookAt(position, position + glm::vec3(0.0f, 1.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f)),  // +Y面
-        glm::lookAt(position, position + glm::vec3(0.0f, -1.0f, 0.0f), glm::vec3(0.0f, 0.0f, -1.0f)),  // -Y面
-        glm::lookAt(position, position + glm::vec3(0.0f, 0.0f, 1.0f), glm::vec3(0.0f, -1.0f, 0.0f)),  // +Z面
-        glm::lookAt(position, position + glm::vec3(0.0f, 0.0f, -1.0f), glm::vec3(0.0f, -1.0f, 0.0f))   // -Z面
+        glm::lookAt(position, position + glm::vec3( 1, 0, 0), glm::vec3(0, -1,  0)), // +X
+        glm::lookAt(position, position + glm::vec3(-1, 0, 0), glm::vec3(0, -1,  0)), // -X
+        glm::lookAt(position, position + glm::vec3( 0, 1, 0), glm::vec3(0,  0,  1)), // +Y
+        glm::lookAt(position, position + glm::vec3( 0,-1, 0), glm::vec3(0,  0, -1)), // -Y
+        glm::lookAt(position, position + glm::vec3( 0, 0, 1), glm::vec3(0, -1,  0)), // +Z
+        glm::lookAt(position, position + glm::vec3( 0, 0,-1), glm::vec3(0, -1,  0))  // -Z
     };
+
     for (uint32_t face = 0; face < 6; ++face) {
-        ubo.viewproj[face] = projection * glm::mat4(glm::mat3(viewMatrices[face]));
-        ubo.cameraPos[face] = glm::vec4(position.x, position.y, position.z, 1.f);
+        ubo.viewproj[face] = projection * viewMatrices[face];  // 保留平移！
+        ubo.cameraPos[face] = glm::vec4(position, 1.0f);
     }
     capturePass->UpdateGlobal(ubo);
 
-    if (cmd == VK_NULL_HANDLE) {
-        VkCommandBuffer cmdBuf = device->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true); // 创建主命令缓冲区。
-        drawScene(cmdBuf);
-        device->flushCommandBuffer(cmdBuf, queue); // 提交并刷新命令缓冲区。
+    // --- 2. 执行渲染 ---
+    VkCommandBuffer cmdBuf = cmd;
+    bool needFlush = (cmd == VK_NULL_HANDLE);
+
+    if (needFlush) {
+        cmdBuf = device->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
     }
-    else {
-        drawScene(cmd);
+
+    drawScene(cmdBuf);
+
+    if (needFlush) {
+        device->flushCommandBuffer(cmdBuf, queue);
     }
-    
+
+    // --- 3. 同步 + 布局转换（关键！）---
+    if (needFlush) {
+        // 等待渲染完成
+        vkQueueWaitIdle(queue);
+
+        // 转换 cubemap 布局为 SHADER_READ_ONLY_OPTIMAL
+        VkCommandBuffer transitionCmd = device->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
+
+        VkImageMemoryBarrier barrier = vks::initializers::imageMemoryBarrier();
+        barrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.image = cubemap->image;
+        barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        barrier.subresourceRange.baseMipLevel = 0;
+        barrier.subresourceRange.levelCount = 1;
+        barrier.subresourceRange.baseArrayLayer = 0;
+        barrier.subresourceRange.layerCount = 6;
+        barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+        vkCmdPipelineBarrier(
+            transitionCmd,
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+        device->flushCommandBuffer(transitionCmd, queue);
+    }
 }
 void LightProbe::GenSH(VkCommandBuffer cmdBuffer, VkQueue queue)
 {

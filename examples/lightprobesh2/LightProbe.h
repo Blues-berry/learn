@@ -20,11 +20,15 @@ public:
      // 获取内部的立方体贴图
     std::shared_ptr<vks::TextureCubeMap> GetCubemap() const { return cubemap; }
     void setmodel(std::shared_ptr<vkglTF::Model> model_) { model = model_; }
-    void SetExternalCubeMap(std::shared_ptr<vks::TextureCubeMap>& cubemap_);
+    // 新增：专门用于 GltfModel 指针
+    void SetGltfModel(GltfModel* model_) { gltfModel = model_; }
+    // void SetExternalCubeMap(std::shared_ptr<vks::TextureCubeMap>& cubemap_);
     void setSkybox(Skybox* skybox_);
     void setPreviewModel(PreviewModel* previewModel_) { previewModel = previewModel_; }
     void CaptureCubeMap(VkQueue queue, VkCommandBuffer cmd = VK_NULL_HANDLE);
     void GenSH(VkCommandBuffer cmdBuffer, VkQueue queue);
+    // 获取 capturePass 以便外部访问
+    CaptureScenePass* GetCapturePass() { return capturePass.get(); }
 private:
    
     void drawScene(VkCommandBuffer cmdBuf);
@@ -35,6 +39,7 @@ private:
     uint32_t width, height;
     std::shared_ptr<vks::TextureCubeMap> cubemap;
     std::shared_ptr<vkglTF::Model> model; // 假设场景模型
+    std::shared_ptr<vkglTF::Model> gltfmodel; // 假设场景模型
     Skybox* skybox = nullptr; // 可选的天空盒对象
     PreviewModel* previewModel = nullptr; // 可选的预览模型对象
     GltfModel* gltfModel=nullptr;

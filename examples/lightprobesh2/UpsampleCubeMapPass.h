@@ -27,6 +27,12 @@ public:
     VkRenderPass renderPass;
     VkDescriptorSet descriptorSet;
     VkDescriptorSetLayout descriptorSetLayout;
+
+    // Л�7(�cubemap��&�,�o
+    void FeedCubeDescriptor(VkDescriptorImageInfo& descriptor);
+    VkImage GetCubeImage() const { return cube ? cube->GetImage() : VK_NULL_HANDLE; }
+    uint32_t GetWidth() const { return width; }
+    uint32_t GetHeight() const { return height; }
 private:
     void PreparePerPassResource();
     void PrepareFrameBuffer();
@@ -43,6 +49,8 @@ private:
 
     std::shared_ptr<ResourceView> colorView;
     std::shared_ptr<ResourceView> dsView;
+    std::shared_ptr<ResourceView> cubeSampleView; // CUBE 视图用于采样
+    VkSampler cubeSampler = VK_NULL_HANDLE;       // 采样器
 
     std::vector<VkClearValue> clearValue;
 

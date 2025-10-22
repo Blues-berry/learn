@@ -21,6 +21,11 @@ public:
     };
 
     void SetModel(const std::shared_ptr<vkglTF::Model> &model_);
+    // 新增：设置 cubemap
+    void SetCubeMap(const std::shared_ptr<vks::TextureCubeMap>& cubemap_) {
+        cubemap = cubemap_;
+        // UpdateDescriptorSet();  // 如果有 descriptorSet，需要更新
+    }
     void UpdateCubemap(const std::shared_ptr<vks::TextureCubeMap>& tex);
     void PreparePSO(VkRenderPass renderPass, VkDescriptorSetLayout passLayout, ETechnique technique);
     void Destroy();

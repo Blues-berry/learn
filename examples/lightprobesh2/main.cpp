@@ -195,7 +195,7 @@ private:
     std::vector<std::unique_ptr<LightProbe>> lightProbes;
     int32_t lightProbesIndex = 0;
     // 光照探针列表，存储场景中的光照探针。
-
+    std::unique_ptr<CaptureScenePass> capturePass;   // 捕获场景通道，用于生成立方体贴图。
     // 天空盒相关成员。
     std::vector<std::shared_ptr<vks::TextureCubeMap>> cubeMaps;
     // 立方体贴图列表，存储多个立方体贴图。
@@ -292,6 +292,7 @@ void VulkanExample::PrepareScene()
         
     gltfModel = std::make_unique<GltfModel>(vulkanDevice, this); // 创建 glTF 模型对象。
     gltfModel->PreparePSO(renderPass, mainPass->descriptorSetLayout, ETechnique::MAIN); // 准备预览模型的 PSO。
+    gltfModel->PreparePSO(capturePass->renderPass, capturePass->descriptorSetLayout, ETechnique::CAPTURE_SCENE); // 准备预览模型的 PSO。
     gltfModel->UpdateModel(gltfModels[gltfmodelIndex]); // 设置初始预览模型。
     // 将 glTF 模型左移并放大10倍
     {
@@ -367,6 +368,11 @@ void VulkanExample::PreparePasses()
     mainPass = std::make_unique<MainPass>(vulkanDevice); // 创建主渲染通道。
     mainPass->SetUp(renderPass); // 设置主渲染通道的渲染通道对象。
 
+
+    // 创建 capturePass（1024×1024，R16G16B16A16_SFLOAT）
+    capturePass = std::make_unique<CaptureScenePass>(vulkanDevice, this, VK_FORMAT_R16G16B16A16_SFLOAT, 1024, 1024);
+
+    
     brdfPass = std::make_unique<GenBRDFLutPass>(vulkanDevice, this); // 创建 BRDF 查找表生成通道。
     brdfPass->Prepare(); // 准备 BRDF 通道资源。
     brdfPass->FeedDescriptor(mainPass->environmemts.brdfView); // 设置主渲染通道的 BRDF 描述符。
@@ -483,27 +489,54 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
 
     previewModel->ShowUI(overlay); // 显示预览模型的 UI 控件。
 }
-void VulkanExample::CaptureCubemap(const glm::vec3& position) {
-    
-    probe = std::make_unique<LightProbe>(vulkanDevice, this, 1024, 1024); // 创建光照探针对象。
-    probe->SetPosition(position);  // 使用相机位置
-    probe->setSkybox(skybox.get());  // 设置天空盒引用
-    probe->setPreviewModel(previewModel.get());  // 设置预览模型引用
-    probe->setmodel(previewModel->getModel());  // 设置预览模型
-    // if (gltfModel) {
-    //     probe->setmodel(gltfModel->getModel());  // 设置 glTF 模型引用
-    // }
-    // 捕获立方体贴图
+void VulkanExample::CaptureCubemap(const glm::vec3& position)
+{
+    probe = std::make_unique<LightProbe>(vulkanDevice, this, 1024, 1024);
+    probe->SetPosition(position);
+    probe->setSkybox(skybox.get());
+    probe->setPreviewModel(previewModel.get());
+
+    if (!gltfModel) {
+        gltfModel = std::make_unique<GltfModel>(vulkanDevice, this);
+        gltfModel->UpdateModel(previewModel->getModel());
+
+
+        // CAPTURE_SCENE: 使用 capturePass 的 renderPass
+        gltfModel->PreparePSO(
+            capturePass->renderPass,
+            capturePass->descriptorSetLayout,
+            ETechnique::CAPTURE_SCENE
+        );
+    }
+
+    probe->SetGltfModel(gltfModel.get());
     probe->CaptureCubeMap(queue);
-    
-    //// 添加新 cubemap
-    //cubeMaps.push_back(capturedCubemap);
-    //cubemapNames.push_back("Captured_" + std::to_string(cubeMaps.size() - 1));
-    //skyboxIndex = cubeMaps.size() - 1;  // 更新索引
-    //// 等待一个额外的帧，确保资源完全准备好
-    //// 这可以确保驱动程序有足够的时间处理资源
-    //vkDeviceWaitIdle(vulkanDevice->logicalDevice);
-    //UpdateSkyBox();  // 更新天空盒、SH、IBL
-    //lightProbes.push_back(std::move(probe));  // 保留 probe，防止采样器被销毁
-}
+
+    // ... SH/IBL 生成 ...
+    auto capturedCubemap = probe->GetCubemap();
+    cubeMaps.push_back(capturedCubemap);
+    cubemapNames.push_back("Captured_" + std::to_string(cubeMaps.size() - 1));
+    skyboxIndex = static_cast<int>(cubeMaps.size() - 1);
+
+    vkDeviceWaitIdle(vulkanDevice->logicalDevice);
+
+    // --- 生成 SH ---
+    shGenPass->SetCubeMap(capturedCubemap);
+    shGenPass->Generate(queue);
+
+    VkDescriptorBufferInfo shBufferInfo;
+    shGenPass->FeedSH(shBufferInfo);                    // 正确！
+    mainPass->environmemts.shCoeffs = shBufferInfo;     // 存入 MainPass
+
+    genIBL->SetCubeMap(capturedCubemap);
+    genIBL->Generate(queue);
+    genIBL->FeedIrradianceMap(mainPass->environmemts.irradianceCube);
+    genIBL->FeedPrefilteredMap(mainPass->environmemts.prefilteredCube);
+
+    mainPass->UpdateBindings();
+    skybox->SetCubeMap(capturedCubemap);
+
+    lightProbes.push_back(std::move(probe));
+}  
+   
 VULKAN_EXAMPLE_MAIN()
