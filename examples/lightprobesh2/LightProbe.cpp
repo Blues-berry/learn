@@ -66,6 +66,12 @@ void LightProbe::CaptureCubeMap(VkQueue queue, VkCommandBuffer cmd)
         ubo.viewproj[face] = projection * viewMatrices[face];  // 保留平移！
         ubo.cameraPos[face] = glm::vec4(position, 1.0f);
     }
+    
+    // 设置光照参数
+    ubo.lights[0] = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);  // 默认白光
+    ubo.exposure = 4.5f;  // 默认曝光值
+    ubo.gamma = 2.2f;     // 默认伽马值
+
     capturePass->UpdateGlobal(ubo);
 
     // --- 2. 执行渲染 ---

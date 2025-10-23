@@ -1,4 +1,5 @@
 #version 450
+#extension GL_EXT_multiview : require
 
 layout (location = 0) in vec3 inWorldPos;
 layout (location = 1) in vec3 inNormal;
@@ -6,13 +7,11 @@ layout (location = 2) in vec2 inUV;
 
 layout (set = 0, binding = 0) uniform Global
 {
-	mat4 projection;
-	mat4 view;
-
-	vec4 lights[4];
-	vec4 cameraPos;
-	float exposure;
-	float gamma;
+    mat4 viewproj[6];  // 6 个面的视图投影矩阵
+    vec4 cameraPos[6]; // 6 个面的相机位置
+    vec4 lights[4];    // 保留光照信息
+    float exposure;    // 曝光
+    float gamma;       // 伽马
 } global;
 
 layout (set = 0, binding = 1) uniform SHCoefficients {
@@ -152,7 +151,7 @@ vec3 simplePBR(vec3 N, vec3 V, vec3 albedo, float metallic) {
 void main()
 {
 	vec3 N = normalize(inNormal);
-	vec3 V = normalize(global.cameraPos.xyz - inWorldPos);
+	vec3 V = normalize(global.cameraPos[gl_ViewIndex].xyz - inWorldPos);
 	vec3 R = reflect(-V, N); 
 
 	float metallic = material.metallic;

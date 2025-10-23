@@ -1,4 +1,5 @@
 #version 450
+#extension GL_EXT_multiview : enable
 
 layout (location = 0) in vec3 inPos;
 layout (location = 1) in vec3 inNormal;
@@ -6,13 +7,8 @@ layout (location = 2) in vec2 inUV;
 
 layout (set = 0, binding = 0) uniform Global
 {
-	mat4 projection;
-	mat4 view;
-
-	vec4 lights[4];
-	vec4 cameraPos;
-	float exposure;
-	float gamma;
+    mat4 viewproj[6];  // 6 个面的视图投影矩阵
+    vec4 cameraPos[6]; // 6 个面的相机位置
 } global;
 
 layout (set = 1, binding = 0) uniform Local
@@ -44,5 +40,5 @@ void main()
 	outUV = inUV;
 	outUV.t = 1.0 - inUV.t;
 
-	gl_Position =  global.projection * global.view * worldPos;
+	gl_Position = global.viewproj[gl_ViewIndex] * worldPos;
 }

@@ -121,25 +121,31 @@ void CaptureScenePass::PrepareFrameBuffer()
     dependencies[1].dstAccessMask = VK_ACCESS_MEMORY_READ_BIT; // 目标访问为内存读取。
     dependencies[1].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT; // 按区域依赖。
 
-    VkRenderPassCreateInfo renderPassCI = vks::initializers::renderPassCreateInfo(); // 初始化渲染通道创建信息。
-    renderPassCI.attachmentCount = 2; // 一个附件。
-    renderPassCI.pAttachments = attachments; // 指定附件描述。
-    renderPassCI.subpassCount = 1; // 一个子通道。
-    renderPassCI.pSubpasses = &subpassDescription; // 指定子通道描述。
-    renderPassCI.dependencyCount = 2; // 两个依赖。
-    renderPassCI.pDependencies = dependencies.data(); // 指定依赖数组。
+    // 创建渲染通道
+    VkRenderPassCreateInfo renderPassCI = vks::initializers::renderPassCreateInfo();
+    renderPassCI.attachmentCount = 2;
+    renderPassCI.pAttachments = attachments;
+    renderPassCI.subpassCount = 1;
+    renderPassCI.pSubpasses = &subpassDescription;
+    renderPassCI.dependencyCount = 2;
+    renderPassCI.pDependencies = dependencies.data();
+    
+    // 创建 6 个独立的渲染通道实例
+    std::array<uint32_t, 6> viewMasks;
+    for (uint32_t i = 0; i < 6; ++i) {
+        viewMasks[i] = 1u << i;  // 每个面使用不同的视图
+    }
 
-    const uint32_t viewMask = 0b00111111; // 设置视图掩码（6 个面）。
-    const uint32_t correlationMask = 0b00111111; // 设置相关掩码。
+    VkRenderPassMultiviewCreateInfo renderPassMultiviewCI{};
+    renderPassMultiviewCI.sType = VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO;
+    renderPassMultiviewCI.subpassCount = 1;
+    renderPassMultiviewCI.pViewMasks = viewMasks.data();
+    renderPassMultiviewCI.correlationMaskCount = 0;
+    renderPassMultiviewCI.pCorrelationMasks = nullptr;
+    renderPassMultiviewCI.dependencyCount = 0;
+    renderPassMultiviewCI.pViewOffsets = nullptr;
 
-    VkRenderPassMultiviewCreateInfo renderPassMultiviewCI{}; // 初始化多视图渲染信息。
-    renderPassMultiviewCI.sType = VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO; // 设置结构体类型。
-    renderPassMultiviewCI.subpassCount = 1; // 一个子通道。
-    renderPassMultiviewCI.pViewMasks = &viewMask; // 指定视图掩码。
-    renderPassMultiviewCI.correlationMaskCount = 1; // 一个相关掩码。
-    renderPassMultiviewCI.pCorrelationMasks = &correlationMask; // 指定相关掩码。
-
-    renderPassCI.pNext = &renderPassMultiviewCI; // 链接多视图信息。
+    renderPassCI.pNext = &renderPassMultiviewCI;
 
     VK_CHECK_RESULT(vkCreateRenderPass(device->logicalDevice, &renderPassCI, nullptr, &renderPass)); // 创建渲染通道并检查结果。
 
@@ -211,23 +217,28 @@ void CaptureScenePass::UpdateGlobal(const GlobalUbo& ubo)
 
 void CaptureScenePass::Draw(VkCommandBuffer cmd, std::function<void(VkCommandBuffer)>&& encoder)
 {
-    // 执行主渲染通道的绘制。
-    beginInfo.renderArea.extent.width = width; // 设置渲染区域宽度。
-    beginInfo.renderArea.extent.height = height; // 设置渲染区域高度。
+    // 设置渲染区域和帧缓冲
+    beginInfo.renderArea.extent.width = width;
+    beginInfo.renderArea.extent.height = height;
     beginInfo.renderPass = renderPass;
-    beginInfo.framebuffer = framebuffer; // 设置帧缓冲区。
+    beginInfo.framebuffer = framebuffer;
 
-    vkCmdBeginRenderPass(cmd, &beginInfo, VK_SUBPASS_CONTENTS_INLINE); // 开始渲染通道。
+    vkCmdBeginRenderPass(cmd, &beginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-    VkViewport viewport = vks::initializers::viewport((float)beginInfo.renderArea.extent.width, (float)beginInfo.renderArea.extent.height, 0.0f, 1.0f); // 设置视口。
-    vkCmdSetViewport(cmd, 0, 1, &viewport); // 应用视口设置。
+    // 设置单个视口和裁剪矩形
+    VkViewport viewport = vks::initializers::viewport(
+        (float)width, (float)height, 0.0f, 1.0f);
+    vkCmdSetViewport(cmd, 0, 1, &viewport);
 
-    VkRect2D scissor = vks::initializers::rect2D(static_cast<int32_t>(viewport.width), static_cast<int32_t>(viewport.height), 0, 0); // 设置剪刀矩形。
-    vkCmdSetScissor(cmd, 0, 1, &scissor); // 应用剪刀矩形设置。
+    VkRect2D scissor = vks::initializers::rect2D(
+        width, height, 0, 0);
+    vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-    encoder(cmd); // 调用用户提供的编码函数执行绘制。
+    // 执行用户的绘制命令
+    // multiview 会自动处理渲染到不同的立方体贴图面
+    encoder(cmd);
 
-    vkCmdEndRenderPass(cmd); // 结束渲染通道。
+    vkCmdEndRenderPass(cmd);
 }
 
 void CaptureScenePass::UpdateBindings()

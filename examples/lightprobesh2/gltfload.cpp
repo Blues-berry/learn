@@ -233,6 +233,12 @@ void GltfModel::PreparePSO(VkRenderPass renderPass, VkDescriptorSetLayout passLa
 	VK_CHECK_RESULT(vkCreateGraphicsPipelines(rawDevice, VK_NULL_HANDLE, 1, &pipelineCI, nullptr, &techniques[(uint32_t)technique].pso));
 }
 
+void GltfModel::SetUseSHAndReflection(bool useSH, bool useReflection) {
+    materialData.useSH = useSH ? 1 : 0;
+    materialData.useReflection = useReflection ? 1 : 0;
+    memcpy(materialBuffer.mapped, &materialData, sizeof(MaterialBuffer));
+}
+
 void GltfModel::ShowUI(vks::UIOverlay* overlay)
 {
 	if (overlay->header("Material")) {
