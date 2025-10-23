@@ -78,58 +78,53 @@ void LightProbe::CaptureCubeMap(VkQueue queue, VkCommandBuffer cmd)
 
     // --- 3. 同步 + 布局转换（关键！）---
     if (needFlush) {
-        // 等待渲染完成
+        // 等待渲染完成（capturePass 的提交已经在 flushCommandBuffer 中完成，但仍然确保队列空闲）
         vkQueueWaitIdle(queue);
 
-        // 转换 cubemap 布局为 SHADER_READ_ONLY_OPTIMAL
-        if (!cubemap) {
-            std::cerr << "[LightProbe::CaptureCubeMap] Warning: cubemap is nullptr, trying to get from capturePass..." << std::endl;
-            // 尝试从capturePass获取cubemap
-            if (capturePass) {
+        // 尝试从 capturePass 获取 cubemap（渲染后 capturePass 应该持有结果）
+        if (capturePass) {
+            if (!cubemap) {
                 cubemap = capturePass->GetCubeMap();
-                if (!cubemap) {
-                    std::cerr << "[LightProbe::CaptureCubeMap] Error: Failed to get cubemap from capturePass!" << std::endl;
-                    return;
-                }
-                
-                // 确保cubemap的成员都被正确初始化
-                if (!cubemap->image) {
-                    std::cerr << "[LightProbe::CaptureCubeMap] Error: Cubemap has null image handle!" << std::endl;
-                    return;
-                }
-                
-                if (cubemap->imageLayout != VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) {
-                    std::cerr << "[LightProbe::CaptureCubeMap] Error: Unexpected cubemap layout!" << std::endl;
-                    return;
-                }
-            } else {
-                std::cerr << "[LightProbe::CaptureCubeMap] Error: Both cubemap and capturePass are null!" << std::endl;
-                return;
             }
         }
-        VkCommandBuffer transitionCmd = device->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
 
-        VkImageMemoryBarrier barrier = vks::initializers::imageMemoryBarrier();
-        barrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barrier.image = cubemap->image;
-        barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        barrier.subresourceRange.baseMipLevel = 0;
-        barrier.subresourceRange.levelCount = 1;
-        barrier.subresourceRange.baseArrayLayer = 0;
-        barrier.subresourceRange.layerCount = 6;
-        barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        if (!cubemap || !cubemap->image) {
+            std::cerr << "[LightProbe::CaptureCubeMap] Error: Failed to get valid cubemap from capturePass!" << std::endl;
+            return;
+        }
 
-        vkCmdPipelineBarrier(
-            transitionCmd,
-            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-            0, 0, nullptr, 0, nullptr, 1, &barrier);
+        // 如果 cubemap 已经处于着色器可读布局，则无需转换
+        if (cubemap->imageLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+            // nothing to do
+        } else {
+            // 执行布局转换到 SHADER_READ_ONLY_OPTIMAL
+            VkCommandBuffer transitionCmd = device->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
 
-        device->flushCommandBuffer(transitionCmd, queue);
+            VkImageMemoryBarrier barrier = vks::initializers::imageMemoryBarrier();
+            barrier.oldLayout = cubemap->imageLayout == VK_IMAGE_LAYOUT_UNDEFINED ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+            barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.image = cubemap->image;
+            barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            barrier.subresourceRange.baseMipLevel = 0;
+            barrier.subresourceRange.levelCount = 1;
+            barrier.subresourceRange.baseArrayLayer = 0;
+            barrier.subresourceRange.layerCount = 6;
+            barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+            barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+            vkCmdPipelineBarrier(
+                transitionCmd,
+                VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+            device->flushCommandBuffer(transitionCmd, queue);
+
+            // 更新跟踪的布局状态
+            cubemap->imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        }
     }
 }
 void LightProbe::GenSH(VkCommandBuffer cmdBuffer, VkQueue queue)
