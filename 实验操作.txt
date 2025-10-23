@@ -44,3 +44,90 @@ C:\Users\Bluesky\Desktop\SKY\Learn\Vulkan\build\bin\Debug
     Lo*=radiance;
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+void GltfModel::PreparePSO(VkRenderPass renderPass, VkDescriptorSetLayout passLayout, ETechnique technique)
+{
+	VkDevice rawDevice = device->logicalDevice;
+
+	// 配置输入组装状态，使用三角形列表拓扑。
+	VkPipelineInputAssemblyStateCreateInfo inputAssemblyState =
+		vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
+	// 配置光栅化状态，填充模式，无背面剔除，逆时针为正面。
+	VkPipelineRasterizationStateCreateInfo rasterizationState =
+		vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE);
+	// 配置颜色混合状态，禁用混合	
+	VkPipelineColorBlendAttachmentState blendAttachmentState =
+		vks::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE);
+	// 配置颜色混合状态，指定一个附件。
+	VkPipelineColorBlendStateCreateInfo colorBlendState =
+		vks::initializers::pipelineColorBlendStateCreateInfo(1, &blendAttachmentState);
+	// 配置深度和模板状态，初始禁用深度测试和写入。
+	VkPipelineDepthStencilStateCreateInfo depthStencilState =
+		vks::initializers::pipelineDepthStencilStateCreateInfo(VK_TRUE, VK_TRUE, VK_COMPARE_OP_LESS_OR_EQUAL);
+	// 配置视口状态，指定一个视口和裁剪矩形。
+	VkPipelineViewportStateCreateInfo viewportState =
+		vks::initializers::pipelineViewportStateCreateInfo(1, 1);
+	// 配置多重采样状态，禁用多重采样（单采样）。
+	VkPipelineMultisampleStateCreateInfo multisampleState =
+		vks::initializers::pipelineMultisampleStateCreateInfo(VK_SAMPLE_COUNT_1_BIT);
+	// 定义动态状态，包括视口和裁剪矩形。
+	std::vector<VkDynamicState> dynamicStateEnables = {
+		VK_DYNAMIC_STATE_VIEWPORT,
+		VK_DYNAMIC_STATE_SCISSOR
+	};
+	// 配置动态状态。
+	VkPipelineDynamicStateCreateInfo dynamicState =
+		vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables);
+
+	// 创建管线布局，包含两个描述符集布局：
+	// 1. 来自 mainpass 的全局描述符集布局 (passLayout)
+	// 2. 模型自己的描述符集布局 (descriptorSetLayout)
+	// 这样可以确保两者不会产生绑定冲突
+	std::vector<VkDescriptorSetLayout> setLayouts = {
+		passLayout,        // 绑定点 0: 来自 mainpass 的全局数据
+		descriptorSetLayout  // 绑定点 1: 模型自己的数据
+	};
+
+	// 创建管线布局
+	VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(setLayouts.data(), static_cast<uint32_t>(setLayouts.size()));
+	VK_CHECK_RESULT(vkCreatePipelineLayout(rawDevice, &pipelineLayoutCreateInfo, nullptr, &techniques[(uint32_t)technique].pipelineLayout));
+
+	// 定义两个着色器阶段（顶点和片段）
+	std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages;
+
+	// 创建图形管线
+	VkGraphicsPipelineCreateInfo pipelineCI = vks::initializers::pipelineCreateInfo(techniques[(uint32_t)technique].pipelineLayout, renderPass);
+	pipelineCI.pInputAssemblyState = &inputAssemblyState;
+	pipelineCI.pRasterizationState = &rasterizationState;
+	pipelineCI.pColorBlendState = &colorBlendState;
+	pipelineCI.pMultisampleState = &multisampleState;
+	pipelineCI.pViewportState = &viewportState;
+	pipelineCI.pDepthStencilState = &depthStencilState;
+	pipelineCI.pDynamicState = &dynamicState;
+	pipelineCI.stageCount = static_cast<uint32_t>(shaderStages.size());
+	pipelineCI.pStages = shaderStages.data();
+	pipelineCI.pVertexInputState = vkglTF::Vertex::getPipelineVertexInputState({ vkglTF::VertexComponent::Position, vkglTF::VertexComponent::Normal, vkglTF::VertexComponent::UV });
+
+	// 加载着色器
+	shaderStages[0] = iLoader->LoadShader("lightprobesh2/gltfmesh.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
+	shaderStages[1] = iLoader->LoadShader("lightprobesh2/gltfmesh.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
+	VK_CHECK_RESULT(vkCreateGraphicsPipelines(rawDevice, VK_NULL_HANDLE, 1, &pipelineCI, nullptr, &techniques[(uint32_t)technique].pso));
+}
+
+
+
+

@@ -260,7 +260,7 @@ private:
     // 描述符池
     VkDescriptorPool descriptorPool{ VK_NULL_HANDLE };
 
-  
+    bool showProbes = false; // Toggle for visualizing probes
 };
 
 void VulkanExample::LoadAssets()
@@ -291,6 +291,7 @@ void VulkanExample::LoadAssets()
 void VulkanExample::PrepareScene()
 {
     // 准备场景，初始化天空盒和预览模型。
+    std::cerr << "PrepareScene: vulkanDevice=" << vulkanDevice << "\n";
     skybox = std::make_unique<Skybox>(vulkanDevice, this); // 创建天空盒对象。
     skybox->SetModel(skyboxModel); // 设置天空盒模型。
     skybox->PreparePSO(renderPass, mainPass->descriptorSetLayout, ETechnique::MAIN); // 准备天空盒的管线状态对象（PSO）。
@@ -307,11 +308,11 @@ void VulkanExample::PrepareScene()
     gltfModel->UpdateModel(gltfModels[gltfmodelIndex]); // 设置初始预览模型。
     // 将 glTF 模型左移并放大10倍
     {
-        glm::mat4 t = glm::translate(glm::mat4(1.0f), glm::vec3(-20.0f, 0.0f, 0.0f));
-        glm::mat4 s = glm::scale(glm::mat4(1.0f), glm::vec3(2.0f));
+        glm::mat4 t = glm::translate(glm::mat4(1.0f), glm::vec3(-10.0f, 0.0f, 0.0f));
+        glm::mat4 s = glm::scale(glm::mat4(1.0f), glm::vec3(1.0f));
         gltfModel->SetTransform(t * s);
     }
-    // 使用 Push Constant 在 Draw 阶段复制 3 份并赋予不同颜色，移除克隆模型的创建
+
 }
 
 void VulkanExample::UpdateSkyBox()
@@ -421,7 +422,7 @@ void VulkanExample::PrepareProbes()
 {
     // 清理已有探针
     for (auto &p : lightProbes) {
-        if (p) p->Destroy();
+        // if (p) p->Destroy();
     }
     lightProbes.clear();
 
@@ -510,6 +511,13 @@ void VulkanExample::drawFrame(VkCommandBuffer cmd)
         }
 
         
+        // 新增：渲染探针为球体
+        if (showProbes) {
+            for (const auto& probe : lightProbes) {
+                probe->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
+            }
+        }
+
         drawUI(cmd); // 绘制 UI（基类方法）。
     });
 }
@@ -534,6 +542,35 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
         if (overlay->button("Capture Cubemap at Camera")) { // 捕获立方体贴图按钮。
             CaptureCubemap(camera.position); // 在相机位置捕获立方体贴图。
         }
+        // Probe grid controls
+        if (overlay->checkBox("Use Multiple Probes", &useMultipleProbes)) {
+            if (useMultipleProbes) {
+                PrepareProbes();
+            } else {
+                lightProbes.clear();
+            }
+        }
+        if (useMultipleProbes) {
+            float step = 0.1f;
+            overlay->inputFloat("Probe Min X", &probeGridConfig.minBounds.x, step, 3);
+            overlay->inputFloat("Probe Min Y", &probeGridConfig.minBounds.y, step, 3);
+            overlay->inputFloat("Probe Min Z", &probeGridConfig.minBounds.z, step, 3);
+            overlay->inputFloat("Probe Max X", &probeGridConfig.maxBounds.x, step, 3);
+            overlay->inputFloat("Probe Max Y", &probeGridConfig.maxBounds.y, step, 3);
+            overlay->inputFloat("Probe Max Z", &probeGridConfig.maxBounds.z, step, 3);
+            overlay->sliderInt("Probe Dim X", &probeGridConfig.dimensions.x, 1, 20);
+            overlay->sliderInt("Probe Dim Y", &probeGridConfig.dimensions.y, 1, 20);
+            overlay->sliderInt("Probe Dim Z", &probeGridConfig.dimensions.z, 1, 20);
+            int res = static_cast<int>(probeGridConfig.resolution);
+            overlay->sliderInt("Probe Resolution", &res, 4, 256);
+            probeGridConfig.resolution = static_cast<uint32_t>(res);
+            if (overlay->button("Generate Probes")) {
+                PrepareProbes();
+            }
+        }
+
+        // Add toggle for probe visualization
+        overlay->checkBox("Show Probes", &showProbes);
     }
 
     previewModel->ShowUI(overlay); // 显示预览模型的 UI 控件。
@@ -587,6 +624,13 @@ void VulkanExample::CaptureCubemap(const glm::vec3& position)
 
     mainPass->UpdateBindings();
     skybox->SetCubeMap(capturedCubemap);
+    // Enable SH and reflection on models after generating SH/IBL
+    if (previewModel) {
+        previewModel->SetUseSHAndReflection(true, true);
+    }
+    if (gltfModel) {
+        gltfModel->SetUseSHAndReflection(true, true);
+    }
 
     lightProbes.push_back(std::move(probe));
 }  

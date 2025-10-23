@@ -1,8 +1,13 @@
 #include "Skybox.h"
+#include <iostream>
 
 Skybox::Skybox(vks::VulkanDevice* dev, IExampleInterfasce* example) : device(dev), iLoader(example)
 {
-	PreparePerBatchResource();
+	if (device) {
+		PreparePerBatchResource();
+	} else {
+		std::cerr << "Skybox constructed with nullptr device\n";
+	}
 }
 
 Skybox::~Skybox()
@@ -22,6 +27,16 @@ void Skybox::UpdateCubemap(const std::shared_ptr<vks::TextureCubeMap>& tex)
 
 void Skybox::UpdateSet()
 {
+	if (!device) {
+		std::cerr << "Skybox::UpdateSet called with nullptr device\n";
+		return;
+	}
+
+	if (!cubemap) {
+		std::cerr << "Skybox::UpdateSet called with nullptr cubemap\n";
+		return;
+	}
+
 	std::vector<VkWriteDescriptorSet> writeDescriptorSets = {
 		vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &localBuffer.descriptor),
 		vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, &cubemap->descriptor)
@@ -31,6 +46,10 @@ void Skybox::UpdateSet()
 
 void Skybox::PreparePerBatchResource()
 {
+	if (!device) {
+		std::cerr << "Skybox::PreparePerBatchResource called with nullptr device\n";
+		return;
+	}
 	std::vector<VkDescriptorPoolSize> poolSizes = {
 		{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 },
 		{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1 },
@@ -62,6 +81,12 @@ void Skybox::PreparePerBatchResource()
 
 void Skybox::PreparePSO(VkRenderPass renderPass, VkDescriptorSetLayout passLayout, ETechnique technique)
 {
+	if (!device) {
+		// Defensive: device not initialized, avoid crash and log error
+		std::cerr << "Skybox::PreparePSO called with nullptr device\n";
+		return;
+	}
+
 	VkDevice rawDevice = device->logicalDevice;
 
 	// 配置输入组装状态，使用三角形列表拓扑。
@@ -164,30 +189,31 @@ void Skybox::Draw(VkCommandBuffer cmd, VkDescriptorSet globalSet, ETechnique tec
 
 void Skybox::Destroy()
 {
+	if (!device) {
+		std::cerr << "Skybox::Destroy called with nullptr device\n";
+	}
 	localBuffer.destroy();
 	model = nullptr;
 
-	if (descriptorPool != VK_NULL_HANDLE)
-	{
+	if (descriptorPool != VK_NULL_HANDLE && device) {
 		vkDestroyDescriptorPool(device->logicalDevice, descriptorPool, nullptr);
 		descriptorPool = VK_NULL_HANDLE;
 	}
 
 
-	if (descriptorSetLayout != VK_NULL_HANDLE)
-	{
+	if (descriptorSetLayout != VK_NULL_HANDLE && device) {
 		vkDestroyDescriptorSetLayout(device->logicalDevice, descriptorSetLayout, nullptr);
 		descriptorSetLayout = VK_NULL_HANDLE;
 	}
 
 	for (auto& tech : techniques) {
-		if (tech.pipelineLayout != VK_NULL_HANDLE)
+		if (tech.pipelineLayout != VK_NULL_HANDLE && device)
 		{
 			vkDestroyPipelineLayout(device->logicalDevice, tech.pipelineLayout, nullptr);
 			tech.pipelineLayout = VK_NULL_HANDLE;
 		}
 
-		if (tech.pso != VK_NULL_HANDLE)
+		if (tech.pso != VK_NULL_HANDLE && device)
 		{
 			vkDestroyPipeline(device->logicalDevice, tech.pso, nullptr);
 			tech.pso = VK_NULL_HANDLE;

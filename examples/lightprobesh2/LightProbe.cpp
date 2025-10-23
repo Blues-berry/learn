@@ -38,7 +38,13 @@ void LightProbe::drawScene(VkCommandBuffer cmdBuf)
 void LightProbe::setSkybox(Skybox* skybox_)
 {
     skybox = skybox_;
-    skybox->PreparePSO(capturePass->renderPass, capturePass->descriptorSetLayout, ETechnique::CAPTURE_SCENE); // 准备天空盒的管线状态对象（PSO）。
+    if (skybox) {
+        // Only prepare PSO if a valid skybox was provided
+        skybox->PreparePSO(capturePass->renderPass, capturePass->descriptorSetLayout, ETechnique::CAPTURE_SCENE);
+    } else {
+        // Defensive: log when setting a null skybox so we can trace call order issues
+        std::cerr << "LightProbe::setSkybox received nullptr - skipping PreparePSO\n";
+    }
 }
 
 void LightProbe::CaptureCubeMap(VkQueue queue, VkCommandBuffer cmd)

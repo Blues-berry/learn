@@ -62,6 +62,27 @@ void PreviewModel::Draw(VkCommandBuffer cmd, VkDescriptorSet globalSet, ETechniq
 	model->draw(cmd);
 }
 
+void PreviewModel::Draw(VkCommandBuffer cmd, VkDescriptorSet globalSet, ETechnique tech, const glm::vec3& position)
+{
+    if (!model)
+    {
+        return;
+    }
+
+    uint32_t techIdx = (uint32_t)tech;
+    std::vector<VkDescriptorSet> sets = {
+        globalSet, descriptorSet
+    };
+
+    // Apply position transformation
+    localData.transform = glm::translate(glm::mat4(1.0f), position);
+    memcpy(localBuffer.mapped, &localData, sizeof(LocalBuffer));
+
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, techniques[techIdx].pipelineLayout, 0, static_cast<uint32_t>(sets.size()), sets.data(), 0, NULL);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, techniques[techIdx].pso);
+    model->draw(cmd);
+}
+
 void PreviewModel::PreparePerBatchResource()
 {
 	std::vector<VkDescriptorPoolSize> poolSizes = {
@@ -201,5 +222,15 @@ void PreviewModel::ShowUI(vks::UIOverlay* overlay)
 	{
 		memcpy(materialBuffer.mapped, &materialData, sizeof(MaterialBuffer));
 		materialDirty = false;
+	}
+}
+
+void PreviewModel::SetUseSHAndReflection(bool useSH, bool useReflection)
+{
+	materialData.useSH = useSH ? 1 : 0;
+	materialData.useReflection = useReflection ? 1 : 0;
+	// Immediately write to GPU buffer
+	if (materialBuffer.mapped) {
+		memcpy(materialBuffer.mapped, &materialData, sizeof(MaterialBuffer));
 	}
 }

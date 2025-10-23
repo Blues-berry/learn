@@ -31,6 +31,12 @@ public:
     CaptureScenePass* GetCapturePass() { return capturePass.get(); }
     // 保存立方体贴图的六个面为单独的图片
     void SaveCubeMapFaces(VkQueue queue, const std::string& basePath);
+    // Add a Draw method to render the probe as a sphere
+    void Draw(VkCommandBuffer cmd, VkDescriptorSet descriptorSet, ETechnique technique) {
+        if (previewModel) {
+            previewModel->Draw(cmd, descriptorSet, technique, position);
+        }
+    }
 private:
    
     void drawScene(VkCommandBuffer cmdBuf);

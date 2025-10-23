@@ -5,7 +5,7 @@
 #include "ILoader.h"
 #include "Pass.h"
 
-namespace vls
+namespace vks
 {
     struct VulkanDevice;
 }

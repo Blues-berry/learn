@@ -38,6 +38,8 @@ public:
 	void ShowUI(vks::UIOverlay* overlay);
 	void SetTransform(const glm::mat4& transform);
     std::shared_ptr<vkglTF::Model> getModel() const { return model; }
+	// Allow enabling/disabling SH and reflection from external code
+	void SetUseSHAndReflection(bool useSH, bool useReflection);
 
 private:
 	void PreparePerBatchResource();

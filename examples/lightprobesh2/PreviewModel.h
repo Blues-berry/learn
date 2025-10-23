@@ -33,10 +33,13 @@ public:
 	void UpdateModel(const std::shared_ptr<vkglTF::Model>& model);
 	void Destroy();
 	void Draw(VkCommandBuffer cmd, VkDescriptorSet globalSet, ETechnique tech);
+	void Draw(VkCommandBuffer cmd, VkDescriptorSet globalSet, ETechnique tech, const glm::vec3& position);
 	void PreparePSO(VkRenderPass renderPass, VkDescriptorSetLayout passLayout, ETechnique technique);
 
 	void ShowUI(vks::UIOverlay* overlay);
     std::shared_ptr<vkglTF::Model> getModel() const { return model; }
+	// Allow enabling/disabling SH and reflection from external code
+	void SetUseSHAndReflection(bool useSH, bool useReflection);
 
 private:
 	void PreparePerBatchResource();
