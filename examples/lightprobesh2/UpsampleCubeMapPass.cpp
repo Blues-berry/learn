@@ -130,18 +130,17 @@ void CaptureScenePass::PrepareFrameBuffer()
     renderPassCI.dependencyCount = 2;
     renderPassCI.pDependencies = dependencies.data();
     
-    // 创建 6 个独立的渲染通道实例
-    std::array<uint32_t, 6> viewMasks;
-    for (uint32_t i = 0; i < 6; ++i) {
-        viewMasks[i] = 1u << i;  // 每个面使用不同的视图
-    }
+    // ✅ 修复3: 正确配置multiview - 所有6个面在单个子通道中同时渲染
+    // viewMask = 0x3F = 0b111111 表示6个视图都被启用
+    uint32_t viewMask = 0x3F;  // 6个立方体面的掩码
+    uint32_t correlationMask = 0x3F;  // 所有视图相关
 
     VkRenderPassMultiviewCreateInfo renderPassMultiviewCI{};
     renderPassMultiviewCI.sType = VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO;
     renderPassMultiviewCI.subpassCount = 1;
-    renderPassMultiviewCI.pViewMasks = viewMasks.data();
-    renderPassMultiviewCI.correlationMaskCount = 0;
-    renderPassMultiviewCI.pCorrelationMasks = nullptr;
+    renderPassMultiviewCI.pViewMasks = &viewMask;  // ✅ 指向单个viewMask
+    renderPassMultiviewCI.correlationMaskCount = 1;
+    renderPassMultiviewCI.pCorrelationMasks = &correlationMask;
     renderPassMultiviewCI.dependencyCount = 0;
     renderPassMultiviewCI.pViewOffsets = nullptr;
 

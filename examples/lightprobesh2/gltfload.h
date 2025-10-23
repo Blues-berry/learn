@@ -16,14 +16,15 @@ public:
 	~GltfModel() = default;
 
 	struct MaterialBuffer {
-		float roughness = 1.f;
+		// ✅ 修复1: 调整默认材质参数，使模型初始可见
+		float roughness = 0.5f;     // 从1.0改为0.5，减少粗糙度
 		float metallic = 0.5;
 		float specular = 0.5;
 		float padding = 0.f;
 		glm::vec4 elbedo = glm::vec4(1.f, 1.f, 1.f, 1.f);
 
-		int32_t useSH = 1;
-		int32_t useReflection = 0;
+		int32_t useSH = 0;          // 从1改为0，初始不使用SH（SH还没生成）
+		int32_t useReflection = 0;  // 初始不使用反射
 	};
 
 	struct LocalBuffer {

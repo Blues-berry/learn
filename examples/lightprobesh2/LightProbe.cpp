@@ -93,10 +93,24 @@ void LightProbe::CaptureCubeMap(VkQueue queue, VkCommandBuffer cmd)
         // 等待渲染完成（capturePass 的提交已经在 flushCommandBuffer 中完成，但仍然确保队列空闲）
         vkQueueWaitIdle(queue);
 
+        // ✅ 修复2: 总是执行布局转换（不再受needFlush条件限制）
         // 尝试从 capturePass 获取 cubemap（渲染后 capturePass 应该持有结果）
-        if (capturePass) {
-            if (!cubemap) {
+        if (!cubemap) {
+            if (capturePass) {
                 cubemap = capturePass->GetCubeMap();
+                if (!cubemap) {
+                    std::cerr << "[LightProbe::CaptureCubeMap] Error: Failed to get cubemap from capturePass!" << std::endl;
+                    return;
+                }
+
+                // 确保cubemap的成员都被正确初始化
+                if (!cubemap->image) {
+                    std::cerr << "[LightProbe::CaptureCubeMap] Error: Cubemap has null image handle!" << std::endl;
+                    return;
+                }
+            } else {
+                std::cerr << "[LightProbe::CaptureCubeMap] Error: Both cubemap and capturePass are null!" << std::endl;
+                return;
             }
         }
 
@@ -139,6 +153,7 @@ void LightProbe::CaptureCubeMap(VkQueue queue, VkCommandBuffer cmd)
         }
     }
 }
+
 void LightProbe::GenSH(VkCommandBuffer cmdBuffer, VkQueue queue)
 {
     GenSHComputePass shPass(device, iLoader);
