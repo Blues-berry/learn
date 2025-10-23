@@ -40,6 +40,14 @@
 // - PreviewModel.h：预览模型类。
 // - fstream：文件流操作（为后续扩展保留）。
 
+// 配置：探针网格参数
+struct ProbeGridConfig {
+    glm::vec3 minBounds{ -10.0f, 0.0f, -10.0f };
+    glm::vec3 maxBounds{ 10.0f, 4.0f, 10.0f };
+    glm::ivec3 dimensions{ 4, 2, 4 };
+    uint32_t resolution{ 32 };
+};
+
 class VulkanExample : public VulkanExampleBase, public IExampleInterfasce
 {
 public:
@@ -194,6 +202,9 @@ private:
 
     std::vector<std::unique_ptr<LightProbe>> lightProbes;
     int32_t lightProbesIndex = 0;
+    // 探针配置
+    ProbeGridConfig probeGridConfig;
+    bool useMultipleProbes = false;
     // 光照探针列表，存储场景中的光照探针。
     std::unique_ptr<CaptureScenePass> capturePass;   // 捕获场景通道，用于生成立方体贴图。
     // 天空盒相关成员。
@@ -408,14 +419,52 @@ void VulkanExample::ReginPrefilterPasses()
 
 void VulkanExample::PrepareProbes()
 {
-    // // 准备光照探针。
-    // auto probe = std::make_unique<LightProbe>(vulkanDevice,this,1024,1024); // 创建光照探针对象。
+    // 清理已有探针
+    for (auto &p : lightProbes) {
+        if (p) p->Destroy();
+    }
+    lightProbes.clear();
 
-    // probe->SetPosition(glm::vec3(0.0f, 0.0f, 0.0f)); // 设置探针位置为原点。  可将探针位置改为可选参数，实时增加。
+    // 自动布置光照探针：在 probeGridConfig 定义的包围盒内使用指定的维度放置探针。
+    // 如果 probeGridConfig 没有被设置（dimensions 为 0），则创建一个中心探针。
+    glm::vec3 minB = probeGridConfig.minBounds;
+    glm::vec3 maxB = probeGridConfig.maxBounds;
+    glm::ivec3 dims = probeGridConfig.dimensions;
+    uint32_t res = probeGridConfig.resolution > 0 ? probeGridConfig.resolution : 32; // 默认 32
 
-    // probe->SetExternalCubeMap(cubeMaps[skyboxIndex]); // 设置初始立方体贴图。
+    if (dims.x <= 0 || dims.y <= 0 || dims.z <= 0) {
+        // 创建一个单一探针，放在包围盒中心
+        glm::vec3 center = (minB + maxB) * 0.5f;
+        auto p = std::make_unique<LightProbe>(vulkanDevice, this, res, res);
+        p->SetPosition(center);
+        p->setSkybox(skybox.get());
+        p->setPreviewModel(previewModel.get());
+        if (gltfModel) p->SetGltfModel(gltfModel.get());
+        lightProbes.push_back(std::move(p));
+        return;
+    }
 
-    // lightProbes.push_back(std::move(probe)); // 将探针添加到列表。
+    // 计算每个单元格大小并创建网格
+    glm::vec3 extent = maxB - minB;
+    glm::vec3 cellSize = glm::vec3(
+        extent.x / static_cast<float>(dims.x),
+        extent.y / static_cast<float>(dims.y),
+        extent.z / static_cast<float>(dims.z)
+    );
+
+    for (int x = 0; x < dims.x; ++x) {
+        for (int y = 0; y < dims.y; ++y) {
+            for (int z = 0; z < dims.z; ++z) {
+                glm::vec3 pos = minB + (glm::vec3(x, y, z) + 0.5f) * cellSize; // 放在单元中心
+                auto p = std::make_unique<LightProbe>(vulkanDevice, this, res, res);
+                p->SetPosition(pos);
+                p->setSkybox(skybox.get());
+                p->setPreviewModel(previewModel.get());
+                if (gltfModel) p->SetGltfModel(gltfModel.get());
+                lightProbes.push_back(std::move(p));
+            }
+        }
+    }
 }
 
 void VulkanExample::prepareData()

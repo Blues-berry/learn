@@ -25,7 +25,7 @@ SHCoefficients shCoeffs;
 std::vector<LightProbe> lightProbes;  // 存储所有探针
 int currentProbeIndex = 0;             // 当前选中的探针索引
 bool useMultipleProbes = false;         // 是否使用多个探针
-const int LOW_RES_CUBEMAP_SIZE = 16;   // 低分辨率CubeMap的大小
+const int LOW_RES_CUBEMAP_SIZE = 32;   // 低分辨率CubeMap的大小 (默认改为 32x32)
 const int PROBE_GRID_SIZE = 3;         // 探针网格大小 (3x3x3 = 27个探针)
 
 // UI 新增：对比模式开关
@@ -257,6 +257,14 @@ public:
 
 		std::cout << "Created " << lightProbes.size() << " light probes in a " 
 		          << PROBE_GRID_SIZE << "x" << PROBE_GRID_SIZE << "x" << PROBE_GRID_SIZE << " grid." << std::endl;
+	}
+
+	// 新增：准备探针（自动布置），对外统一调用点
+	void PrepareProbes()
+	{
+		// 目前使用 createProbeGrid 进行自动布置；将来可以加入基于场景包围盒或配置的放置逻辑
+		createProbeGrid();
+		std::cout << "PrepareProbes: placed " << lightProbes.size() << " probes, using resolution " << LOW_RES_CUBEMAP_SIZE << "x" << LOW_RES_CUBEMAP_SIZE << std::endl;
 	}
 
 	// 为所有探针生成低分辨率CubeMap
