@@ -511,6 +511,9 @@ void VulkanExample::CaptureCubemap(const glm::vec3& position)
 
     probe->SetGltfModel(gltfModel.get());
     probe->CaptureCubeMap(queue);
+    // 新增：保存六个方向图片，文件名前缀为 "Captured_"+编号
+    std::string basePath = "Captured_" + std::to_string(cubeMaps.size()) + "_";
+    probe->SaveCubeMapFaces(queue, basePath);
 
     // ... SH/IBL 生成 ...
     auto capturedCubemap = probe->GetCubemap();

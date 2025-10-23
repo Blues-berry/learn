@@ -29,6 +29,8 @@ public:
     void GenSH(VkCommandBuffer cmdBuffer, VkQueue queue);
     // 获取 capturePass 以便外部访问
     CaptureScenePass* GetCapturePass() { return capturePass.get(); }
+    // 保存立方体贴图的六个面为单独的图片
+    void SaveCubeMapFaces(VkQueue queue, const std::string& basePath);
 private:
    
     void drawScene(VkCommandBuffer cmdBuf);

@@ -29,6 +29,8 @@ public:
 
     VkImage GetImage() const { return image; }
     VkFormat GetFormat() const { return format; }
+    uint32_t GetWidth() const { return width; }
+    uint32_t GetHeight() const { return height; }
 
     vks::VulkanDevice* device;
 private:
@@ -57,6 +59,10 @@ class RenderTargetCube : public RenderTarget2D {
 public:
     RenderTargetCube(vks::VulkanDevice* device_, VkFormat format, uint32_t width, uint32_t height);
     ~RenderTargetCube() override = default;
+
+    std::shared_ptr<vks::TextureCubeMap> GetTextureCubeMap();
+private:
+    std::shared_ptr<vks::TextureCubeMap> cubeMap;
 };
 
 class ResourceView {

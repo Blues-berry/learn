@@ -1,6 +1,14 @@
 #include "UpsampleCubeMapPass.h"
 #include <stdexcept>
 
+// CaptureScenePass::GetCubeMap 实现放到文件底部，保证类定义已知
+// =================== CaptureScenePass::GetCubeMap ===================
+#include "VulkanTexture.h"
+std::shared_ptr<vks::TextureCubeMap> CaptureScenePass::GetCubeMap() const {
+    if (!cube) return nullptr;
+    return cube->GetTextureCubeMap();
+}
+
 
 CaptureScenePass::CaptureScenePass(vks::VulkanDevice* device_, IExampleInterfasce* example, VkFormat format, uint32_t w, uint32_t h)
     : device(device_)

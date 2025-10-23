@@ -12,6 +12,9 @@ public:
     explicit CaptureScenePass(vks::VulkanDevice* device_, IExampleInterfasce* example, VkFormat format, uint32_t width, uint32_t height);
     ~CaptureScenePass();
 
+    // ????????????
+    std::shared_ptr<vks::TextureCubeMap> GetCubeMap() const;
+
     struct GlobalUbo {
         glm::mat4 viewproj[6];
         glm::vec4 cameraPos[6];
