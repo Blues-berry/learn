@@ -59,7 +59,12 @@ void PreviewModel::Draw(VkCommandBuffer cmd, VkDescriptorSet globalSet, ETechniq
 
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, techniques[techIdx].pipelineLayout, 0, static_cast<uint32_t>(sets.size()), sets.data(), 0, NULL);
 	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, techniques[techIdx].pso);
-	model->draw(cmd);
+
+	// ✅ 修复: 绑定顶点和索引缓冲，并传递正确的参数
+	VkDeviceSize offsets[1] = { 0 };
+	vkCmdBindVertexBuffers(cmd, 0, 1, &model->vertices.buffer, offsets);
+	vkCmdBindIndexBuffer(cmd, model->indices.buffer, 0, VK_INDEX_TYPE_UINT32);
+	model->draw(cmd, vkglTF::RenderFlags::BindImages, techniques[techIdx].pipelineLayout, 1);
 }
 
 void PreviewModel::Draw(VkCommandBuffer cmd, VkDescriptorSet globalSet, ETechnique tech, const glm::vec3& position)
@@ -80,7 +85,12 @@ void PreviewModel::Draw(VkCommandBuffer cmd, VkDescriptorSet globalSet, ETechniq
 
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, techniques[techIdx].pipelineLayout, 0, static_cast<uint32_t>(sets.size()), sets.data(), 0, NULL);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, techniques[techIdx].pso);
-    model->draw(cmd);
+
+    // ✅ 修复: 绑定顶点和索引缓冲，并传递正确的参数
+    VkDeviceSize offsets[1] = { 0 };
+    vkCmdBindVertexBuffers(cmd, 0, 1, &model->vertices.buffer, offsets);
+    vkCmdBindIndexBuffer(cmd, model->indices.buffer, 0, VK_INDEX_TYPE_UINT32);
+    model->draw(cmd, vkglTF::RenderFlags::BindImages, techniques[techIdx].pipelineLayout, 1);
 }
 
 void PreviewModel::PreparePerBatchResource()

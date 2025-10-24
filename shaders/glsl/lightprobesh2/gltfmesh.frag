@@ -1,5 +1,4 @@
 #version 450
-#extension GL_EXT_multiview : require
 
 layout (location = 0) in vec3 inWorldPos;
 layout (location = 1) in vec3 inNormal;
@@ -7,20 +6,21 @@ layout (location = 2) in vec2 inUV;
 
 layout (set = 0, binding = 0) uniform Global
 {
-    mat4 viewproj[6];  // 6 个面的视图投影矩阵
-    vec4 cameraPos[6]; // 6 个面的相机位置
-    vec4 lights[4];    // 保留光照信息
-    float exposure;    // 曝光
-    float gamma;       // 伽马
+    mat4 projection;   // ✅ 修复：改为分开的 projection 和 view，与 skybox 一致
+    mat4 view;
+    vec4 lights[4];
+    vec4 cameraPos;
+    float exposure;
+    float gamma;
 } global;
 
 layout (set = 0, binding = 1) uniform SHCoefficients {
 	vec4 l00, l1m1, l10, l1p1, l2m2, l2m1, l20, l2p1, l2p2;
 } sh;
 
-layout (binding = 2) uniform sampler2D samplerBRDFLUT;
-layout (binding = 3) uniform samplerCube samplerIrradiance;
-layout (binding = 4) uniform samplerCube prefilteredMap;
+layout (set = 0, binding = 2) uniform sampler2D samplerBRDFLUT;
+layout (set = 0, binding = 3) uniform samplerCube samplerIrradiance;
+layout (set = 0, binding = 4) uniform samplerCube prefilteredMap;
 
 layout (set = 1, binding = 1) uniform Material
 {
@@ -151,47 +151,36 @@ vec3 simplePBR(vec3 N, vec3 V, vec3 albedo, float metallic) {
 void main()
 {
 	vec3 N = normalize(inNormal);
-	vec3 V = normalize(global.cameraPos[gl_ViewIndex].xyz - inWorldPos);
-	vec3 R = reflect(-V, N); 
+	vec3 V = normalize(global.cameraPos.xyz - inWorldPos);
+	vec3 R = reflect(-V, N);
 
 	float metallic = material.metallic;
 	float roughness = material.roughness;
 
-	vec3 F0 = vec3(0.04);
-	F0 = mix(F0, ALBEDO, metallic);
-	vec3 F = F_SchlickR(max(dot(N, V), 0.0), F0, roughness);
-	vec2 brdf = texture(samplerBRDFLUT, vec2(max(dot(N, V), 0.0), roughness)).rg;
+	// ✅ 修复: 使用material.elbedo作为基础颜色
+	vec3 albedo = ALBEDO;
 
-	vec3 Lo = vec3(0.0);
-//	for(int i = 0; i < global.lights.length(); i++) {
-//		vec3 L = normalize(global.lights[i].xyz - inWorldPos);
-//		Lo += specularContribution(L, V, N, F0, metallic, roughness);
-//	}
-	
-	vec3 diffuse = vec3(0.0);
+	// 简单的光照计算：使用法线和视角方向
+	vec3 N_normalized = normalize(N);
+	float NdotV = max(dot(N_normalized, V), 0.0);
 
-	if (material.useSH > 0) {
-		diffuse = simplePBR(N, V, ALBEDO, metallic);
-	} else {
-		
-		vec3 irradiance = texture(samplerIrradiance, N).rgb;
+	// 基础漫反射光照
+	vec3 diffuse = albedo * 0.5;  // 基础环境光
 
-		// Diffuse based on irradiance
-		vec3 kD = 1.0 - F;
-		kD *= 1.0 - metallic;
-		
-		diffuse = kD * irradiance * ALBEDO;
-	}
-	
-	vec3 specular = vec3(0.0);
-	
-	if (material.useReflection > 0) {
-		// Specular reflectance
-		vec3 reflection = prefilteredReflection(R, roughness).rgb;
-		specular = reflection * (F * brdf.x + brdf.y);
-	}
-	vec3 ambient = (diffuse + specular);
-	vec3 color = ambient + Lo;
+	// 添加一个简单的方向光
+	vec3 lightDir = normalize(vec3(1.0, 1.0, 1.0));
+	float NdotL = max(dot(N_normalized, lightDir), 0.0);
+	diffuse += albedo * NdotL * 0.5;  // 方向光贡献
+
+	// 简单的镜面反射
+	vec3 H = normalize(V + lightDir);
+	float NdotH = max(dot(N_normalized, H), 0.0);
+	float specular = pow(NdotH, 32.0) * 0.5;  // 镜面高光
+
+	vec3 color = diffuse + vec3(specular);
+
+	// ✅ 修复: 确保颜色不会太暗
+	color = max(color, vec3(0.1));  // 最小亮度
 
 	// Tone mapping
 	color = Uncharted2Tonemap(color * global.exposure);

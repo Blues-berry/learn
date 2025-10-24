@@ -291,7 +291,6 @@ void VulkanExample::LoadAssets()
 void VulkanExample::PrepareScene()
 {
     // 准备场景，初始化天空盒和预览模型。
-    std::cerr << "PrepareScene: vulkanDevice=" << vulkanDevice << "\n";
     skybox = std::make_unique<Skybox>(vulkanDevice, this); // 创建天空盒对象。
     skybox->SetModel(skyboxModel); // 设置天空盒模型。
     skybox->PreparePSO(renderPass, mainPass->descriptorSetLayout, ETechnique::MAIN); // 准备天空盒的管线状态对象（PSO）。
@@ -300,19 +299,19 @@ void VulkanExample::PrepareScene()
     previewModel = std::make_unique<PreviewModel>(vulkanDevice, this); // 创建预览模型对象。
     previewModel->PreparePSO(renderPass, mainPass->descriptorSetLayout, ETechnique::MAIN); // 准备预览模型的 PSO。
     previewModel->UpdateModel(previewModels[modelIndex]); // 设置初始预览模型。
-        // 准备VulkanglTFModel
-        
-    gltfModel = std::make_unique<GltfModel>(vulkanDevice, this); // 创建 glTF 模型对象。
-    gltfModel->PreparePSO(renderPass, mainPass->descriptorSetLayout, ETechnique::MAIN); // 准备预览模型的 PSO。
-    gltfModel->PreparePSO(capturePass->renderPass, capturePass->descriptorSetLayout, ETechnique::CAPTURE_SCENE); // 准备预览模型的 PSO。
-    gltfModel->UpdateModel(gltfModels[gltfmodelIndex]); // 设置初始预览模型。
-    // 将 glTF 模型左移并放大10倍
-    {
-        glm::mat4 t = glm::translate(glm::mat4(1.0f), glm::vec3(-10.0f, 0.0f, 0.0f));
-        glm::mat4 s = glm::scale(glm::mat4(1.0f), glm::vec3(1.0f));
+
+    // ✅ 准备gltfModel - 为MainPass和CapturePass都准备PSO
+    if (!gltfModels.empty()) {
+        gltfModel = std::make_unique<GltfModel>(vulkanDevice, this); // 创建 glTF 模型对象。
+        gltfModel->PreparePSO(renderPass, mainPass->descriptorSetLayout, ETechnique::MAIN); // 为MainPass准备PSO
+        gltfModel->PreparePSO(capturePass->renderPass, capturePass->descriptorSetLayout, ETechnique::CAPTURE_SCENE); // 为CapturePass准备PSO
+        gltfModel->UpdateModel(gltfModels[0]); // 设置第一个模型
+
+        // 设置gltfModel的位置和缩放
+        glm::mat4 t = glm::translate(glm::mat4(1.0f), glm::vec3(-20.0f, 0.0f, 0.0f));
+        glm::mat4 s = glm::scale(glm::mat4(1.0f), glm::vec3(2.0f));
         gltfModel->SetTransform(t * s);
     }
-
 }
 
 void VulkanExample::UpdateSkyBox()
@@ -344,11 +343,13 @@ void VulkanExample::LoadPreviewModel(const std::string& name, const std::string&
 void VulkanExample::LoadgltfModel(const std::string& name, const std::string& cubemapPath, uint32_t glTFLoadingFlags)
 {
     // 加载预览模型。
+    std::cerr << "LoadgltfModel: Loading " << name << " from " << cubemapPath << "\n";
     auto model = std::make_shared<vkglTF::Model>(); // 创建 glTF 模型对象。
     model->loadFromFile(getAssetPath() + cubemapPath, vulkanDevice, queue, glTFLoadingFlags); // 从文件加载模型。
 
     gltfModels.emplace_back(model); // 添加到预览模型列表。
     gltfModelNames.emplace_back(name); // 添加模型名称。
+    std::cerr << "LoadgltfModel: Loaded " << name << ", total models: " << gltfModels.size() << "\n";
 }
 void VulkanExample::LoadCubeMap(const std::string& name, const std::string& cubemapPath, VkFormat format)
 {
@@ -471,8 +472,9 @@ void VulkanExample::PrepareProbes()
 void VulkanExample::prepareData()
 {
     // 准备渲染数据。
-    mainPassData.project = camera.matrices.perspective; // 设置投影矩阵。
-    mainPassData.view = camera.matrices.view; // 设置视图矩阵。
+    // ✅ 修复：使用分开的 projection 和 view 矩阵，与着色器匹配
+    mainPassData.projection = camera.matrices.perspective;
+    mainPassData.view = camera.matrices.view;
     mainPassData.cameraPos = glm::vec4(camera.position, 1.0f); // 设置相机位置（齐次坐标）。
     mainPassData.light[0] = glm::vec4(10.0f, 10.0f, 10.0f, 1.0f); // ✅ 设置光源位置
 
@@ -492,7 +494,7 @@ void VulkanExample::drawFrame(VkCommandBuffer cmd)
         // 匿名函数：记录绘制命令。
         skybox->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); // 绘制天空盒。
         previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); // 绘制预览模型。
-        gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
+        if (gltfModel) { gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); } // ✅ 添加空指针检查
         for (auto& m : gltfClones) { m->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
 
         // ✅ 修复：删除重复的数据更新，数据已在prepareData中更新

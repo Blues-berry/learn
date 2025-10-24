@@ -6,20 +6,20 @@ layout (location = 2) in vec2 inUV;
 
 layout (set = 0, binding = 0) uniform Global
 {
-	mat4 viewProject[6];
-	vec4 cameraPos[6];
-	vec4 mainLight;
-	float exposure;
-	float gamma;
+    mat4 viewproj;     // 视图投影矩阵
+    vec4 cameraPos;    // 相机位置
+    vec4 lights[4];    // 光照信息
+    float exposure;    // 曝光
+    float gamma;       // 伽马
 } global;
 
 layout (set = 0, binding = 1) uniform SHCoefficients {
 	vec4 l00, l1m1, l10, l1p1, l2m2, l2m1, l20, l2p1, l2p2;
 } sh;
 
-layout (binding = 2) uniform sampler2D samplerBRDFLUT;
-layout (binding = 3) uniform samplerCube samplerIrradiance;
-layout (binding = 4) uniform samplerCube prefilteredMap;
+layout (set = 0, binding = 2) uniform sampler2D samplerBRDFLUT;
+layout (set = 0, binding = 3) uniform samplerCube samplerIrradiance;
+layout (set = 0, binding = 4) uniform samplerCube prefilteredMap;
 
 layout (set = 1, binding = 1) uniform Material
 {
@@ -47,6 +47,7 @@ vec3 Uncharted2Tonemap(vec3 x) {
 	float A = 0.15, B = 0.50, C = 0.10, D = 0.20, E = 0.02, F = 0.30;
 	return ((x*(A*x+C*B)+D*E)/(x*(A*x+B)+D*F))-E/F;
 }
+
 // Normal Distribution function
 float D_GGX(float dotNH, float roughness)
 {
@@ -71,6 +72,7 @@ vec3 F_Schlick(float cosTheta, vec3 F0)
 {
 	return F0 + (1.0 - F0) * pow(1.0 - cosTheta, 5.0);
 }
+
 vec3 F_SchlickR(float cosTheta, vec3 F0, float roughness)
 {
 	return F0 + (max(vec3(1.0 - roughness), F0) - F0) * pow(1.0 - cosTheta, 5.0);
@@ -144,10 +146,13 @@ vec3 simplePBR(vec3 N, vec3 V, vec3 albedo, float metallic) {
 void main()
 {
 	vec3 N = normalize(inNormal);
-	vec3 V = normalize(global.cameraPos[0].xyz - inWorldPos);
+	vec3 V = normalize(global.cameraPos.xyz - inWorldPos);
 	vec3 R = reflect(-V, N);
 
-	// ✅ 修复: 使用material.elbedo作为基础颜色
+	float metallic = material.metallic;
+	float roughness = material.roughness;
+
+	// 使用material.elbedo作为基础颜色
 	vec3 albedo = ALBEDO;
 
 	// 简单的光照计算：使用法线和视角方向
@@ -169,7 +174,7 @@ void main()
 
 	vec3 color = diffuse + vec3(specular);
 
-	// ✅ 修复: 确保颜色不会太暗
+	// 确保颜色不会太暗
 	color = max(color, vec3(0.1));  // 最小亮度
 
 	// Tone mapping

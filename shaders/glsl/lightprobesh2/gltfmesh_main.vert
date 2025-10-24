@@ -6,12 +6,11 @@ layout (location = 2) in vec2 inUV;
 
 layout (set = 0, binding = 0) uniform Global
 {
-    mat4 projection;    // ✅ 修复：改为分开的 projection 和 view，与 skybox 一致
-    mat4 view;
-    vec4 lights[4];
-    vec4 cameraPos;
-    float exposure;
-    float gamma;
+    mat4 viewproj;     // 视图投影矩阵
+    vec4 cameraPos;    // 相机位置
+    vec4 lights[4];    // 光照信息
+    float exposure;    // 曝光
+    float gamma;       // 伽马
 } global;
 
 layout (set = 1, binding = 0) uniform Local
@@ -29,12 +28,12 @@ layout (location = 0) out vec3 outWorldPos;
 layout (location = 1) out vec3 outNormal;
 layout (location = 2) out vec2 outUV;
 
-out gl_PerVertex
+out gl_PerVertex 
 {
 	vec4 gl_Position;
 };
 
-void main()
+void main() 
 {
 	vec4 worldPos = ubo.model * pc.modelOffset * vec4(inPos, 1.0);
 
@@ -43,5 +42,6 @@ void main()
 	outUV = inUV;
 	outUV.t = 1.0 - inUV.t;
 
-	gl_Position = global.projection * global.view * worldPos;
+	gl_Position = global.viewproj * worldPos;
 }
+

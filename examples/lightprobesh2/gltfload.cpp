@@ -79,6 +79,11 @@ void GltfModel::Draw(VkCommandBuffer cmd, VkDescriptorSet globalSet, ETechnique 
 		glm::vec3(0.3f, 0.5f, 1.0f)
 	};
 
+	// ✅ 修复: 绑定顶点和索引缓冲
+	VkDeviceSize vertexOffsets[1] = { 0 };
+	vkCmdBindVertexBuffers(cmd, 0, 1, &model->vertices.buffer, vertexOffsets);
+	vkCmdBindIndexBuffer(cmd, model->indices.buffer, 0, VK_INDEX_TYPE_UINT32);
+
 	// ✅ 修复2: 对于MAIN技术，使用localData.transform而不是push constant中的大偏移
 	// ✅ 修复3: CAPTURE_SCENE中不应用偏移，直接在原点绘制
 	if (tech == ETechnique::CAPTURE_SCENE) {
@@ -86,7 +91,8 @@ void GltfModel::Draw(VkCommandBuffer cmd, VkDescriptorSet globalSet, ETechnique 
 		pc.modelOffset = glm::mat4(1.0f);
 		pc.tint = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);
 		vkCmdPushConstants(cmd, techniques[techIdx].pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstantBlock), &pc);
-		model->draw(cmd);
+		// ✅ 修复: 传递pipelineLayout和bindImageSet参数
+		model->draw(cmd, vkglTF::RenderFlags::BindImages, techniques[techIdx].pipelineLayout, 1);
 	}
 	else {
 		// MAIN技术：使用SetTransform()设置的localData.transform，不应用push constant偏移
@@ -94,7 +100,8 @@ void GltfModel::Draw(VkCommandBuffer cmd, VkDescriptorSet globalSet, ETechnique 
 		pc.modelOffset = glm::mat4(1.0f);  // ✅ 不应用push constant偏移
 		pc.tint = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);
 		vkCmdPushConstants(cmd, techniques[techIdx].pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstantBlock), &pc);
-		model->draw(cmd);
+		// ✅ 修复: 传递pipelineLayout和bindImageSet参数
+		model->draw(cmd, vkglTF::RenderFlags::BindImages, techniques[techIdx].pipelineLayout, 1);
 	}
 }
 
