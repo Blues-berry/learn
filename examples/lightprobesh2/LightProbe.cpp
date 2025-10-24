@@ -68,7 +68,7 @@ void LightProbe::CaptureCubeMap(VkQueue queue, VkCommandBuffer cmd)
     }
     
     // 设置光照参数
-    ubo.lights[0] = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);  // 默认白光
+    ubo.mainLight = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);  // 默认白光
     ubo.exposure = 4.5f;  // 默认曝光值
     ubo.gamma = 2.2f;     // 默认伽马值
 

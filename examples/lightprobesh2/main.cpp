@@ -474,12 +474,11 @@ void VulkanExample::prepareData()
     mainPassData.project = camera.matrices.perspective; // 设置投影矩阵。
     mainPassData.view = camera.matrices.view; // 设置视图矩阵。
     mainPassData.cameraPos = glm::vec4(camera.position, 1.0f); // 设置相机位置（齐次坐标）。
+    mainPassData.light[0] = glm::vec4(10.0f, 10.0f, 10.0f, 1.0f); // ✅ 设置光源位置
 
     mainPass->UpdateGlobal(mainPassData); // 更新主渲染通道的全局 UBO 数据。
 
     skybox->Update(camera.matrices.view); // 更新天空盒的视图矩阵。
-    
-
 }
 
 void VulkanExample::drawFrame(VkCommandBuffer cmd)
@@ -495,22 +494,9 @@ void VulkanExample::drawFrame(VkCommandBuffer cmd)
         previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); // 绘制预览模型。
         gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
         for (auto& m : gltfClones) { m->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
-        // 绘制glTF模型
-        if (gltfModel) {
-        // glm::mat4 project;
-        // glm::mat4 view;
-        // glm::vec4 light[4];
-        // glm::vec4 cameraPos;
-            // 确保 mainPassData 包含 lightPos 和 viewPos
-        mainPassData.light[0] = glm::vec4(10.0f, 10.0f, 10.0f, 1.0f);  // 示例光源位置
-        mainPassData.cameraPos = glm::vec4(camera.position, 10.0f);  // 相机位置
-        mainPassData.view = camera.matrices.view;
-        mainPassData.project = camera.matrices.perspective;
-        mainPass->UpdateGlobal(mainPassData);
 
-        }
+        // ✅ 修复：删除重复的数据更新，数据已在prepareData中更新
 
-        
         // 新增：渲染探针为球体
         if (showProbes) {
             for (const auto& probe : lightProbes) {
@@ -586,6 +572,12 @@ void VulkanExample::CaptureCubemap(const glm::vec3& position)
         gltfModel = std::make_unique<GltfModel>(vulkanDevice, this);
         gltfModel->UpdateModel(previewModel->getModel());
 
+        // ✅ 为MAIN技术准备PSO（用于主渲染）
+        gltfModel->PreparePSO(
+            renderPass,
+            mainPass->descriptorSetLayout,
+            ETechnique::MAIN
+        );
 
         // CAPTURE_SCENE: 使用 capturePass 的 renderPass
         gltfModel->PreparePSO(
