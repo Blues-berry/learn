@@ -498,12 +498,23 @@ void VulkanExample::CaptureAllProbes()
             continue;
         }
 
+        // ✅ 新增：为每个探针生成 SH 和 IBL
+        std::cout << "    Generating SH and IBL for probe " << i << "..." << std::endl;
+
+        // 生成 SH 系数
+        shGenPass->SetCubeMap(capturedCubemap);
+        shGenPass->Generate(queue);
+
+        // 生成 IBL 贴图
+        genIBL->SetCubeMap(capturedCubemap);
+        genIBL->Generate(queue);
+
         // 添加到全局 cubeMaps 列表
         cubeMaps.push_back(capturedCubemap);
         std::string probeName = "Probe_" + std::to_string(i) + "_" + std::to_string(cubeMaps.size() - 1);
         cubemapNames.push_back(probeName);
 
-        std::cout << "    ✓ Probe " << i << " captured successfully" << std::endl;
+        std::cout << "    ✓ Probe " << i << " captured and processed successfully" << std::endl;
     }
 
     // 等待所有操作完成

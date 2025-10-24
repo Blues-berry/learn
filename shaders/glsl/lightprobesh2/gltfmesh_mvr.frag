@@ -83,8 +83,13 @@ vec3 prefilteredReflection(vec3 R, float roughness)
 	float lod = roughness * MAX_REFLECTION_LOD;
 	float lodf = floor(lod);
 	float lodc = ceil(lod);
-	vec3 a = textureLod(prefilteredMap, R, lodf).rgb;
-	vec3 b = textureLod(prefilteredMap, R, lodc).rgb;
+
+	// ✅ 修复：与 prefilterenvmap.frag 保持一致，采样前翻转 Y 坐标
+	vec3 sampleR = R;
+	sampleR.y = -sampleR.y;
+
+	vec3 a = textureLod(prefilteredMap, sampleR, lodf).rgb;
+	vec3 b = textureLod(prefilteredMap, sampleR, lodc).rgb;
 	return mix(a, b, lod - lodf);
 }
 
@@ -149,30 +154,42 @@ void main()
 	vec3 V = normalize(global.cameraPos[gl_ViewIndex].xyz - inWorldPos);
 	vec3 R = reflect(-V, N);
 
-	// ✅ 修复: 使用material.elbedo作为基础颜色
-	vec3 albedo = ALBEDO;
+	float metallic = material.metallic;
+	float roughness = material.roughness;
 
-	// 简单的光照计算：使用法线和视角方向
-	vec3 N_normalized = normalize(N);
-	float NdotV = max(dot(N_normalized, V), 0.0);
+	vec3 F0 = vec3(0.04);
+	F0 = mix(F0, ALBEDO, metallic);
+	vec3 F = F_SchlickR(max(dot(N, V), 0.0), F0, roughness);
+	vec2 brdf = texture(samplerBRDFLUT, vec2(max(dot(N, V), 0.0), roughness)).rg;
 
-	// 基础漫反射光照
-	vec3 diffuse = albedo * 0.5;  // 基础环境光
+	vec3 Lo = vec3(0.0);
 
-	// 添加一个简单的方向光
-	vec3 lightDir = normalize(vec3(1.0, 1.0, 1.0));
-	float NdotL = max(dot(N_normalized, lightDir), 0.0);
-	diffuse += albedo * NdotL * 0.5;  // 方向光贡献
+	vec3 diffuse = vec3(0.0);
 
-	// 简单的镜面反射
-	vec3 H = normalize(V + lightDir);
-	float NdotH = max(dot(N_normalized, H), 0.0);
-	float specular = pow(NdotH, 32.0) * 0.5;  // 镜面高光
+	if (material.useSH > 0) {
+		diffuse = simplePBR(N, V, ALBEDO, metallic);
+	} else {
+		// ✅ 修复：与 irradiancecube.frag 保持一致，采样前翻转 Y 坐标
+		vec3 sampleN = N;
+		sampleN.y = -sampleN.y;
+		vec3 irradiance = texture(samplerIrradiance, sampleN).rgb;
 
-	vec3 color = diffuse + vec3(specular);
+		// Diffuse based on irradiance
+		vec3 kD = 1.0 - F;
+		kD *= 1.0 - metallic;
 
-	// ✅ 修复: 确保颜色不会太暗
-	color = max(color, vec3(0.1));  // 最小亮度
+		diffuse = kD * irradiance * ALBEDO;
+	}
+
+	vec3 specular = vec3(0.0);
+
+	if (material.useReflection > 0) {
+		// Specular reflectance
+		vec3 reflection = prefilteredReflection(R, roughness).rgb;
+		specular = reflection * (F * brdf.x + brdf.y);
+	}
+	vec3 ambient = (diffuse + specular);
+	vec3 color = ambient + Lo;
 
 	// Tone mapping
 	color = Uncharted2Tonemap(color * global.exposure);

@@ -22,6 +22,19 @@ LightProbe::~LightProbe()
 
 void LightProbe::drawScene(VkCommandBuffer cmdBuf)
 {
+    // ✅ 修复：为捕获时的天空盒更新位置
+    // 天空盒需要围绕探针位置，而不是固定在世界坐标系中
+    if (skybox) {
+        // 创建一个以探针位置为中心的视图矩阵
+        // 由于天空盒总是在相机位置，我们需要创建一个"虚拟相机"在探针位置
+        glm::mat4 skyboxView = glm::lookAt(
+            position,                           // 相机位置 = 探针位置
+            position + glm::vec3(0, 0, -1),    // 看向 -Z 方向
+            glm::vec3(0, 1, 0)                 // Y 轴向上
+        );
+        skybox->Update(skyboxView);
+    }
+
     capturePass->Draw(cmdBuf, [this](VkCommandBuffer cmd) {
         if (skybox) {
             skybox->Draw(cmd, capturePass->descriptorSet, ETechnique::CAPTURE_SCENE);
@@ -32,7 +45,7 @@ void LightProbe::drawScene(VkCommandBuffer cmdBuf)
 
     });
 
-    
+
 }
 
 void LightProbe::setSkybox(Skybox* skybox_)

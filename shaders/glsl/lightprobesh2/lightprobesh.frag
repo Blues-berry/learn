@@ -78,8 +78,13 @@ vec3 prefilteredReflection(vec3 R, float roughness)
 	float lod = roughness * MAX_REFLECTION_LOD;
 	float lodf = floor(lod);
 	float lodc = ceil(lod);
-	vec3 a = textureLod(prefilteredMap, R, lodf).rgb;
-	vec3 b = textureLod(prefilteredMap, R, lodc).rgb;
+
+	// ✅ 修复：与 prefilterenvmap.frag 保持一致，采样前翻转 Y 坐标
+	vec3 sampleR = R;
+	sampleR.y = -sampleR.y;
+
+	vec3 a = textureLod(prefilteredMap, sampleR, lodf).rgb;
+	vec3 b = textureLod(prefilteredMap, sampleR, lodc).rgb;
 	return mix(a, b, lod - lodf);
 }
 
@@ -168,13 +173,15 @@ void main()
 	if (material.useSH > 0) {
 		diffuse = simplePBR(N, V, ALBEDO, metallic);
 	} else {
-		
-		vec3 irradiance = texture(samplerIrradiance, N).rgb;
+		// ✅ 修复：与 irradiancecube.frag 保持一致，采样前翻转 Y 坐标
+		vec3 sampleN = N;
+		sampleN.y = -sampleN.y;
+		vec3 irradiance = texture(samplerIrradiance, sampleN).rgb;
 
 		// Diffuse based on irradiance
 		vec3 kD = 1.0 - F;
 		kD *= 1.0 - metallic;
-		
+
 		diffuse = kD * irradiance * ALBEDO;
 	}
 	
