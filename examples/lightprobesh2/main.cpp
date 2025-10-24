@@ -462,7 +462,7 @@ void VulkanExample::PrepareProbes()
                 p->SetPosition(pos);
                 p->setSkybox(skybox.get());
                 p->setPreviewModel(previewModel.get());
-                if (gltfModel) p->SetGltfModel(gltfModel.get());
+                p->SetGltfModel(gltfModel.get());
                 lightProbes.push_back(std::move(p));
             }
         }
