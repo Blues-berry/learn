@@ -1,5 +1,5 @@
 #include <cstdint>
-#include <glm/glm.hpp> 
+#include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include "vulkanexamplebase.h"
@@ -10,6 +10,7 @@
 #include "Pass.h"
 #include "ILoader.h"
 #include "PreviewModel.h"
+#include "ProbeVisualizer.h"
 #include <fstream>
 #include "tiny_gltf.h"
 #include "../base/VulkanTools.h"
@@ -280,6 +281,20 @@ private:
     // 描述符池
     VkDescriptorPool descriptorPool{ VK_NULL_HANDLE };
 
+    // ✅ 新增：探针可视化器
+    std::unique_ptr<ProbeVisualizer> probeVisualizer;
+
+    // ✅ 新增：探针显示模式
+    enum class ProbeDisplayMode {
+        NONE = 0,           // 不显示探针
+        SINGLE = 1,         // 显示单个探针
+        ALL = 2,            // 显示所有探针
+        INTERPOLATED = 3    // 显示插值探针
+    };
+    ProbeDisplayMode probeDisplayMode = ProbeDisplayMode::NONE;
+
+    // ✅ 新增：探针可视化参数
+    float probeVisualizationScale = 0.2f;
     bool showProbes = false; // Toggle for visualizing probes
 };
 
@@ -332,6 +347,16 @@ void VulkanExample::PrepareScene()
         glm::mat4 s = glm::scale(glm::mat4(1.0f), glm::vec3(2.0f));
         gltfModel->SetTransform(t * s);
     }
+
+    // ✅ 新增：初始化探针可视化器
+    probeVisualizer = std::make_unique<ProbeVisualizer>(vulkanDevice, this);
+    probeVisualizer->Initialize();
+    // ✅ 设置球体模型（使用已加载的 preview 模型中的球体）
+    if (!previewModels.empty()) {
+        probeVisualizer->SetSphereModel(previewModels[0]);  // 使用第一个球体模型
+    }
+    probeVisualizer->PreparePSO(renderPass, mainPass->descriptorSetLayout, ETechnique::MAIN);
+    probeVisualizer->SetProbeScale(probeVisualizationScale);
 }
 
 void VulkanExample::UpdateSkyBox()
@@ -638,10 +663,44 @@ void VulkanExample::drawFrame(VkCommandBuffer cmd)
 
         // ✅ 修复：删除重复的数据更新，数据已在prepareData中更新
 
-        // 新增：渲染探针为球体
-        if (showProbes) {
-            for (const auto& probe : lightProbes) {
-                probe->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
+        // ✅ 新增：根据模式绘制探针
+        if (probeDisplayMode != ProbeDisplayMode::NONE && probeVisualizer) {
+            switch (probeDisplayMode) {
+                case ProbeDisplayMode::SINGLE: {
+                    // 显示单个探针（最后捕获的探针）
+                    if (!lightProbes.empty()) {
+                        probeVisualizer->DrawProbe(cmd, mainPass->descriptorSet, ETechnique::MAIN,
+                                                  lightProbes.back()->GetPosition(),
+                                                  glm::vec4(1.0f, 0.0f, 0.0f, 1.0f)); // 红色
+                    }
+                    break;
+                }
+                case ProbeDisplayMode::ALL: {
+                    // 显示所有探针
+                    std::vector<glm::vec3> positions;
+                    for (const auto& probe : lightProbes) {
+                        positions.push_back(probe->GetPosition());
+                    }
+                    if (!positions.empty()) {
+                        probeVisualizer->DrawProbes(cmd, mainPass->descriptorSet, ETechnique::MAIN, positions);
+                    }
+                    break;
+                }
+                case ProbeDisplayMode::INTERPOLATED: {
+                    // 显示多探针插值（相机周围的探针）
+                    if (useMultipleProbes && !multiProbeData.empty()) {
+                        std::vector<glm::vec3> positions;
+                        for (const auto& probeData : multiProbeData) {
+                            positions.push_back(probeData.position);
+                        }
+                        if (!positions.empty()) {
+                            probeVisualizer->DrawProbes(cmd, mainPass->descriptorSet, ETechnique::MAIN, positions);
+                        }
+                    }
+                    break;
+                }
+                default:
+                    break;
             }
         }
 
@@ -706,8 +765,21 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
             }
         }
 
-        // Add toggle for probe visualization
-        overlay->checkBox("Show Probes", &showProbes);
+        // ✅ 新增：探针可视化模式选择
+        if (overlay->header("Probe Visualization")) {
+            std::vector<std::string> displayModes = { "None", "Single", "All", "Interpolated" };
+            int modeIndex = static_cast<int>(probeDisplayMode);
+            if (overlay->comboBox("Display Mode", &modeIndex, displayModes)) {
+                probeDisplayMode = static_cast<ProbeDisplayMode>(modeIndex);
+            }
+
+            // 探针大小控制
+            if (overlay->sliderFloat("Probe Scale", &probeVisualizationScale, 0.05f, 1.0f)) {
+                if (probeVisualizer) {
+                    probeVisualizer->SetProbeScale(probeVisualizationScale);
+                }
+            }
+        }
     }
 
     previewModel->ShowUI(overlay); // 显示预览模型的 UI 控件。
