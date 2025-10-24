@@ -48,6 +48,15 @@ struct ProbeGridConfig {
     uint32_t resolution{ 32 };
 };
 
+// ✅ 新增：多探针数据结构体
+struct ProbeData {
+    glm::vec3 position;
+    std::shared_ptr<vks::TextureCubeMap> cubemap;
+    VkDescriptorImageInfo irradianceCube;
+    VkDescriptorImageInfo prefilteredCube;
+    VkDescriptorBufferInfo shCoeffs;
+};
+
 class VulkanExample : public VulkanExampleBase, public IExampleInterfasce
 {
 public:
@@ -140,6 +149,12 @@ public:
     void CaptureAllProbes();
     // ✅ 新增：自动捕获所有探针的立方体贴图
 
+    int findNearestProbe(const glm::vec3& position);
+    // ✅ 新增：根据位置找到最近的探针
+
+    void updateProbeBindings(int probeIndex);
+    // ✅ 新增：更新探针绑定（SH 和 IBL）
+
     void ReginPrefilterPasses();
     // 声明重新生成预过滤通道函数（未实现）。
 
@@ -206,8 +221,10 @@ private:
     std::vector<std::unique_ptr<LightProbe>> lightProbes;
     int32_t lightProbesIndex = 0;
     // 探针配置
-    ProbeGridConfig probeGridConfig;
+    ProbeGridConfig probeGridConfig;    
     bool useMultipleProbes = false;
+    // ✅ 新增：多探针数据列表
+    std::vector<ProbeData> multiProbeData;
     // 光照探针列表，存储场景中的光照探针。
     std::unique_ptr<CaptureScenePass> capturePass;   // 捕获场景通道，用于生成立方体贴图。
     // 天空盒相关成员。
@@ -483,6 +500,9 @@ void VulkanExample::CaptureAllProbes()
 
     std::cout << "[VulkanExample::CaptureAllProbes] Starting capture for " << lightProbes.size() << " probes..." << std::endl;
 
+    // 清空之前的多探针数据
+    multiProbeData.clear();
+
     // 为每个探针捕获立方体贴图
     for (size_t i = 0; i < lightProbes.size(); ++i) {
         auto& p = lightProbes[i];
@@ -509,7 +529,21 @@ void VulkanExample::CaptureAllProbes()
         genIBL->SetCubeMap(capturedCubemap);
         genIBL->Generate(queue);
 
-        // 添加到全局 cubeMaps 列表
+        // ✅ 修复：保存每个探针的数据到 ProbeData
+        ProbeData data;
+        data.position = p->GetPosition();
+        data.cubemap = capturedCubemap;
+
+        // 获取 SH 系数
+        shGenPass->FeedSH(data.shCoeffs);
+
+        // 获取 IBL 贴图
+        genIBL->FeedIrradianceMap(data.irradianceCube);
+        genIBL->FeedPrefilteredMap(data.prefilteredCube);
+
+        multiProbeData.push_back(data);
+
+        // 添加到全局 cubeMaps 列表（用于 UI 显示）
         cubeMaps.push_back(capturedCubemap);
         std::string probeName = "Probe_" + std::to_string(i) + "_" + std::to_string(cubeMaps.size() - 1);
         cubemapNames.push_back(probeName);
@@ -520,12 +554,51 @@ void VulkanExample::CaptureAllProbes()
     // 等待所有操作完成
     vkDeviceWaitIdle(vulkanDevice->logicalDevice);
 
-    // 更新天空盒为最后一个捕获的探针
-    if (!cubeMaps.empty()) {
-        skyboxIndex = static_cast<int>(cubeMaps.size() - 1);
-        UpdateSkyBox();
-        std::cout << "[VulkanExample::CaptureAllProbes] All probes captured! Updated skybox to probe " << skyboxIndex << std::endl;
+    // ✅ 修复：不自动更新天空盒，让用户选择
+    std::cout << "[VulkanExample::CaptureAllProbes] All " << multiProbeData.size() << " probes captured!" << std::endl;
+    std::cout << "  Multi-probe data ready for interpolation" << std::endl;
+}
+
+// ✅ 新增：根据位置找到最近的探针
+int VulkanExample::findNearestProbe(const glm::vec3& position)
+{
+    if (multiProbeData.empty()) {
+        return -1;
     }
+
+    int nearestIndex = 0;
+    float minDistance = glm::distance(position, multiProbeData[0].position);
+
+    for (size_t i = 1; i < multiProbeData.size(); ++i) {
+        float distance = glm::distance(position, multiProbeData[i].position);
+        if (distance < minDistance) {
+            minDistance = distance;
+            nearestIndex = static_cast<int>(i);
+        }
+    }
+
+    return nearestIndex;
+}
+
+// ✅ 新增：更新探针绑定（SH 和 IBL）
+void VulkanExample::updateProbeBindings(int probeIndex)
+{
+    if (probeIndex < 0 || probeIndex >= static_cast<int>(multiProbeData.size())) {
+        std::cerr << "[VulkanExample::updateProbeBindings] Invalid probe index: " << probeIndex << std::endl;
+        return;
+    }
+
+    const ProbeData& data = multiProbeData[probeIndex];
+
+    // 更新 SH 系数
+    mainPass->environmemts.shCoeffs = data.shCoeffs;
+
+    // 更新 IBL 贴图
+    mainPass->environmemts.irradianceCube = data.irradianceCube;
+    mainPass->environmemts.prefilteredCube = data.prefilteredCube;
+
+    // 更新描述符集
+    mainPass->UpdateBindings();
 }
 
 void VulkanExample::prepareData()
@@ -538,6 +611,14 @@ void VulkanExample::prepareData()
     mainPassData.light[0] = glm::vec4(10.0f, 10.0f, 10.0f, 1.0f); // ✅ 设置光源位置
 
     mainPass->UpdateGlobal(mainPassData); // 更新主渲染通道的全局 UBO 数据。
+
+    // ✅ 新增：多探针模式下根据相机位置更新 SH 和 IBL
+    if (useMultipleProbes && !multiProbeData.empty()) {
+        int nearestProbeIndex = findNearestProbe(camera.position);
+        if (nearestProbeIndex >= 0) {
+            updateProbeBindings(nearestProbeIndex);
+        }
+    }
 
     skybox->Update(camera.matrices.view); // 更新天空盒的视图矩阵。
 }

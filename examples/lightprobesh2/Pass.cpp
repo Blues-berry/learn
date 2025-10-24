@@ -722,13 +722,24 @@ void GenIBLCubeMipPass::PrepareData()
     auto project = glm::perspective((float)(M_PI / 2.0), 1.0f, 0.1f, 512.0f); // 创建透视投影矩阵（90 度 FOV，近裁剪面 0.1，远裁剪面 512）。
 
     IBLGenUBO uboData = {}; // 初始化 IBL 统一缓冲区对象。
-    // 设置立方体贴图的六个面的 MVP 矩阵。
-    uboData.mvp[0] = project * glm::rotate(glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(0.0f, 1.0f, 0.0f)), glm::radians(180.0f), glm::vec3(1.0f, 0.0f, 0.0f)); // 正 X 面。
-    uboData.mvp[1] = project * glm::rotate(glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(0.0f, 1.0f, 0.0f)), glm::radians(180.0f), glm::vec3(1.0f, 0.0f, 0.0f)); // 负 X 面。
-    uboData.mvp[2] = project * glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f)); // 正 Y 面。
-    uboData.mvp[3] = project * glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f)); // 负 Y 面。
-    uboData.mvp[4] = project * glm::rotate(glm::mat4(1.0f), glm::radians(180.0f), glm::vec3(1.0f, 0.0f, 0.0f)); // 正 Z 面。
-    uboData.mvp[5] = project * glm::rotate(glm::mat4(1.0f), glm::radians(180.0f), glm::vec3(0.0f, 0.0f, 1.0f)); // 负 Z 面。
+
+    // ✅ 修复：立方体贴图的六个面的 MVP 矩阵
+    // Vulkan 立方体贴图面顺序: +X, -X, +Y, -Y, +Z, -Z
+    // 对应的视图矩阵应该从该面的方向看向原点
+
+    // 使用 lookAt 方式生成视图矩阵，更直观且正确
+    glm::mat4 views[6] = {
+        glm::lookAt(glm::vec3( 1, 0, 0), glm::vec3(0, 0, 0), glm::vec3(0, -1,  0)), // +X 面：从右边看
+        glm::lookAt(glm::vec3(-1, 0, 0), glm::vec3(0, 0, 0), glm::vec3(0, -1,  0)), // -X 面：从左边看
+        glm::lookAt(glm::vec3( 0, 1, 0), glm::vec3(0, 0, 0), glm::vec3(0,  0,  1)), // +Y 面：从上面看
+        glm::lookAt(glm::vec3( 0,-1, 0), glm::vec3(0, 0, 0), glm::vec3(0,  0, -1)), // -Y 面：从下面看
+        glm::lookAt(glm::vec3( 0, 0, 1), glm::vec3(0, 0, 0), glm::vec3(0, -1,  0)), // +Z 面：从前面看
+        glm::lookAt(glm::vec3( 0, 0,-1), glm::vec3(0, 0, 0), glm::vec3(0, -1,  0))  // -Z 面：从后面看
+    };
+
+    for (int i = 0; i < 6; ++i) {
+        uboData.mvp[i] = project * views[i];
+    }
 
     FeedUBO(uboData); // 调用子类实现的 UBO 数据填充方法。
 

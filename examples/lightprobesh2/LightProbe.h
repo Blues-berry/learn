@@ -17,6 +17,8 @@ public:
     LightProbe(vks::VulkanDevice* device_, IExampleInterfasce* example, uint32_t width_ = 512, uint32_t height_ = 512);
     ~LightProbe();
     void SetPosition(const glm::vec3& position_) { position = position_; }
+    // ✅ 新增：获取探针位置
+    glm::vec3 GetPosition() const { return position; }
      // 获取内部的立方体贴图
     std::shared_ptr<vks::TextureCubeMap> GetCubemap() const { return cubemap; }
     void setmodel(std::shared_ptr<vkglTF::Model> model_) { model = model_; }
