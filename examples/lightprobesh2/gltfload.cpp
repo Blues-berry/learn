@@ -79,29 +79,11 @@ void GltfModel::Draw(VkCommandBuffer cmd, VkDescriptorSet globalSet, ETechnique 
 		glm::vec3(0.3f, 0.5f, 1.0f)
 	};
 
-	// ✅ 修复: 绑定顶点和索引缓冲
-	VkDeviceSize vertexOffsets[1] = { 0 };
-	vkCmdBindVertexBuffers(cmd, 0, 1, &model->vertices.buffer, vertexOffsets);
-	vkCmdBindIndexBuffer(cmd, model->indices.buffer, 0, VK_INDEX_TYPE_UINT32);
-
-	// ✅ 修复2: 对于MAIN技术，使用localData.transform而不是push constant中的大偏移
-	// ✅ 修复3: CAPTURE_SCENE中不应用偏移，直接在原点绘制
-	if (tech == ETechnique::CAPTURE_SCENE) {
-		// 捕获场景时，不应用偏移和缩放，直接在原点绘制
-		pc.modelOffset = glm::mat4(1.0f);
-		pc.tint = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);
+	for (int i = 0; i < 4; ++i) {
+		pc.modelOffset = glm::translate(glm::mat4(1.0f), offsets[i]) * glm::scale(glm::mat4(1.0f), glm::vec3(scale));
+		pc.tint = glm::vec4(colors[i % 3], 1.0f);
 		vkCmdPushConstants(cmd, techniques[techIdx].pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstantBlock), &pc);
-		// ✅ 修复: 传递pipelineLayout和bindImageSet参数
-		model->draw(cmd, vkglTF::RenderFlags::BindImages, techniques[techIdx].pipelineLayout, 1);
-	}
-	else {
-		// MAIN技术：使用SetTransform()设置的localData.transform，不应用push constant偏移
-		// 这样模型就不会跟随视角移动
-		pc.modelOffset = glm::mat4(1.0f);  // ✅ 不应用push constant偏移
-		pc.tint = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);
-		vkCmdPushConstants(cmd, techniques[techIdx].pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstantBlock), &pc);
-		// ✅ 修复: 传递pipelineLayout和bindImageSet参数
-		model->draw(cmd, vkglTF::RenderFlags::BindImages, techniques[techIdx].pipelineLayout, 1);
+		model->draw(cmd);
 	}
 }
 
@@ -245,24 +227,10 @@ void GltfModel::PreparePSO(VkRenderPass renderPass, VkDescriptorSetLayout passLa
 	pipelineCI.pStages = shaderStages.data();
 	pipelineCI.pVertexInputState = vkglTF::Vertex::getPipelineVertexInputState({ vkglTF::VertexComponent::Position, vkglTF::VertexComponent::Normal, vkglTF::VertexComponent::UV });
 
-	// ✅ 修复4: 根据技术类型选择不同的着色器
-	// MAIN技术使用普通着色器，CAPTURE_SCENE使用multiview着色器
-	if (technique == ETechnique::MAIN) {
-		shaderStages[0] = iLoader->LoadShader("lightprobesh2/gltfmesh.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
-		shaderStages[1] = iLoader->LoadShader("lightprobesh2/gltfmesh.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
-	}
-	else {
-		// CAPTURE_SCENE使用multiview着色器，支持同时渲染到6个cubemap面
-		shaderStages[0] = iLoader->LoadShader("lightprobesh2/gltfmesh_mvr.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
-		shaderStages[1] = iLoader->LoadShader("lightprobesh2/gltfmesh_mvr.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
-	}
+	// 加载着色器
+	shaderStages[0] = iLoader->LoadShader("lightprobesh2/gltfmesh.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
+	shaderStages[1] = iLoader->LoadShader("lightprobesh2/gltfmesh.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
 	VK_CHECK_RESULT(vkCreateGraphicsPipelines(rawDevice, VK_NULL_HANDLE, 1, &pipelineCI, nullptr, &techniques[(uint32_t)technique].pso));
-}
-
-void GltfModel::SetUseSHAndReflection(bool useSH, bool useReflection) {
-    materialData.useSH = useSH ? 1 : 0;
-    materialData.useReflection = useReflection ? 1 : 0;
-    memcpy(materialBuffer.mapped, &materialData, sizeof(MaterialBuffer));
 }
 
 void GltfModel::ShowUI(vks::UIOverlay* overlay)

@@ -304,8 +304,8 @@ void VulkanExample::PrepareScene()
     if (!gltfModels.empty()) {
         gltfModel = std::make_unique<GltfModel>(vulkanDevice, this); // 创建 glTF 模型对象。
         gltfModel->PreparePSO(renderPass, mainPass->descriptorSetLayout, ETechnique::MAIN); // 为MainPass准备PSO
-        gltfModel->PreparePSO(capturePass->renderPass, capturePass->descriptorSetLayout, ETechnique::CAPTURE_SCENE); // 为CapturePass准备PSO
-        gltfModel->UpdateModel(gltfModels[0]); // 设置第一个模型
+        //gltfModel->PreparePSO(capturePass->renderPass, capturePass->descriptorSetLayout, ETechnique::CAPTURE_SCENE); // 为CapturePass准备PSO
+        gltfModel->UpdateModel(gltfModels[gltfmodelIndex]); // 设置第一个模型
 
         // 设置gltfModel的位置和缩放
         glm::mat4 t = glm::translate(glm::mat4(1.0f), glm::vec3(-20.0f, 0.0f, 0.0f));
@@ -574,19 +574,19 @@ void VulkanExample::CaptureCubemap(const glm::vec3& position)
         gltfModel = std::make_unique<GltfModel>(vulkanDevice, this);
         gltfModel->UpdateModel(previewModel->getModel());
 
-        // ✅ 为MAIN技术准备PSO（用于主渲染）
-        gltfModel->PreparePSO(
-            renderPass,
-            mainPass->descriptorSetLayout,
-            ETechnique::MAIN
-        );
+        // // ✅ 为MAIN技术准备PSO（用于主渲染）
+        // gltfModel->PreparePSO(
+        //     renderPass,
+        //     mainPass->descriptorSetLayout,
+        //     ETechnique::MAIN
+        // );
 
-        // CAPTURE_SCENE: 使用 capturePass 的 renderPass
-        gltfModel->PreparePSO(
-            capturePass->renderPass,
-            capturePass->descriptorSetLayout,
-            ETechnique::CAPTURE_SCENE
-        );
+        // // CAPTURE_SCENE: 使用 capturePass 的 renderPass
+        // gltfModel->PreparePSO(
+        //     capturePass->renderPass,
+        //     capturePass->descriptorSetLayout,
+        //     ETechnique::CAPTURE_SCENE
+        // );
     }
 
     probe->SetGltfModel(gltfModel.get());
@@ -623,7 +623,7 @@ void VulkanExample::CaptureCubemap(const glm::vec3& position)
         previewModel->SetUseSHAndReflection(true, true);
     }
     if (gltfModel) {
-        gltfModel->SetUseSHAndReflection(true, true);
+        //gltfModel->SetUseSHAndReflection(true, true);
     }
 
     lightProbes.push_back(std::move(probe));
