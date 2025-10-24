@@ -137,6 +137,9 @@ public:
     void CaptureCubemap(const glm::vec3& position);
     // 声明捕获立方体贴图函数，在指定位置生成新的立方体贴图。
 
+    void CaptureAllProbes();
+    // ✅ 新增：自动捕获所有探针的立方体贴图
+
     void ReginPrefilterPasses();
     // 声明重新生成预过滤通道函数（未实现）。
 
@@ -432,7 +435,8 @@ void VulkanExample::PrepareProbes()
     glm::vec3 minB = probeGridConfig.minBounds;
     glm::vec3 maxB = probeGridConfig.maxBounds;
     glm::ivec3 dims = probeGridConfig.dimensions;
-    uint32_t res = probeGridConfig.resolution > 0 ? probeGridConfig.resolution : 32; // 默认 32
+    // ✅ 修改：多探针模式使用 16×16 分辨率
+    uint32_t res = 16;
 
     if (dims.x <= 0 || dims.y <= 0 || dims.z <= 0) {
         // 创建一个单一探针，放在包围盒中心
@@ -466,6 +470,50 @@ void VulkanExample::PrepareProbes()
                 lightProbes.push_back(std::move(p));
             }
         }
+    }
+}
+
+// ✅ 新增：自动捕获所有探针的立方体贴图
+void VulkanExample::CaptureAllProbes()
+{
+    if (lightProbes.empty()) {
+        std::cerr << "[VulkanExample::CaptureAllProbes] No probes to capture!" << std::endl;
+        return;
+    }
+
+    std::cout << "[VulkanExample::CaptureAllProbes] Starting capture for " << lightProbes.size() << " probes..." << std::endl;
+
+    // 为每个探针捕获立方体贴图
+    for (size_t i = 0; i < lightProbes.size(); ++i) {
+        auto& p = lightProbes[i];
+        std::cout << "  Capturing probe " << (i + 1) << "/" << lightProbes.size() << "..." << std::endl;
+
+        // 执行捕获
+        p->CaptureCubeMap(queue);
+
+        // 获取捕获的立方体贴图
+        auto capturedCubemap = p->GetCubemap();
+        if (!capturedCubemap) {
+            std::cerr << "    Error: Failed to get cubemap for probe " << i << std::endl;
+            continue;
+        }
+
+        // 添加到全局 cubeMaps 列表
+        cubeMaps.push_back(capturedCubemap);
+        std::string probeName = "Probe_" + std::to_string(i) + "_" + std::to_string(cubeMaps.size() - 1);
+        cubemapNames.push_back(probeName);
+
+        std::cout << "    ✓ Probe " << i << " captured successfully" << std::endl;
+    }
+
+    // 等待所有操作完成
+    vkDeviceWaitIdle(vulkanDevice->logicalDevice);
+
+    // 更新天空盒为最后一个捕获的探针
+    if (!cubeMaps.empty()) {
+        skyboxIndex = static_cast<int>(cubeMaps.size() - 1);
+        UpdateSkyBox();
+        std::cout << "[VulkanExample::CaptureAllProbes] All probes captured! Updated skybox to probe " << skyboxIndex << std::endl;
     }
 }
 
@@ -530,13 +578,16 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
             CaptureCubemap(camera.position); // 在相机位置捕获立方体贴图。
         }
         // Probe grid controls
+        // ✅ 修复：分离 "Use Multiple Probes" 和 "Generate Probes" 的逻辑
+        // 不在勾选时自动调用 PrepareProbes()，而是让用户手动点击 "Generate Probes"
         if (overlay->checkBox("Use Multiple Probes", &useMultipleProbes)) {
-            if (useMultipleProbes) {
-                PrepareProbes();
-            } else {
+            if (!useMultipleProbes) {
+                // 取消勾选时清空探针
                 lightProbes.clear();
             }
+            // 勾选时不自动生成，等待用户点击 "Generate Probes" 按钮
         }
+
         if (useMultipleProbes) {
             float step = 0.1f;
             overlay->inputFloat("Probe Min X", &probeGridConfig.minBounds.x, step, 3);
@@ -551,8 +602,15 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
             int res = static_cast<int>(probeGridConfig.resolution);
             overlay->sliderInt("Probe Resolution", &res, 4, 256);
             probeGridConfig.resolution = static_cast<uint32_t>(res);
+
+            // ✅ 修复：现在点击 "Generate Probes" 会真正生成探针
             if (overlay->button("Generate Probes")) {
                 PrepareProbes();
+            }
+
+            // ✅ 新增：自动捕获所有探针的按钮
+            if (overlay->button("Capture All Probes")) {
+                CaptureAllProbes();
             }
         }
 
