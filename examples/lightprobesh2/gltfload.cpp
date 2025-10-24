@@ -54,6 +54,14 @@ void GltfModel::Draw(VkCommandBuffer cmd, VkDescriptorSet globalSet, ETechnique 
 	}
 
 	uint32_t techIdx = (uint32_t)tech;
+
+	// ✅ 安全检查：确保 PSO 已经准备好
+	if (techniques[techIdx].pso == VK_NULL_HANDLE || techniques[techIdx].pipelineLayout == VK_NULL_HANDLE)
+	{
+		std::cerr << "GltfModel::Draw - PSO not prepared for technique " << techIdx << "\n";
+		return;
+	}
+
 	std::vector<VkDescriptorSet> sets = {
 		globalSet, descriptorSet
 	};

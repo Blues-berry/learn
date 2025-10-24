@@ -574,19 +574,26 @@ void VulkanExample::CaptureCubemap(const glm::vec3& position)
         gltfModel = std::make_unique<GltfModel>(vulkanDevice, this);
         gltfModel->UpdateModel(previewModel->getModel());
 
-        // // ✅ 为MAIN技术准备PSO（用于主渲染）
-        // gltfModel->PreparePSO(
-        //     renderPass,
-        //     mainPass->descriptorSetLayout,
-        //     ETechnique::MAIN
-        // );
+        // ✅ 为MAIN技术准备PSO（用于主渲染）
+        gltfModel->PreparePSO(
+            renderPass,
+            mainPass->descriptorSetLayout,
+            ETechnique::MAIN
+        );
 
-        // // CAPTURE_SCENE: 使用 capturePass 的 renderPass
-        // gltfModel->PreparePSO(
-        //     capturePass->renderPass,
-        //     capturePass->descriptorSetLayout,
-        //     ETechnique::CAPTURE_SCENE
-        // );
+        // ✅ CAPTURE_SCENE: 使用 capturePass 的 renderPass
+        gltfModel->PreparePSO(
+            capturePass->renderPass,
+            capturePass->descriptorSetLayout,
+            ETechnique::CAPTURE_SCENE
+        );
+    } else {
+        // ✅ 如果 gltfModel 已存在但没有 CAPTURE_SCENE PSO，则准备它
+        gltfModel->PreparePSO(
+            capturePass->renderPass,
+            capturePass->descriptorSetLayout,
+            ETechnique::CAPTURE_SCENE
+        );
     }
 
     probe->SetGltfModel(gltfModel.get());
