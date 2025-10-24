@@ -1,4 +1,5 @@
 #version 450
+#extension GL_EXT_multiview : enable
 
 layout (location = 0) in vec3 inWorldPos;
 layout (location = 1) in vec3 inNormal;
@@ -144,7 +145,8 @@ vec3 simplePBR(vec3 N, vec3 V, vec3 albedo, float metallic) {
 void main()
 {
 	vec3 N = normalize(inNormal);
-	vec3 V = normalize(global.cameraPos[0].xyz - inWorldPos);
+	// ✅ 修复：使用 gl_ViewIndex 选择正确的相机位置（multiview 渲染）
+	vec3 V = normalize(global.cameraPos[gl_ViewIndex].xyz - inWorldPos);
 	vec3 R = reflect(-V, N);
 
 	// ✅ 修复: 使用material.elbedo作为基础颜色

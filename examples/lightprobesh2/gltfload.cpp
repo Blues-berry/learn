@@ -87,11 +87,41 @@ void GltfModel::Draw(VkCommandBuffer cmd, VkDescriptorSet globalSet, ETechnique 
 		glm::vec3(0.3f, 0.5f, 1.0f)
 	};
 
-	for (int i = 0; i < 4; ++i) {
-		pc.modelOffset = glm::translate(glm::mat4(1.0f), offsets[i]) * glm::scale(glm::mat4(1.0f), glm::vec3(scale));
-		pc.tint = glm::vec4(colors[i % 3], 1.0f);
-		vkCmdPushConstants(cmd, techniques[techIdx].pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstantBlock), &pc);
-		model->draw(cmd);
+	// ============ 根据技术类型选择不同的绘制方式 ============
+	if (tech == ETechnique::CAPTURE_SCENE) {
+		// ✅ CAPTURE_SCENE 模式：绘制单个实例，位置与 MainPass 中第一个实例相同
+		// 这样可以被 multiview 着色器正确处理，渲染到 6 个立方体面
+		// gltfModel 应该在世界坐标系中的相同位置，而不是原点
+
+		// 使用与 MainPass 中第一个实例相同的位置和缩放
+		const glm::vec3 captureOffset = glm::vec3(-20.0f, 0.0f, 0.0f);  // 与 MainPass 中第一个实例相同
+		const float captureScale = 50.0f;
+
+		pc.modelOffset = glm::translate(glm::mat4(1.0f), captureOffset) *
+						glm::scale(glm::mat4(1.0f), glm::vec3(captureScale));
+		pc.tint = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);  // 白色，不着色
+
+		vkCmdPushConstants(cmd, techniques[techIdx].pipelineLayout,
+						  VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+						  0, sizeof(PushConstantBlock), &pc);
+
+		// 使用 BindImages 标志以绑定纹理资源
+		model->draw(cmd, vkglTF::RenderFlags::BindImages,
+				   techniques[techIdx].pipelineLayout, 1);
+	}
+	else {
+		// ✅ MAIN 模式：绘制 4 个不同位置的模型实例
+		for (int i = 0; i < 4; ++i) {
+			pc.modelOffset = glm::translate(glm::mat4(1.0f), offsets[i]) *
+							glm::scale(glm::mat4(1.0f), glm::vec3(scale));
+			pc.tint = glm::vec4(colors[i % 3], 1.0f);
+
+			vkCmdPushConstants(cmd, techniques[techIdx].pipelineLayout,
+							  VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+							  0, sizeof(PushConstantBlock), &pc);
+
+			model->draw(cmd);
+		}
 	}
 }
 
@@ -235,9 +265,16 @@ void GltfModel::PreparePSO(VkRenderPass renderPass, VkDescriptorSetLayout passLa
 	pipelineCI.pStages = shaderStages.data();
 	pipelineCI.pVertexInputState = vkglTF::Vertex::getPipelineVertexInputState({ vkglTF::VertexComponent::Position, vkglTF::VertexComponent::Normal, vkglTF::VertexComponent::UV });
 
-	// 加载着色器
-	shaderStages[0] = iLoader->LoadShader("lightprobesh2/gltfmesh.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
-	shaderStages[1] = iLoader->LoadShader("lightprobesh2/gltfmesh.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
+	// 加载着色器 - 根据技术类型选择不同的着色器
+	if (technique == ETechnique::CAPTURE_SCENE) {
+		// ✅ CAPTURE_SCENE: 使用 multiview 着色器
+		shaderStages[0] = iLoader->LoadShader("lightprobesh2/gltfmesh_mvr.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
+		shaderStages[1] = iLoader->LoadShader("lightprobesh2/gltfmesh_mvr.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
+	} else {
+		// ✅ MAIN: 使用标准着색器
+		shaderStages[0] = iLoader->LoadShader("lightprobesh2/gltfmesh.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
+		shaderStages[1] = iLoader->LoadShader("lightprobesh2/gltfmesh.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
+	}
 	VK_CHECK_RESULT(vkCreateGraphicsPipelines(rawDevice, VK_NULL_HANDLE, 1, &pipelineCI, nullptr, &techniques[(uint32_t)technique].pso));
 }
 

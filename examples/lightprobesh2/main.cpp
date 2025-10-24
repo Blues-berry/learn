@@ -304,7 +304,7 @@ void VulkanExample::PrepareScene()
     if (!gltfModels.empty()) {
         gltfModel = std::make_unique<GltfModel>(vulkanDevice, this); // 创建 glTF 模型对象。
         gltfModel->PreparePSO(renderPass, mainPass->descriptorSetLayout, ETechnique::MAIN); // 为MainPass准备PSO
-        //gltfModel->PreparePSO(capturePass->renderPass, capturePass->descriptorSetLayout, ETechnique::CAPTURE_SCENE); // 为CapturePass准备PSO
+        gltfModel->PreparePSO(capturePass->renderPass, capturePass->descriptorSetLayout, ETechnique::CAPTURE_SCENE); // 为CapturePass准备PSO
         gltfModel->UpdateModel(gltfModels[gltfmodelIndex]); // 设置第一个模型
 
         // 设置gltfModel的位置和缩放
@@ -485,9 +485,8 @@ void VulkanExample::prepareData()
 
 void VulkanExample::drawFrame(VkCommandBuffer cmd)
 {
-    if (probe) {
-        probe->CaptureCubeMap(queue, cmd);
-    }
+    // ✅ 删除：不应该在每帧都捕获立方体贴图
+    // 捕获应该只在用户点击按钮时执行（在 CaptureCubemap() 中）
 
     // 绘制单帧。
     mainPass->Draw(cmd, frameBuffers[currentBuffer], width, height, [this](VkCommandBuffer cmd) {
@@ -570,6 +569,8 @@ void VulkanExample::CaptureCubemap(const glm::vec3& position)
     probe->setSkybox(skybox.get());
     probe->setPreviewModel(previewModel.get());
 
+    // ✅ 使用已经存在的 gltfModel（在 PrepareScene 中创建）
+    // 如果 gltfModel 不存在，则创建一个新的
     if (!gltfModel) {
         gltfModel = std::make_unique<GltfModel>(vulkanDevice, this);
         gltfModel->UpdateModel(previewModel->getModel());
@@ -588,7 +589,8 @@ void VulkanExample::CaptureCubemap(const glm::vec3& position)
             ETechnique::CAPTURE_SCENE
         );
     } else {
-        // ✅ 如果 gltfModel 已存在但没有 CAPTURE_SCENE PSO，则准备它
+        // ✅ 如果 gltfModel 已存在，确保 CAPTURE_SCENE PSO 已准备
+        // 检查 CAPTURE_SCENE PSO 是否已准备
         gltfModel->PreparePSO(
             capturePass->renderPass,
             capturePass->descriptorSetLayout,
