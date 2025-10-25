@@ -723,13 +723,14 @@ void GenIBLCubeMipPass::PrepareData()
 
     IBLGenUBO uboData = {}; // 初始化 IBL 统一缓冲区对象。
     // 设置立方体贴图的六个面的 MVP 矩阵。
-    uboData.mvp[0] = project * glm::rotate(glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(0.0f, 1.0f, 0.0f)), glm::radians(180.0f), glm::vec3(1.0f, 0.0f, 0.0f)); // 正 X 面。
-    uboData.mvp[1] = project * glm::rotate(glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(0.0f, 1.0f, 0.0f)), glm::radians(180.0f), glm::vec3(1.0f, 0.0f, 0.0f)); // 负 X 面。
-    uboData.mvp[2] = project * glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f)); // 正 Y 面。
-    uboData.mvp[3] = project * glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f)); // 负 Y 面。
-    uboData.mvp[4] = project * glm::rotate(glm::mat4(1.0f), glm::radians(180.0f), glm::vec3(1.0f, 0.0f, 0.0f)); // 正 Z 面。
-    uboData.mvp[5] = project * glm::rotate(glm::mat4(1.0f), glm::radians(180.0f), glm::vec3(0.0f, 0.0f, 1.0f)); // 负 Z 面。
-
+    uboData.mvp[0] = project * glm::rotate(glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(0.0f, 1.0f, 0.0f)), glm::radians(180.0f), glm::vec3(1.0f, 0.0f, 0.0f)); // 正 X 面。
+    uboData.mvp[1] = project * glm::rotate(glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(0.0f, 1.0f, 0.0f)), glm::radians(180.0f), glm::vec3(1.0f, 0.0f, 0.0f)); // 负 X 面。
+    uboData.mvp[2] = project * glm::rotate(glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f)),glm::radians(180.0f), glm::vec3(0.0f, 1.0f, 0.0f)); // 正 Y 面。
+    uboData.mvp[3] = project * glm::rotate(glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f)),glm::radians(180.0f), glm::vec3(0.0f, 1.0f, 0.0f)); // 正 Y 面。
+    uboData.mvp[4] = project * glm::rotate(glm::rotate(glm::mat4(1.0f), glm::radians(-180.0f), glm::vec3(0.0f, 1.0f, 0.0f)),glm::radians(-180.0f), glm::vec3(1.0f, 0.0f, 0.0f)); // 正 Z 面
+    uboData.mvp[5] = project * glm::rotate(glm::rotate(glm::mat4(1.0f), glm::radians(-180.0f), glm::vec3(0.0f, 1.0f, 0.0f)),glm::radians(180.0f), glm::vec3(0.0f, 0.0f, 1.0f)); // 负 Z 面。
+    // uboData.mvp[4] = project * glm::rotate(glm::mat4(1.0f), glm::radians(180.0f), glm::vec3(1.0f, 0.0f, 0.0f)); // 正 Z 面。
+    // uboData.mvp[5] = project * glm::rotate(glm::mat4(1.0f), glm::radians(180.0f), glm::vec3(0.0f, 0.0f, 1.0f)); // 负 Z 面。
     FeedUBO(uboData); // 调用子类实现的 UBO 数据填充方法。
 
     memcpy(ubo.mapped, &uboData, sizeof(IBLGenUBO)); // 复制 UBO 数据到缓冲区。
