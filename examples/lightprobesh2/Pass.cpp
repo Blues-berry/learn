@@ -494,9 +494,10 @@ void MainPass::UpdateBindings()
 void MainPass::PreparePerPassResource()
 {
     // 准备主渲染通道的资源。
+    // ✅ 修复：增加描述符池大小，确保有足够的描述符
     std::vector<VkDescriptorPoolSize> poolSizes = {
-        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2 }, // 两个统一缓冲区描述符。
-        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4 }, // 四个图像采样器描述符。
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 4 }, // 增加到4：globalBuffer + shCoeffs + 预留
+        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 8 }, // 增加到8：brdf + irradiance + prefiltered + 预留
     };
     VkDescriptorPoolCreateInfo descriptorPoolInfo = vks::initializers::descriptorPoolCreateInfo(poolSizes, 1); // 初始化描述符池。
     VK_CHECK_RESULT(vkCreateDescriptorPool(device->logicalDevice, &descriptorPoolInfo, nullptr, &descriptorPool)); // 创建描述符池。

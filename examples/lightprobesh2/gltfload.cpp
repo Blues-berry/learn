@@ -11,6 +11,7 @@ GltfModel::GltfModel(vks::VulkanDevice* dev, IExampleInterfasce* example) : devi
 void GltfModel::UpdateModel(const std::shared_ptr<vkglTF::Model>& model_)
 {
 	model = model_;
+	// ✅ 不需要调用 UpdateSet()，因为 model 不影响 descriptor bindings
 }
 
 void GltfModel::Destroy()
@@ -139,23 +140,17 @@ void GltfModel::Draw(VkCommandBuffer cmd, VkDescriptorSet globalSet, ETechnique 
 
 void GltfModel::PreparePerBatchResource()
 {
-	// 创建独立的描述符池，用于模型自己的资源
+	// ✅ 修复：移除纹理绑定，着色器不使用 binding 2 的纹理数组
 	std::vector<VkDescriptorPoolSize> poolSizes = {
 		{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 },
 		{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 },
-        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 15 },
 	};
 	VkDescriptorPoolCreateInfo descriptorPoolInfo = vks::initializers::descriptorPoolCreateInfo(poolSizes, 1);
 	VK_CHECK_RESULT(vkCreateDescriptorPool(device->logicalDevice, &descriptorPoolInfo, nullptr, &descriptorPool));
 
-	// 创建独立的描述符集布局，用于模型自己的资源
 	std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {
-		// 绑定 0: 局部变换矩阵（顶点和片段着色器）
 		vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0),
-		// 绑定 1: 材质参数（片段着色器）
 		vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT, 1),
-		// 绑定 2: 模型纹理（片段着色器）
-		vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 2),
 	};
 	VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCI = vks::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings);
 	VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device->logicalDevice, &descriptorSetLayoutCI, nullptr, &descriptorSetLayout));
@@ -185,19 +180,11 @@ void GltfModel::PreparePerBatchResource()
 
 void GltfModel::UpdateSet()
 {
+	// ✅ 修复：只绑定 uniform buffers，着色器不使用纹理数组
 	std::vector<VkWriteDescriptorSet> writeDescriptorSets = {
-	vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &localBuffer.descriptor),
-	vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, &materialBuffer.descriptor)
+		vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &localBuffer.descriptor),
+		vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, &materialBuffer.descriptor)
 	};
-
-    // // 添加纹理绑定（假设model有textures数组）
-    // std::vector<VkDescriptorImageInfo> imageInfos(15); // 默认填充dummy纹理
-    // for (size_t i = 0; i < model->textures.size() && i < 15; ++i) {
-    //     imageInfos[i] = { model->textures[i].sampler, model->textures[i].imageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
-    // }
-    // VkWriteDescriptorSet textureWrite = vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2, nullptr, 15);
-    // textureWrite.pImageInfo = imageInfos.data();
-    // writeDescriptorSets.push_back(textureWrite);
 	vkUpdateDescriptorSets(device->logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, NULL);
 }
 
@@ -205,6 +192,16 @@ void GltfModel::SetTransform(const glm::mat4& transform)
 {
 	localData.transform = transform;
 	memcpy(localBuffer.mapped, &localData, sizeof(LocalBuffer));
+}
+
+void GltfModel::SetUseSHAndReflection(bool useSH, bool useReflection)
+{
+	materialData.useSH = useSH ? 1 : 0;
+	materialData.useReflection = useReflection ? 1 : 0;
+	// Immediately write to GPU buffer
+	if (materialBuffer.mapped) {
+		memcpy(materialBuffer.mapped, &materialData, sizeof(MaterialBuffer));
+	}
 }
 
 void GltfModel::PreparePSO(VkRenderPass renderPass, VkDescriptorSetLayout passLayout, ETechnique technique)

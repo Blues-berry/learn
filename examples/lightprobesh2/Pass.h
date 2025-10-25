@@ -125,10 +125,11 @@ private:
 
 struct Evnironmemt
 {
-    VkDescriptorImageInfo brdfView;
-    VkDescriptorImageInfo irradianceCube;
-    VkDescriptorImageInfo prefilteredCube;
-    VkDescriptorBufferInfo shCoeffs;
+    // ✅ 修复：初始化所有成员，避免垃圾数据
+    VkDescriptorImageInfo brdfView = {};
+    VkDescriptorImageInfo irradianceCube = {};
+    VkDescriptorImageInfo prefilteredCube = {};
+    VkDescriptorBufferInfo shCoeffs = {};
 };
 
 class MainPass

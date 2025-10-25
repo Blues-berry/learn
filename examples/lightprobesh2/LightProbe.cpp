@@ -66,13 +66,16 @@ void LightProbe::CaptureCubeMap(VkQueue queue, VkCommandBuffer cmd)
     CaptureScenePass::GlobalUbo ubo = {};
     glm::mat4 projection = glm::perspective(glm::radians(90.0f), 1.0f, 0.1f, 256.0f);
 
+    // ✅ 修复：标准立方体贴图视图矩阵配置
+    // 所有面都使用一致的up向量(0, -1, 0)，这是标准的立方体贴图配置
+    // 着色器中的Y坐标翻转会处理OpenGL到Vulkan的坐标系转换
     std::array<glm::mat4, 6> viewMatrices = {
-        glm::lookAt(position, position + glm::vec3( 1, 0, 0), glm::vec3(0, -1,  0)), // +X
-        glm::lookAt(position, position + glm::vec3(-1, 0, 0), glm::vec3(0, -1,  0)), // -X
-        glm::lookAt(position, position + glm::vec3( 0, 1, 0), glm::vec3(0,  0,  1)), // +Y
-        glm::lookAt(position, position + glm::vec3( 0,-1, 0), glm::vec3(0,  0, -1)), // -Y
-        glm::lookAt(position, position + glm::vec3( 0, 0, 1), glm::vec3(0, -1,  0)), // +Z
-        glm::lookAt(position, position + glm::vec3( 0, 0,-1), glm::vec3(0, -1,  0))  // -Z
+        glm::lookAt(position, position + glm::vec3( 1, 0, 0), glm::vec3(0, -1,  0)), // +X: 看向右
+        glm::lookAt(position, position + glm::vec3(-1, 0, 0), glm::vec3(0, -1,  0)), // -X: 看向左
+        glm::lookAt(position, position + glm::vec3( 0, 1, 0), glm::vec3(0, -1,  0)), // +Y: 看向上
+        glm::lookAt(position, position + glm::vec3( 0,-1, 0), glm::vec3(0, -1,  0)), // -Y: 看向下
+        glm::lookAt(position, position + glm::vec3( 0, 0, 1), glm::vec3(0, -1,  0)), // +Z: 看向前
+        glm::lookAt(position, position + glm::vec3( 0, 0,-1), glm::vec3(0, -1,  0))  // -Z: 看向后
     };
 
     for (uint32_t face = 0; face < 6; ++face) {

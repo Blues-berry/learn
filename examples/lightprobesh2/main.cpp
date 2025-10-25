@@ -334,6 +334,9 @@ void VulkanExample::PrepareScene()
     previewModel = std::make_unique<PreviewModel>(vulkanDevice, this); // 创建预览模型对象。
     previewModel->PreparePSO(renderPass, mainPass->descriptorSetLayout, ETechnique::MAIN); // 准备预览模型的 PSO。
     previewModel->UpdateModel(previewModels[modelIndex]); // 设置初始预览模型。
+    // ✅ 修复：初始化材质参数，不使用SH和反射（使用默认天空盒的IBL）
+    previewModel->SetUseSHAndReflection(false, false);
+    std::cout << "[PrepareScene] PreviewModel initialized: useSH=0, useReflection=0 (using default skybox IBL)" << std::endl;
 
     // ✅ 准备gltfModel - 为MainPass和CapturePass都准备PSO
     if (!gltfModels.empty()) {
@@ -346,6 +349,9 @@ void VulkanExample::PrepareScene()
         glm::mat4 t = glm::translate(glm::mat4(1.0f), glm::vec3(-20.0f, 0.0f, 0.0f));
         glm::mat4 s = glm::scale(glm::mat4(1.0f), glm::vec3(2.0f));
         gltfModel->SetTransform(t * s);
+        // ✅ 修复：初始化材质参数，不使用SH和反射（使用默认天空盒的IBL）
+        gltfModel->SetUseSHAndReflection(false, false);
+        std::cout << "[PrepareScene] GltfModel initialized: useSH=0, useReflection=0 (using default skybox IBL)" << std::endl;
     }
 
     // ✅ 新增：初始化探针可视化器
@@ -794,6 +800,7 @@ void VulkanExample::CaptureCubemap(const glm::vec3& position)
     // ✅ 使用已经存在的 gltfModel（在 PrepareScene 中创建）
     // 如果 gltfModel 不存在，则创建一个新的
     if (!gltfModel) {
+        std::cout << "[CaptureCubemap] Creating new gltfModel..." << std::endl;
         gltfModel = std::make_unique<GltfModel>(vulkanDevice, this);
         gltfModel->UpdateModel(previewModel->getModel());
 
@@ -810,14 +817,14 @@ void VulkanExample::CaptureCubemap(const glm::vec3& position)
             capturePass->descriptorSetLayout,
             ETechnique::CAPTURE_SCENE
         );
+
+        // ✅ 修复：初始化材质参数
+        gltfModel->SetUseSHAndReflection(false, false);
+        std::cout << "[CaptureCubemap] gltfModel created and initialized" << std::endl;
     } else {
-        // ✅ 如果 gltfModel 已存在，确保 CAPTURE_SCENE PSO 已准备
-        // 检查 CAPTURE_SCENE PSO 是否已准备
-        gltfModel->PreparePSO(
-            capturePass->renderPass,
-            capturePass->descriptorSetLayout,
-            ETechnique::CAPTURE_SCENE
-        );
+        std::cout << "[CaptureCubemap] Using existing gltfModel (PSOs already prepared in PrepareScene)" << std::endl;
+        // ✅ 修复：不要重复调用 PreparePSO，因为在 PrepareScene 中已经准备好了
+        // 重复调用会导致资源泄漏和状态混乱
     }
 
     probe->SetGltfModel(gltfModel.get());
@@ -835,29 +842,59 @@ void VulkanExample::CaptureCubemap(const glm::vec3& position)
     vkDeviceWaitIdle(vulkanDevice->logicalDevice);
 
     // --- 生成 SH ---
+    std::cout << "[CaptureCubemap] Generating SH coefficients..." << std::endl;
     shGenPass->SetCubeMap(capturedCubemap);
     shGenPass->Generate(queue);
 
     VkDescriptorBufferInfo shBufferInfo;
     shGenPass->FeedSH(shBufferInfo);                    // 正确！
     mainPass->environmemts.shCoeffs = shBufferInfo;     // 存入 MainPass
+    std::cout << "[CaptureCubemap] SH buffer: " << (shBufferInfo.buffer ? "Valid" : "NULL") << std::endl;
 
+    // --- 生成 IBL ---
+    std::cout << "[CaptureCubemap] Generating IBL maps..." << std::endl;
     genIBL->SetCubeMap(capturedCubemap);
     genIBL->Generate(queue);
     genIBL->FeedIrradianceMap(mainPass->environmemts.irradianceCube);
     genIBL->FeedPrefilteredMap(mainPass->environmemts.prefilteredCube);
+    std::cout << "[CaptureCubemap] Irradiance sampler: " << (mainPass->environmemts.irradianceCube.sampler ? "Valid" : "NULL") << std::endl;
+    std::cout << "[CaptureCubemap] Prefiltered sampler: " << (mainPass->environmemts.prefilteredCube.sampler ? "Valid" : "NULL") << std::endl;
 
+    // ✅ 修复：验证数据有效性后再更新绑定
+    if (!mainPass->environmemts.shCoeffs.buffer) {
+        std::cerr << "[CaptureCubemap] Warning: shCoeffs buffer not initialized!" << std::endl;
+    }
+    if (!mainPass->environmemts.brdfView.sampler) {
+        std::cerr << "[CaptureCubemap] Warning: brdfView sampler not initialized!" << std::endl;
+    }
+    if (!mainPass->environmemts.irradianceCube.sampler) {
+        std::cerr << "[CaptureCubemap] Warning: irradianceCube sampler not initialized!" << std::endl;
+    }
+    if (!mainPass->environmemts.prefilteredCube.sampler) {
+        std::cerr << "[CaptureCubemap] Warning: prefilteredCube sampler not initialized!" << std::endl;
+    }
+
+    // ✅ 修复：先更新绑定，再设置材质参数
     mainPass->UpdateBindings();
+
+    // ✅ 修复：等待所有GPU操作完成
+    vkDeviceWaitIdle(vulkanDevice->logicalDevice);
+
     skybox->SetCubeMap(capturedCubemap);
-    // Enable SH and reflection on models after generating SH/IBL
+
+    // ✅ 修复：启用SH和反射，并强制刷新材质buffer
     if (previewModel) {
         previewModel->SetUseSHAndReflection(true, true);
+        std::cout << "[CaptureCubemap] PreviewModel: Enabled SH and Reflection" << std::endl;
     }
     if (gltfModel) {
-        //gltfModel->SetUseSHAndReflection(true, true);
+        gltfModel->SetUseSHAndReflection(true, true);
+        std::cout << "[CaptureCubemap] GltfModel: Enabled SH and Reflection" << std::endl;
     }
 
     lightProbes.push_back(std::move(probe));
-}  
+
+    std::cout << "[CaptureCubemap] Capture complete! Models should now use captured lighting." << std::endl;
+}
    
 VULKAN_EXAMPLE_MAIN()

@@ -37,6 +37,7 @@ public:
 
 	void ShowUI(vks::UIOverlay* overlay);
 	void SetTransform(const glm::mat4& transform);
+	void SetUseSHAndReflection(bool useSH, bool useReflection);
     std::shared_ptr<vkglTF::Model> getModel() const { return model; }
 
 private:
