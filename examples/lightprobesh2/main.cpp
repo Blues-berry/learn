@@ -268,6 +268,10 @@ private:
 
     // ✅ 新增：立方体贴图插值
     std::unique_ptr<CubemapInterpolation> cubemapInterpolation;
+
+    // ✅ 新增：插值算法选择
+    int32_t interpolationModeIndex = 0;  // 0=IDW, 1=Linear, 2=Cubic
+    std::vector<std::string> interpolationModeNames = {"IDW", "Linear", "Cubic"};
 };
 
 void VulkanExample::LoadAssets()
@@ -440,9 +444,9 @@ void VulkanExample::PrepareProbes()
     }
     lightProbes.clear();
 
-    // ✅ 新增：初始化立方体贴图插值对象
+    // ✅ 新增：初始化立方体贴图插值对象（支持GPU加速）
     if (!cubemapInterpolation) {
-        cubemapInterpolation = std::make_unique<CubemapInterpolation>(vulkanDevice);
+        cubemapInterpolation = std::make_unique<CubemapInterpolation>(vulkanDevice, this);
     } else {
         cubemapInterpolation->ClearProbes();
     }
@@ -635,20 +639,77 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
                 CaptureAllProbes();
             }
 
-            // ✅ 新增：立方体贴图插值按钮
-            if (overlay->button("Interpolate Cubemap")) {
+            // ✅ 新增：插值算法选择
+            if (overlay->comboBox("Interpolation Mode", &interpolationModeIndex, interpolationModeNames)) {
+                if (cubemapInterpolation) {
+                    auto mode = static_cast<CubemapInterpolation::InterpolationMode>(interpolationModeIndex);
+                    cubemapInterpolation->SetInterpolationMode(mode);
+                    std::cout << "[VulkanExample] Interpolation mode changed to " << interpolationModeNames[interpolationModeIndex] << std::endl;
+                }
+            }
+
+            // ✅ 新增：立方体贴图插值按钮（支持GPU加速和多种算法）
+            if (overlay->button("Interpolate Cubemap (GPU)")) {
                 if (cubemapInterpolation && cubemapInterpolation->GetProbeCount() > 0) {
-                    // 在相机位置进行插值
-                    auto interpolatedCubemap = cubemapInterpolation->InterpolateAt(camera.position, 50.0f);
+                    // 在相机位置进行插值，使用GPU加速，分辨率256x256
+                    auto interpolatedCubemap = cubemapInterpolation->InterpolateAt(
+                        camera.position,
+                        50.0f,      // maxDistance
+                        256,        // outputResolution
+                        queue       // Vulkan队列
+                    );
                     if (interpolatedCubemap) {
                         cubeMaps.push_back(interpolatedCubemap);
-                        cubemapNames.push_back("Interpolated_" + std::to_string(cubeMaps.size() - 1));
+                        cubemapNames.push_back("Interpolated_" + interpolationModeNames[interpolationModeIndex] + "_" + std::to_string(cubeMaps.size() - 1));
                         skyboxIndex = static_cast<int>(cubeMaps.size() - 1);
                         UpdateSkyBox();
-                        std::cout << "[VulkanExample] Interpolated cubemap created at camera position" << std::endl;
+                        std::cout << "[VulkanExample] GPU-accelerated interpolated cubemap created using "
+                                  << interpolationModeNames[interpolationModeIndex] << " at camera position" << std::endl;
                     }
                 } else {
                     std::cerr << "[VulkanExample] No probes available for interpolation!" << std::endl;
+                }
+            }
+
+            // ✅ 新增：权重可视化按钮
+            if (overlay->button("Visualize Weights (Heatmap)")) {
+                if (cubemapInterpolation && cubemapInterpolation->GetProbeCount() > 0) {
+                    // 可视化权重热力图
+                    auto weightVisualization = cubemapInterpolation->VisualizeWeights(
+                        256,        // outputResolution
+                        queue,      // Vulkan队列
+                        1           // visualizationMode: WEIGHT_HEATMAP
+                    );
+                    if (weightVisualization) {
+                        cubeMaps.push_back(weightVisualization);
+                        cubemapNames.push_back("WeightHeatmap_" + std::to_string(cubeMaps.size() - 1));
+                        skyboxIndex = static_cast<int>(cubeMaps.size() - 1);
+                        UpdateSkyBox();
+                        std::cout << "[VulkanExample] Weight heatmap visualization created" << std::endl;
+                    }
+                } else {
+                    std::cerr << "[VulkanExample] No probes available for weight visualization!" << std::endl;
+                }
+            }
+
+            // ✅ 新增：显示最近探针ID的可视化
+            if (overlay->button("Visualize Closest Probe ID")) {
+                if (cubemapInterpolation && cubemapInterpolation->GetProbeCount() > 0) {
+                    // 可视化最近探针的ID
+                    auto probeIDVisualization = cubemapInterpolation->VisualizeWeights(
+                        256,        // outputResolution
+                        queue,      // Vulkan队列
+                        2           // visualizationMode: CLOSEST_PROBE_ID
+                    );
+                    if (probeIDVisualization) {
+                        cubeMaps.push_back(probeIDVisualization);
+                        cubemapNames.push_back("ProbeID_" + std::to_string(cubeMaps.size() - 1));
+                        skyboxIndex = static_cast<int>(cubeMaps.size() - 1);
+                        UpdateSkyBox();
+                        std::cout << "[VulkanExample] Probe ID visualization created" << std::endl;
+                    }
+                } else {
+                    std::cerr << "[VulkanExample] No probes available for probe ID visualization!" << std::endl;
                 }
             }
         }

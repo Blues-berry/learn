@@ -1,0 +1,197 @@
+#version 450
+#extension GL_ARB_separate_shader_objects : enable
+
+// 工作组大小：16x16 处理高分辨率立方体贴图
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+// 探针数据结构
+struct ProbeData {
+    vec4 position;      // 探针位置 (xyz, padding)
+    vec4 reserved;      // 保留用于对齐
+};
+
+// 常量缓冲区：探针信息
+layout(set = 0, binding = 0) uniform ProbeBuffer {
+    uint probeCount;
+    uint maxDistance;
+    uint interpolationMode;  // 0=IDW, 1=Linear, 2=Cubic
+    uint padding;
+    ProbeData probes[256];   // 最多支持256个探针
+} probeBuffer;
+
+// 输入：多个低分辨率立方体贴图（探针捕获的）
+layout(set = 0, binding = 1) uniform samplerCube probeCubemaps[256];
+
+// 输出：高分辨率立方体贴图
+layout(set = 0, binding = 2, rgba16f) uniform imageCube outputCubemap;
+
+// 立方体贴图面的法向量
+const vec3 cubeFaceNormals[6] = vec3[](
+    vec3(1.0, 0.0, 0.0),   // +X
+    vec3(-1.0, 0.0, 0.0),  // -X
+    vec3(0.0, 1.0, 0.0),   // +Y
+    vec3(0.0, -1.0, 0.0),  // -Y
+    vec3(0.0, 0.0, 1.0),   // +Z
+    vec3(0.0, 0.0, -1.0)   // -Z
+);
+
+// 计算两点之间的距离
+float Distance(vec3 a, vec3 b) {
+    return length(a - b);
+}
+
+// 反距离加权（IDW）插值
+vec4 InterpolateIDW(vec3 queryPos, vec3 direction) {
+    vec4 result = vec4(0.0);
+    float totalWeight = 0.0;
+    
+    for (uint i = 0; i < probeBuffer.probeCount; ++i) {
+        vec3 probePos = probeBuffer.probes[i].position.xyz;
+        float dist = Distance(queryPos, probePos);
+        
+        // 如果距离超过最大距离，跳过
+        if (dist > float(probeBuffer.maxDistance)) {
+            continue;
+        }
+        
+        // 计算权重：1 / (distance + epsilon)
+        const float epsilon = 0.01;
+        float weight = 1.0 / (dist + epsilon);
+        
+        // 从该探针的立方体贴图采样
+        vec4 color = texture(probeCubemaps[i], direction);
+        
+        result += color * weight;
+        totalWeight += weight;
+    }
+    
+    // 归一化
+    if (totalWeight > 0.0) {
+        result /= totalWeight;
+    }
+    
+    return result;
+}
+
+// 线性插值（使用最近的两个探针）
+vec4 InterpolateLinear(vec3 queryPos, vec3 direction) {
+    // 找到最近的两个探针
+    float minDist1 = 1e10, minDist2 = 1e10;
+    uint idx1 = 0, idx2 = 0;
+    
+    for (uint i = 0; i < probeBuffer.probeCount; ++i) {
+        vec3 probePos = probeBuffer.probes[i].position.xyz;
+        float dist = Distance(queryPos, probePos);
+        
+        if (dist < minDist1) {
+            minDist2 = minDist1;
+            idx2 = idx1;
+            minDist1 = dist;
+            idx1 = i;
+        } else if (dist < minDist2) {
+            minDist2 = dist;
+            idx2 = i;
+        }
+    }
+    
+    // 线性插值权重
+    float totalDist = minDist1 + minDist2;
+    float weight1 = (totalDist - minDist1) / totalDist;
+    float weight2 = (totalDist - minDist2) / totalDist;
+    
+    vec4 color1 = texture(probeCubemaps[idx1], direction);
+    vec4 color2 = texture(probeCubemaps[idx2], direction);
+    
+    return color1 * weight1 + color2 * weight2;
+}
+
+// 三次样条插值（简化版：使用最近的4个探针）
+vec4 InterpolateCubic(vec3 queryPos, vec3 direction) {
+    // 找到最近的4个探针
+    float distances[4] = float[](1e10, 1e10, 1e10, 1e10);
+    uint indices[4] = uint[](0, 0, 0, 0);
+    
+    for (uint i = 0; i < probeBuffer.probeCount && i < 4; ++i) {
+        vec3 probePos = probeBuffer.probes[i].position.xyz;
+        float dist = Distance(queryPos, probePos);
+        
+        // 插入排序
+        for (uint j = 0; j < 4; ++j) {
+            if (dist < distances[j]) {
+                for (uint k = 3; k > j; --k) {
+                    distances[k] = distances[k-1];
+                    indices[k] = indices[k-1];
+                }
+                distances[j] = dist;
+                indices[j] = i;
+                break;
+            }
+        }
+    }
+    
+    // 计算三次样条权重（简化：使用高斯权重）
+    vec4 result = vec4(0.0);
+    float totalWeight = 0.0;
+    
+    for (uint i = 0; i < 4; ++i) {
+        float dist = distances[i];
+        float weight = exp(-dist * dist / 2.0);  // 高斯权重
+        
+        vec4 color = texture(probeCubemaps[indices[i]], direction);
+        result += color * weight;
+        totalWeight += weight;
+    }
+    
+    if (totalWeight > 0.0) {
+        result /= totalWeight;
+    }
+    
+    return result;
+}
+
+void main() {
+    // 获取输出立方体贴图的尺寸
+    ivec2 outputSize = imageSize(outputCubemap).xy;
+    
+    // 确保当前线程在有效范围内
+    if (gl_GlobalInvocationID.x >= outputSize.x || gl_GlobalInvocationID.y >= outputSize.y) {
+        return;
+    }
+    
+    // 处理立方体贴图的6个面
+    for (uint face = 0; face < 6; ++face) {
+        // 计算像素坐标
+        ivec3 texel = ivec3(gl_GlobalInvocationID.xy, face);
+        vec2 uv = vec2(gl_GlobalInvocationID.xy) / vec2(outputSize);
+        
+        // 计算立方体贴图采样方向
+        vec3 normal = cubeFaceNormals[face];
+        vec3 up = abs(normal.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
+        vec3 right = normalize(cross(up, normal));
+        up = cross(normal, right);
+        
+        vec2 scaledUV = uv * 2.0 - 1.0;  // 映射到 [-1, 1]
+        vec3 direction = normalize(normal + scaledUV.x * right + scaledUV.y * up);
+        
+        // 查询位置（这里使用方向作为查询位置的代理）
+        // 实际应用中应该使用相机位置或其他查询点
+        vec3 queryPos = direction;
+        
+        // 根据插值模式选择插值方法
+        vec4 interpolatedColor;
+        if (probeBuffer.interpolationMode == 0u) {
+            // IDW 插值
+            interpolatedColor = InterpolateIDW(queryPos, direction);
+        } else if (probeBuffer.interpolationMode == 1u) {
+            // 线性插值
+            interpolatedColor = InterpolateLinear(queryPos, direction);
+        } else {
+            // 三次样条插值
+            interpolatedColor = InterpolateCubic(queryPos, direction);
+        }
+        
+        // 写入输出立方体贴图
+        imageStore(outputCubemap, texel, interpolatedColor);
+    }
+}
+

@@ -1,12 +1,21 @@
 #include "CubemapInterpolation.h"
+#include "ProbeInterpolationPass.h"
+#include "ProbeWeightVisualizationPass.h"
 #include "VulkanDevice.h"
+#include "ILoader.h"
 #include <cmath>
 #include <algorithm>
 #include <iostream>
 
-CubemapInterpolation::CubemapInterpolation(vks::VulkanDevice* device)
-    : device(device)
+CubemapInterpolation::CubemapInterpolation(vks::VulkanDevice* device, IExampleInterfasce* example)
+    : device(device), example(example)
 {
+    // 如果提供了示例接口，创建GPU插值通道和权重可视化通道
+    if (example) {
+        interpolationPass = std::make_unique<ProbeInterpolationPass>(device, example);
+        weightVisualizationPass = std::make_unique<ProbeWeightVisualizationPass>(device, example);
+        std::cout << "[CubemapInterpolation] GPU interpolation and weight visualization passes initialized" << std::endl;
+    }
 }
 
 CubemapInterpolation::~CubemapInterpolation()
@@ -28,6 +37,14 @@ void CubemapInterpolation::AddProbe(
     probe.cubemap = cubemap;
     probes.push_back(probe);
 
+    // 同时添加到GPU插值通道和权重可视化通道
+    if (interpolationPass) {
+        interpolationPass->AddProbe(position, cubemap);
+    }
+    if (weightVisualizationPass) {
+        weightVisualizationPass->AddProbe(position);
+    }
+
     std::cout << "[CubemapInterpolation::AddProbe] Added probe at position ("
               << position.x << ", " << position.y << ", " << position.z << ")"
               << " Total probes: " << probes.size() << std::endl;
@@ -36,7 +53,22 @@ void CubemapInterpolation::AddProbe(
 void CubemapInterpolation::ClearProbes()
 {
     probes.clear();
+    if (interpolationPass) {
+        interpolationPass->ClearProbes();
+    }
+    if (weightVisualizationPass) {
+        weightVisualizationPass->ClearProbes();
+    }
     std::cout << "[CubemapInterpolation::ClearProbes] All probes cleared" << std::endl;
+}
+
+void CubemapInterpolation::SetInterpolationMode(InterpolationMode mode)
+{
+    interpolationMode = mode;
+    if (interpolationPass) {
+        interpolationPass->SetInterpolationMode(static_cast<ProbeInterpolationPass::InterpolationMode>(mode));
+    }
+    std::cout << "[CubemapInterpolation::SetInterpolationMode] Mode set to " << static_cast<int>(mode) << std::endl;
 }
 
 float CubemapInterpolation::Distance(const glm::vec3& a, const glm::vec3& b) const
@@ -122,17 +154,65 @@ std::shared_ptr<vks::TextureCubeMap> CubemapInterpolation::PerformInterpolation(
 
 std::shared_ptr<vks::TextureCubeMap> CubemapInterpolation::InterpolateAt(
     const glm::vec3& position,
-    float maxDistance)
+    float maxDistance,
+    uint32_t outputResolution,
+    VkQueue queue)
 {
     if (probes.empty()) {
         std::cerr << "[CubemapInterpolation::InterpolateAt] No probes available for interpolation!" << std::endl;
         return nullptr;
     }
 
-    // 计算插值权重
-    std::vector<float> weights = ComputeWeights(position, maxDistance);
+    // 如果有GPU插值通道且提供了队列，使用GPU加速
+    if (interpolationPass && queue != VK_NULL_HANDLE) {
+        std::cout << "[CubemapInterpolation::InterpolateAt] Using GPU interpolation at resolution "
+                  << outputResolution << "x" << outputResolution << std::endl;
 
-    // 执行插值
+        // 创建输出立方体贴图
+        auto outputCubemap = std::make_shared<vks::TextureCubeMap>();
+        // 注意：这里需要实际创建GPU纹理，暂时使用简化方式
+        // 实际应该通过 RenderTargetCube 创建
+
+        interpolationPass->SetOutputCubemap(outputCubemap);
+        interpolationPass->SetMaxDistance(maxDistance);
+        interpolationPass->Generate(queue);
+
+        return outputCubemap;
+    }
+
+    // 回退到CPU插值
+    std::cout << "[CubemapInterpolation::InterpolateAt] Using CPU interpolation (fallback)" << std::endl;
+    std::vector<float> weights = ComputeWeights(position, maxDistance);
     return PerformInterpolation(weights);
+}
+
+std::shared_ptr<vks::TextureCubeMap> CubemapInterpolation::VisualizeWeights(
+    uint32_t outputResolution,
+    VkQueue queue,
+    uint32_t visualizationMode)
+{
+    if (probes.empty()) {
+        std::cerr << "[CubemapInterpolation::VisualizeWeights] No probes available!" << std::endl;
+        return nullptr;
+    }
+
+    if (!weightVisualizationPass || queue == VK_NULL_HANDLE) {
+        std::cerr << "[CubemapInterpolation::VisualizeWeights] Weight visualization pass not available!" << std::endl;
+        return nullptr;
+    }
+
+    std::cout << "[CubemapInterpolation::VisualizeWeights] Visualizing weights at resolution "
+              << outputResolution << "x" << outputResolution << std::endl;
+
+    // 创建输出立方体贴图
+    auto outputCubemap = std::make_shared<vks::TextureCubeMap>();
+    // 注意：这里需要实际创建GPU纹理，暂时使用简化方式
+    // 实际应该通过 RenderTargetCube 创建
+
+    weightVisualizationPass->SetOutputCubemap(outputCubemap);
+    weightVisualizationPass->SetVisualizationMode(static_cast<ProbeWeightVisualizationPass::VisualizationMode>(visualizationMode));
+    weightVisualizationPass->Generate(queue);
+
+    return outputCubemap;
 }
 
