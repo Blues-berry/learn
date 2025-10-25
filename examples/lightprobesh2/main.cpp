@@ -100,9 +100,10 @@ public:
         {
             previewModel->Destroy(); // 销毁预览模型对象。
             previewModel = nullptr; // 清空指针。
-        }
+        } 
         if (gltfModel)
         {
+            
             gltfModel->Destroy(); // 销毁预览模型对象。
             gltfModel = nullptr; // 清空指针。
         }
