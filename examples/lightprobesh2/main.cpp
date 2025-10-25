@@ -279,6 +279,12 @@ void VulkanExample::LoadAssets()
     LoadPreviewModel("teapot", "models/teapot.gltf", glTFLoadingFlags); // 加载茶壶模型。
     LoadPreviewModel("torusknot", "models/torusknot.gltf", glTFLoadingFlags); // 加载环面结模型。
     LoadPreviewModel("venus", "models/venus.gltf", glTFLoadingFlags); // 加载维纳斯模型。
+    LoadPreviewModel("armor", "models/armor/armor.gltf", glTFLoadingFlags); // 加载维纳斯模型。
+    LoadPreviewModel("chinesedragon", "models/chinesedragon.gltf", glTFLoadingFlags); // 加载维纳斯模型。
+    LoadPreviewModel("sibenik", "models/sibenik.gltf", glTFLoadingFlags); // 加载维纳斯模型。
+    LoadPreviewModel("fireplace", "models/fireplace.gltf", glTFLoadingFlags); // 加载维纳斯模型。
+    LoadPreviewModel("glowsphere", "models/glowsphere.gltf", glTFLoadingFlags); // 加载维纳斯模型。
+    LoadPreviewModel("rock01", "models/rock01.gltf", glTFLoadingFlags); // 加载维纳斯模型。
 
    
     LoadgltfModel("FlightHelmet", "models/FlightHelmet/glTF/FlightHelmet.gltf", glTFLoadingFlags); // 
