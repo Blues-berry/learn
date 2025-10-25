@@ -1,5 +1,5 @@
 #include <cstdint>
-#include <glm/glm.hpp> 
+#include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include "vulkanexamplebase.h"
@@ -10,6 +10,7 @@
 #include "Pass.h"
 #include "ILoader.h"
 #include "PreviewModel.h"
+#include "CubemapInterpolation.h"
 #include <fstream>
 #include "tiny_gltf.h"
 #include "../base/VulkanTools.h"
@@ -264,6 +265,9 @@ private:
     VkDescriptorPool descriptorPool{ VK_NULL_HANDLE };
 
     bool showProbes = false; // Toggle for visualizing probes
+
+    // ✅ 新增：立方体贴图插值
+    std::unique_ptr<CubemapInterpolation> cubemapInterpolation;
 };
 
 void VulkanExample::LoadAssets()
@@ -436,6 +440,13 @@ void VulkanExample::PrepareProbes()
     }
     lightProbes.clear();
 
+    // ✅ 新增：初始化立方体贴图插值对象
+    if (!cubemapInterpolation) {
+        cubemapInterpolation = std::make_unique<CubemapInterpolation>(vulkanDevice);
+    } else {
+        cubemapInterpolation->ClearProbes();
+    }
+
     // 自动布置光照探针：在 probeGridConfig 定义的包围盒内使用指定的维度放置探针。
     // 如果 probeGridConfig 没有被设置（dimensions 为 0），则创建一个中心探针。
     glm::vec3 minB = probeGridConfig.minBounds;
@@ -508,6 +519,11 @@ void VulkanExample::CaptureAllProbes()
         cubeMaps.push_back(capturedCubemap);
         std::string probeName = "Probe_" + std::to_string(i) + "_" + std::to_string(cubeMaps.size() - 1);
         cubemapNames.push_back(probeName);
+
+        // ✅ 新增：添加到插值对象
+        if (cubemapInterpolation) {
+            cubemapInterpolation->AddProbe(p->GetPosition(), capturedCubemap);
+        }
 
         std::cout << "    ✓ Probe " << i << " captured successfully" << std::endl;
     }
@@ -617,6 +633,23 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
             // ✅ 新增：自动捕获所有探针的按钮
             if (overlay->button("Capture All Probes")) {
                 CaptureAllProbes();
+            }
+
+            // ✅ 新增：立方体贴图插值按钮
+            if (overlay->button("Interpolate Cubemap")) {
+                if (cubemapInterpolation && cubemapInterpolation->GetProbeCount() > 0) {
+                    // 在相机位置进行插值
+                    auto interpolatedCubemap = cubemapInterpolation->InterpolateAt(camera.position, 50.0f);
+                    if (interpolatedCubemap) {
+                        cubeMaps.push_back(interpolatedCubemap);
+                        cubemapNames.push_back("Interpolated_" + std::to_string(cubeMaps.size() - 1));
+                        skyboxIndex = static_cast<int>(cubeMaps.size() - 1);
+                        UpdateSkyBox();
+                        std::cout << "[VulkanExample] Interpolated cubemap created at camera position" << std::endl;
+                    }
+                } else {
+                    std::cerr << "[VulkanExample] No probes available for interpolation!" << std::endl;
+                }
             }
         }
 
