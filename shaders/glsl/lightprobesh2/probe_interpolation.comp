@@ -26,15 +26,35 @@ layout(set = 0, binding = 1) uniform samplerCube probeCubemaps[256];
 // 输出：高分辨率立方体贴图
 layout(set = 0, binding = 2, rgba16f) uniform imageCube outputCubemap;
 
-// 立方体贴图面的法向量
-const vec3 cubeFaceNormals[6] = vec3[](
-    vec3(1.0, 0.0, 0.0),   // +X
-    vec3(-1.0, 0.0, 0.0),  // -X
-    vec3(0.0, 1.0, 0.0),   // +Y
-    vec3(0.0, -1.0, 0.0),  // -Y
-    vec3(0.0, 0.0, 1.0),   // +Z
-    vec3(0.0, 0.0, -1.0)   // -Z
-);
+// 计算立方体贴图采样方向（标准方法）
+vec3 GetCubemapDirection(uint face, vec2 uv) {
+    // uv 在 [0, 1] 范围内，映射到 [-1, 1]
+    vec2 coords = uv * 2.0 - 1.0;
+    
+    vec3 dir;
+    switch(face) {
+        case 0: // +X
+            dir = vec3(1.0, -coords.y, -coords.x);
+            break;
+        case 1: // -X
+            dir = vec3(-1.0, -coords.y, coords.x);
+            break;
+        case 2: // +Y
+            dir = vec3(coords.x, 1.0, coords.y);
+            break;
+        case 3: // -Y
+            dir = vec3(coords.x, -1.0, -coords.y);
+            break;
+        case 4: // +Z
+            dir = vec3(coords.x, -coords.y, 1.0);
+            break;
+        case 5: // -Z
+            dir = vec3(-coords.x, -coords.y, -1.0);
+            break;
+    }
+    
+    return normalize(dir);
+}
 
 // 计算两点之间的距离
 float Distance(vec3 a, vec3 b) {
@@ -170,16 +190,12 @@ void main() {
     
     // 计算像素坐标
     ivec3 texel = ivec3(gl_GlobalInvocationID.xy, face);
-    vec2 uv = vec2(gl_GlobalInvocationID.xy) / vec2(outputSize);
     
-    // 计算立方体贴图采样方向
-    vec3 normal = cubeFaceNormals[face];
-    vec3 up = abs(normal.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
-    vec3 right = normalize(cross(up, normal));
-    up = cross(normal, right);
+    // 计算UV坐标（像素中心）
+    vec2 uv = (vec2(gl_GlobalInvocationID.xy) + 0.5) / vec2(outputSize);
     
-    vec2 scaledUV = uv * 2.0 - 1.0;  // 映射到 [-1, 1]
-    vec3 direction = normalize(normal + scaledUV.x * right + scaledUV.y * up);
+    // 使用标准立方体贴图方向计算
+    vec3 direction = GetCubemapDirection(face, uv);
     
     // 使用传入的查询位置（相机位置或其他查询点）
     vec3 queryPos = probeBuffer.queryPosition.xyz;
