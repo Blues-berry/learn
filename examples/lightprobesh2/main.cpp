@@ -43,10 +43,10 @@
 
 // 配置：探针网格参数
 struct ProbeGridConfig {
-    glm::vec3 minBounds{ -10.0f, 0.0f, -10.0f };
-    glm::vec3 maxBounds{ 10.0f, 4.0f, 10.0f };
-    glm::ivec3 dimensions{ 4, 2, 4 };
-    uint32_t resolution{ 32 };
+    glm::vec3 minBounds{ 5.0f, 0.0f, -5.0f };
+    glm::vec3 maxBounds{ 5.0f, 4.0f, 5.0f };
+    glm::ivec3 dimensions{ 2, 2, 2 };
+    uint32_t resolution{ 4 };
 };
 
 class VulkanExample : public VulkanExampleBase, public IExampleInterfasce

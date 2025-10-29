@@ -24,7 +24,7 @@ enum class ETechnique : uint32_t {
 
 class RenderAttachment {
 public:
-    RenderAttachment(vks::VulkanDevice* device_, VkImageType type, VkFormat format, VkImageUsageFlags usage, uint32_t width, uint32_t height, uint32_t layer);
+    RenderAttachment(vks::VulkanDevice* device_, VkImageType type, VkFormat format, VkImageUsageFlags usage, uint32_t width, uint32_t height, uint32_t layer, VkImageCreateFlags flags = 0);
     virtual ~RenderAttachment();
 
     VkImage GetImage() const { return image; }
@@ -59,6 +59,16 @@ class RenderTargetCube : public RenderTarget2D {
 public:
     RenderTargetCube(vks::VulkanDevice* device_, VkFormat format, uint32_t width, uint32_t height);
     ~RenderTargetCube() override = default;
+
+    std::shared_ptr<vks::TextureCubeMap> GetTextureCubeMap();
+private:
+    std::shared_ptr<vks::TextureCubeMap> cubeMap;
+};
+
+class StorageCubeMap : public RenderAttachment {
+public:
+    StorageCubeMap(vks::VulkanDevice* device_, VkFormat format, uint32_t width, uint32_t height);
+    ~StorageCubeMap() override;
 
     std::shared_ptr<vks::TextureCubeMap> GetTextureCubeMap();
 private:

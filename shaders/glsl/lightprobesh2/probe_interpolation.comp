@@ -16,6 +16,7 @@ layout(set = 0, binding = 0) uniform ProbeBuffer {
     uint maxDistance;
     uint interpolationMode;  // 0=IDW, 1=Linear, 2=Cubic
     uint padding;
+    vec4 queryPosition;      // 查询位置 (xyz, padding)
     ProbeData probes[256];   // 最多支持256个探针
 } probeBuffer;
 
@@ -111,13 +112,15 @@ vec4 InterpolateCubic(vec3 queryPos, vec3 direction) {
     float distances[4] = float[](1e10, 1e10, 1e10, 1e10);
     uint indices[4] = uint[](0, 0, 0, 0);
     
-    for (uint i = 0; i < probeBuffer.probeCount && i < 4; ++i) {
+    // 遍历所有探针，找到最近的4个
+    for (uint i = 0; i < probeBuffer.probeCount; ++i) {
         vec3 probePos = probeBuffer.probes[i].position.xyz;
         float dist = Distance(queryPos, probePos);
         
-        // 插入排序
+        // 插入排序：找到合适的位置插入
         for (uint j = 0; j < 4; ++j) {
             if (dist < distances[j]) {
+                // 向后移动更大的距离
                 for (uint k = 3; k > j; --k) {
                     distances[k] = distances[k-1];
                     indices[k] = indices[k-1];
@@ -133,8 +136,11 @@ vec4 InterpolateCubic(vec3 queryPos, vec3 direction) {
     vec4 result = vec4(0.0);
     float totalWeight = 0.0;
     
-    for (uint i = 0; i < 4; ++i) {
+    uint maxProbes = min(4u, probeBuffer.probeCount);
+    for (uint i = 0; i < maxProbes; ++i) {
         float dist = distances[i];
+        if (dist >= 1e9) break;  // 跳过未初始化的距离
+        
         float weight = exp(-dist * dist / 2.0);  // 高斯权重
         
         vec4 color = texture(probeCubemaps[indices[i]], direction);
@@ -158,40 +164,40 @@ void main() {
         return;
     }
     
-    // 处理立方体贴图的6个面
-    for (uint face = 0; face < 6; ++face) {
-        // 计算像素坐标
-        ivec3 texel = ivec3(gl_GlobalInvocationID.xy, face);
-        vec2 uv = vec2(gl_GlobalInvocationID.xy) / vec2(outputSize);
-        
-        // 计算立方体贴图采样方向
-        vec3 normal = cubeFaceNormals[face];
-        vec3 up = abs(normal.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
-        vec3 right = normalize(cross(up, normal));
-        up = cross(normal, right);
-        
-        vec2 scaledUV = uv * 2.0 - 1.0;  // 映射到 [-1, 1]
-        vec3 direction = normalize(normal + scaledUV.x * right + scaledUV.y * up);
-        
-        // 查询位置（这里使用方向作为查询位置的代理）
-        // 实际应用中应该使用相机位置或其他查询点
-        vec3 queryPos = direction;
-        
-        // 根据插值模式选择插值方法
-        vec4 interpolatedColor;
-        if (probeBuffer.interpolationMode == 0u) {
-            // IDW 插值
-            interpolatedColor = InterpolateIDW(queryPos, direction);
-        } else if (probeBuffer.interpolationMode == 1u) {
-            // 线性插值
-            interpolatedColor = InterpolateLinear(queryPos, direction);
-        } else {
-            // 三次样条插值
-            interpolatedColor = InterpolateCubic(queryPos, direction);
-        }
-        
-        // 写入输出立方体贴图
-        imageStore(outputCubemap, texel, interpolatedColor);
+    // 当前处理的立方体贴图面（从 gl_GlobalInvocationID.z 获取）
+    uint face = gl_GlobalInvocationID.z;
+    if (face >= 6) return;  // 安全检查
+    
+    // 计算像素坐标
+    ivec3 texel = ivec3(gl_GlobalInvocationID.xy, face);
+    vec2 uv = vec2(gl_GlobalInvocationID.xy) / vec2(outputSize);
+    
+    // 计算立方体贴图采样方向
+    vec3 normal = cubeFaceNormals[face];
+    vec3 up = abs(normal.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
+    vec3 right = normalize(cross(up, normal));
+    up = cross(normal, right);
+    
+    vec2 scaledUV = uv * 2.0 - 1.0;  // 映射到 [-1, 1]
+    vec3 direction = normalize(normal + scaledUV.x * right + scaledUV.y * up);
+    
+    // 使用传入的查询位置（相机位置或其他查询点）
+    vec3 queryPos = probeBuffer.queryPosition.xyz;
+    
+    // 根据插值模式选择插值方法
+    vec4 interpolatedColor;
+    if (probeBuffer.interpolationMode == 0u) {
+        // IDW 插值
+        interpolatedColor = InterpolateIDW(queryPos, direction);
+    } else if (probeBuffer.interpolationMode == 1u) {
+        // 线性插值
+        interpolatedColor = InterpolateLinear(queryPos, direction);
+    } else {
+        // 三次样条插值
+        interpolatedColor = InterpolateCubic(queryPos, direction);
     }
+    
+    // 写入输出立方体贴图
+    imageStore(outputCubemap, texel, interpolatedColor);
 }
 

@@ -1,0 +1,72 @@
+#version 450
+#extension GL_ARB_separate_shader_objects : enable
+
+// 工作组大小：16x16 处理高分辨率立方体贴图
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+// 探针数据结构
+struct ProbeData {
+    vec4 position;      // 探针位置 (xyz, padding)
+    vec4 reserved;      // 保留用于对齐
+};
+
+// 常量缓冲区：探针信息
+layout(set = 0, binding = 0) uniform ProbeBuffer {
+    uint probeCount;
+    uint maxDistance;
+    uint interpolationMode;  // 0=IDW, 1=Linear, 2=Cubic
+    uint padding;
+    vec4 queryPosition;      // 查询位置 (xyz, padding)
+    ProbeData probes[256];   // 最多支持256个探针
+} probeBuffer;
+
+// 输入：多个低分辨率立方体贴图（探针捕获的）
+layout(set = 0, binding = 1) uniform samplerCube probeCubemaps[256];
+
+// 输出：高分辨率立方体贴图
+layout(set = 0, binding = 2, rgba16f) uniform imageCube outputCubemap;
+
+// 立方体贴图面的法向量
+const vec3 cubeFaceNormals[6] = vec3[](
+    vec3(1.0, 0.0, 0.0),   // +X
+    vec3(-1.0, 0.0, 0.0),  // -X
+    vec3(0.0, 1.0, 0.0),   // +Y
+    vec3(0.0, -1.0, 0.0),  // -Y
+    vec3(0.0, 0.0, 1.0),   // +Z
+    vec3(0.0, 0.0, -1.0)   // -Z
+);
+
+void main() {
+    // 获取输出立方体贴图的尺寸
+    ivec2 outputSize = imageSize(outputCubemap).xy;
+    
+    // 确保当前线程在有效范围内
+    if (gl_GlobalInvocationID.x >= outputSize.x || gl_GlobalInvocationID.y >= outputSize.y) {
+        return;
+    }
+    
+    // 当前处理的立方体贴图面（从 gl_GlobalInvocationID.z 获取）
+    uint face = gl_GlobalInvocationID.z;
+    if (face >= 6) return;  // 安全检查
+    
+    // 计算像素坐标
+    ivec3 texel = ivec3(gl_GlobalInvocationID.xy, face);
+    vec2 uv = vec2(gl_GlobalInvocationID.xy) / vec2(outputSize);
+    
+    // 简单的调试输出：根据面和UV坐标生成颜色
+    vec4 debugColor = vec4(0.0);
+    
+    if (face == 0) debugColor = vec4(1.0, 0.0, 0.0, 1.0);      // +X: 红色
+    else if (face == 1) debugColor = vec4(0.0, 1.0, 0.0, 1.0); // -X: 绿色
+    else if (face == 2) debugColor = vec4(0.0, 0.0, 1.0, 1.0); // +Y: 蓝色
+    else if (face == 3) debugColor = vec4(1.0, 1.0, 0.0, 1.0); // -Y: 黄色
+    else if (face == 4) debugColor = vec4(1.0, 0.0, 1.0, 1.0); // +Z: 洋红
+    else debugColor = vec4(0.0, 1.0, 1.0, 1.0);                // -Z: 青色
+    
+    // 根据UV坐标调整亮度
+    float brightness = (uv.x + uv.y) * 0.5;
+    debugColor.rgb *= brightness;
+    
+    // 写入输出立方体贴图
+    imageStore(outputCubemap, texel, debugColor);
+}

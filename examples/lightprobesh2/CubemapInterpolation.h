@@ -134,5 +134,8 @@ private:
     std::unique_ptr<ProbeInterpolationPass> interpolationPass;
     std::unique_ptr<ProbeWeightVisualizationPass> weightVisualizationPass;
     InterpolationMode interpolationMode = InterpolationMode::IDW;
+    
+    // 保持最后一个 StorageCubeMap 的生命周期，防止底层 Vulkan 资源被过早释放
+    std::shared_ptr<class StorageCubeMap> lastStorageCube;
 };
 

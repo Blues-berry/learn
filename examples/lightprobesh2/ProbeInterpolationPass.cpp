@@ -54,8 +54,11 @@ ProbeInterpolationPass::ProbeInterpolationPass(vks::VulkanDevice* device_, IExam
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
         &probeBuffer,
         sizeof(ProbeBuffer));
+    
+    // 映射缓冲区内存
+    VK_CHECK_RESULT(probeBuffer.map());
 
-    // 创建计算管线
+    // 创建计算管线 - 使用正常的插值着色器
     VkComputePipelineCreateInfo computePipelineCI = vks::initializers::computePipelineCreateInfo(pipelineLayout);
     computePipelineCI.stage = iLoader->LoadShader("lightprobesh2/probe_interpolation.comp.spv", VK_SHADER_STAGE_COMPUTE_BIT);
     VK_CHECK_RESULT(vkCreateComputePipelines(device->logicalDevice, VK_NULL_HANDLE, 1, &computePipelineCI, nullptr, &pipeline));
@@ -120,10 +123,22 @@ void ProbeInterpolationPass::SetMaxDistance(float distance)
     std::cout << "[ProbeInterpolationPass::SetMaxDistance] Max distance set to " << distance << std::endl;
 }
 
+void ProbeInterpolationPass::SetQueryPosition(const glm::vec3& position)
+{
+    queryPosition = position;
+    std::cout << "[ProbeInterpolationPass::SetQueryPosition] Query position set to (" 
+              << position.x << ", " << position.y << ", " << position.z << ")" << std::endl;
+}
+
 void ProbeInterpolationPass::UpdateProbeBuffer()
 {
     if (!probeBuffer.buffer) {
         std::cerr << "[ProbeInterpolationPass::UpdateProbeBuffer] Probe buffer not initialized!" << std::endl;
+        return;
+    }
+
+    if (!probeBuffer.mapped) {
+        std::cerr << "[ProbeInterpolationPass::UpdateProbeBuffer] Probe buffer not mapped!" << std::endl;
         return;
     }
 
@@ -132,6 +147,7 @@ void ProbeInterpolationPass::UpdateProbeBuffer()
     bufferData->maxDistance = static_cast<uint32_t>(maxDistance);
     bufferData->interpolationMode = static_cast<uint32_t>(interpolationMode);
     bufferData->padding = 0;
+    bufferData->queryPosition = glm::vec4(queryPosition, 0.0f);
 
     for (size_t i = 0; i < probes.size(); ++i) {
         bufferData->probes[i].position = glm::vec4(probes[i].position, 0.0f);
@@ -145,6 +161,12 @@ void ProbeInterpolationPass::UpdateDescriptorSet()
 {
     if (probes.empty() || !outputCubemap) {
         std::cerr << "[ProbeInterpolationPass::UpdateDescriptorSet] Missing probes or output cubemap!" << std::endl;
+        return;
+    }
+
+    // 检查输出立方体贴图是否有效
+    if (!outputCubemap->view || outputCubemap->view == VK_NULL_HANDLE) {
+        std::cerr << "[ProbeInterpolationPass::UpdateDescriptorSet] Output cubemap view is invalid!" << std::endl;
         return;
     }
 
@@ -168,10 +190,14 @@ void ProbeInterpolationPass::UpdateDescriptorSet()
     // 写入探针立方体贴图数组
     std::vector<VkDescriptorImageInfo> probeImageInfos;
     for (const auto& probe : probes) {
+        if (!probe.cubemap || !probe.cubemap->view || !probe.cubemap->sampler) {
+            std::cerr << "[ProbeInterpolationPass::UpdateDescriptorSet] Invalid probe cubemap detected!" << std::endl;
+            return;
+        }
         VkDescriptorImageInfo imageInfo = {};
         imageInfo.sampler = probe.cubemap->sampler;
         imageInfo.imageView = probe.cubemap->view;
-        imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        imageInfo.imageLayout = probe.cubemap->imageLayout;  // 使用实际的布局
         probeImageInfos.push_back(imageInfo);
     }
 
@@ -207,14 +233,40 @@ void ProbeInterpolationPass::Generate(VkQueue queue)
         return;
     }
 
+    std::cout << "[ProbeInterpolationPass::Generate] Starting GPU interpolation with " 
+              << probes.size() << " probes at " << outputWidth << "x" << outputHeight << std::endl;
+
     UpdateProbeBuffer();
     UpdateDescriptorSet();
 
     VkCommandBuffer cmdBuf = device->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
+    // 转换图像布局为 GENERAL，用于计算着色器写入
+    VkImageMemoryBarrier barrier = vks::initializers::imageMemoryBarrier();
+    barrier.image = outputCubemap->image;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    barrier.srcAccessMask = 0;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 6;
+    
+    vkCmdPipelineBarrier(
+        cmdBuf,
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        0,
+        0, nullptr,
+        0, nullptr,
+        1, &barrier
+    );
+    
     Draw(cmdBuf);
     device->flushCommandBuffer(cmdBuf, queue);
 
-    std::cout << "[ProbeInterpolationPass::Generate] Interpolation completed" << std::endl;
+    std::cout << "[ProbeInterpolationPass::Generate] GPU interpolation completed!" << std::endl;
 }
 
 void ProbeInterpolationPass::Dispatch(VkCommandBuffer cmd)
@@ -226,6 +278,7 @@ void ProbeInterpolationPass::Dispatch(VkCommandBuffer cmd)
     uint32_t groupCountX = (outputWidth + 15) / 16;
     uint32_t groupCountY = (outputHeight + 15) / 16;
 
-    vkCmdDispatch(cmd, groupCountX, groupCountY, 6);  // 6个立方体面
+    // 处理立方体贴图的6个面
+    vkCmdDispatch(cmd, groupCountX, groupCountY, 6);
 }
 

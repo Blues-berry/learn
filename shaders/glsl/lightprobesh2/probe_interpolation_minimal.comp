@@ -1,0 +1,30 @@
+#version 450
+
+// 工作组大小：16x16
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+// 输出：立方体贴图
+layout(set = 0, binding = 2, rgba16f) uniform imageCube outputCubemap;
+
+void main() {
+    // 获取输出立方体贴图的尺寸
+    ivec2 outputSize = imageSize(outputCubemap).xy;
+    
+    // 确保当前线程在有效范围内
+    if (gl_GlobalInvocationID.x >= outputSize.x || gl_GlobalInvocationID.y >= outputSize.y) {
+        return;
+    }
+    
+    // 当前处理的立方体贴图面
+    uint face = gl_GlobalInvocationID.z;
+    if (face >= 6) return;
+    
+    // 计算像素坐标
+    ivec3 texel = ivec3(gl_GlobalInvocationID.xy, face);
+    
+    // 简单的测试颜色：红色
+    vec4 testColor = vec4(1.0, 0.0, 0.0, 1.0);
+    
+    // 写入输出立方体贴图
+    imageStore(outputCubemap, texel, testColor);
+}

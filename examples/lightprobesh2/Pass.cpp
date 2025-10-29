@@ -425,7 +425,15 @@ MainPass::MainPass(vks::VulkanDevice* device_)
 
     PreparePerPassResource(); // 准备每通道资源。
 }
+class Singleton {
 
+public:
+	static Singleton Get() {
+		static Singleton instance;
+		return instance;
+	}
+
+};
 MainPass::~MainPass()
 {
     // 析构函数：清理主渲染通道资源。
@@ -928,7 +936,7 @@ void GenIBLPass::FeedPrefilteredMap(VkDescriptorImageInfo& descriptor)
 }
 
 
-RenderAttachment::RenderAttachment(vks::VulkanDevice* device_, VkImageType t, VkFormat fmt, VkImageUsageFlags usage, uint32_t w, uint32_t h, uint32_t l)
+RenderAttachment::RenderAttachment(vks::VulkanDevice* device_, VkImageType t, VkFormat fmt, VkImageUsageFlags usage, uint32_t w, uint32_t h, uint32_t l, VkImageCreateFlags flags)
     : device(device_)
     , width(w)
     , height(h)
@@ -948,6 +956,7 @@ RenderAttachment::RenderAttachment(vks::VulkanDevice* device_, VkImageType t, Vk
     imageCI.samples = VK_SAMPLE_COUNT_1_BIT; // 设置单采样。
     imageCI.tiling = VK_IMAGE_TILING_OPTIMAL; // 设置图像平铺为最优。
     imageCI.usage = usage; // 设置图像用途为颜色附件和采样。
+    imageCI.flags = flags; // 设置图像创建标志（如 CUBE_COMPATIBLE）。
     VK_CHECK_RESULT(vkCreateImage(device->logicalDevice, &imageCI, nullptr, &image)); // 创建图像。
 
     VkMemoryAllocateInfo memAlloc = vks::initializers::memoryAllocateInfo(); // 初始化内存分配信息。
@@ -982,6 +991,73 @@ RenderTarget2D::RenderTarget2D(vks::VulkanDevice* device_, VkFormat fmt, uint32_
 RenderTargetCube::RenderTargetCube(vks::VulkanDevice* device_, VkFormat fmt, uint32_t width, uint32_t height)
     : RenderTarget2D(device_, fmt, width, height, 6)
 {
+}
+
+StorageCubeMap::StorageCubeMap(vks::VulkanDevice* device_, VkFormat fmt, uint32_t width, uint32_t height)
+    : RenderAttachment(device_, VK_IMAGE_TYPE_2D, fmt, 
+                      VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, 
+                      width, height, 6, 
+                      VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT)
+{
+}
+
+StorageCubeMap::~StorageCubeMap()
+{
+    if (cubeMap && cubeMap->view) {
+        vkDestroyImageView(device->logicalDevice, cubeMap->view, nullptr);
+    }
+    if (cubeMap && cubeMap->sampler) {
+        vkDestroySampler(device->logicalDevice, cubeMap->sampler, nullptr);
+    }
+}
+
+std::shared_ptr<vks::TextureCubeMap> StorageCubeMap::GetTextureCubeMap() {
+    if (!cubeMap) {
+        cubeMap = std::make_shared<vks::TextureCubeMap>();
+        cubeMap->image = GetImage();
+        cubeMap->device = device;
+        // 存储图像的布局将是 GENERAL，用于计算着色器写入
+        // 但布局转换将由使用它的 Pass 负责
+        cubeMap->imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        cubeMap->layerCount = 6;  // 立方体贴图总是6层
+        cubeMap->width = GetWidth();
+        cubeMap->height = GetHeight();
+        cubeMap->mipLevels = 1;
+        
+        // 创建立方体贴图的视图
+        VkImageViewCreateInfo viewCI = vks::initializers::imageViewCreateInfo();
+        viewCI.image = cubeMap->image;
+        viewCI.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
+        viewCI.format = GetFormat();
+        viewCI.components = { VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G, VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_A };
+        viewCI.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        viewCI.subresourceRange.baseMipLevel = 0;
+        viewCI.subresourceRange.levelCount = 1;
+        viewCI.subresourceRange.baseArrayLayer = 0;
+        viewCI.subresourceRange.layerCount = 6;
+        
+        VK_CHECK_RESULT(vkCreateImageView(device->logicalDevice, &viewCI, nullptr, &cubeMap->view));
+        
+        // 创建采样器
+        VkSamplerCreateInfo samplerCI = vks::initializers::samplerCreateInfo();
+        samplerCI.magFilter = VK_FILTER_LINEAR;
+        samplerCI.minFilter = VK_FILTER_LINEAR;
+        samplerCI.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+        samplerCI.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        samplerCI.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        samplerCI.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        samplerCI.minLod = 0.0f;
+        samplerCI.maxLod = 1.0f;
+        samplerCI.maxAnisotropy = 1.0f;
+        
+        VK_CHECK_RESULT(vkCreateSampler(device->logicalDevice, &samplerCI, nullptr, &cubeMap->sampler));
+        
+        // 更新描述符信息
+        cubeMap->descriptor.imageLayout = cubeMap->imageLayout;
+        cubeMap->descriptor.imageView = cubeMap->view;
+        cubeMap->descriptor.sampler = cubeMap->sampler;
+    }
+    return cubeMap;
 }
 
 ResourceView::ResourceView(const std::shared_ptr<RenderAttachment>& att, VkImageViewType type, uint32_t firstSlice, uint32_t sliceCount, VkImageAspectFlags flags)

@@ -3,6 +3,7 @@
 #include "ProbeWeightVisualizationPass.h"
 #include "VulkanDevice.h"
 #include "ILoader.h"
+#include "Pass.h"
 #include <cmath>
 #include <algorithm>
 #include <iostream>
@@ -168,14 +169,31 @@ std::shared_ptr<vks::TextureCubeMap> CubemapInterpolation::InterpolateAt(
         std::cout << "[CubemapInterpolation::InterpolateAt] Using GPU interpolation at resolution "
                   << outputResolution << "x" << outputResolution << std::endl;
 
-        // 创建输出立方体贴图
-        auto outputCubemap = std::make_shared<vks::TextureCubeMap>();
-        // 注意：这里需要实际创建GPU纹理，暂时使用简化方式
-        // 实际应该通过 RenderTargetCube 创建
+        // 创建存储立方体贴图（支持 STORAGE_IMAGE 用法）
+        auto storageCube = std::make_shared<StorageCubeMap>(
+            device, 
+            VK_FORMAT_R16G16B16A16_SFLOAT,
+            outputResolution, 
+            outputResolution
+        );
+        
+        // 获取 TextureCubeMap 对象
+        auto outputCubemap = storageCube->GetTextureCubeMap();
+        
+        if (!outputCubemap) {
+            std::cerr << "[CubemapInterpolation::InterpolateAt] Failed to create output cubemap!" << std::endl;
+            return nullptr;
+        }
 
         interpolationPass->SetOutputCubemap(outputCubemap);
         interpolationPass->SetMaxDistance(maxDistance);
+        interpolationPass->SetQueryPosition(position);  // 设置查询位置
         interpolationPass->Generate(queue);
+
+        // 关键修复：保存 storageCube 以保持底层资源的生命周期
+        // 将其存储为outputCubemap的用户数据或其他方式
+        // 临时方案：保存到类成员中
+        lastStorageCube = storageCube;
 
         return outputCubemap;
     }
@@ -204,14 +222,28 @@ std::shared_ptr<vks::TextureCubeMap> CubemapInterpolation::VisualizeWeights(
     std::cout << "[CubemapInterpolation::VisualizeWeights] Visualizing weights at resolution "
               << outputResolution << "x" << outputResolution << std::endl;
 
-    // 创建输出立方体贴图
-    auto outputCubemap = std::make_shared<vks::TextureCubeMap>();
-    // 注意：这里需要实际创建GPU纹理，暂时使用简化方式
-    // 实际应该通过 RenderTargetCube 创建
+    // 创建存储立方体贴图（支持 STORAGE_IMAGE 用法）
+    auto storageCube = std::make_shared<StorageCubeMap>(
+        device, 
+        VK_FORMAT_R16G16B16A16_SFLOAT,
+        outputResolution, 
+        outputResolution
+    );
+    
+    // 获取 TextureCubeMap 对象
+    auto outputCubemap = storageCube->GetTextureCubeMap();
+    
+    if (!outputCubemap) {
+        std::cerr << "[CubemapInterpolation::VisualizeWeights] Failed to create output cubemap!" << std::endl;
+        return nullptr;
+    }
 
     weightVisualizationPass->SetOutputCubemap(outputCubemap);
     weightVisualizationPass->SetVisualizationMode(static_cast<ProbeWeightVisualizationPass::VisualizationMode>(visualizationMode));
     weightVisualizationPass->Generate(queue);
+
+    // 保存 storageCube 以保持底层资源的生命周期
+    lastStorageCube = storageCube;
 
     return outputCubemap;
 }

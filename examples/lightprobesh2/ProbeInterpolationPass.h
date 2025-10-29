@@ -42,6 +42,7 @@ public:
         uint32_t maxDistance;
         uint32_t interpolationMode;
         uint32_t padding;
+        glm::vec4 queryPosition;  // 查询位置 (xyz, padding)
         ProbeData probes[256];  // 最多支持256个探针
     };
 
@@ -82,6 +83,11 @@ public:
      * @brief 设置最大搜索距离
      */
     void SetMaxDistance(float distance);
+
+    /**
+     * @brief 设置查询位置（相机位置或其他查询点）
+     */
+    void SetQueryPosition(const glm::vec3& position);
 
     /**
      * @brief 执行插值计算
@@ -125,6 +131,7 @@ private:
     // 参数
     InterpolationMode interpolationMode = InterpolationMode::IDW;
     float maxDistance = 50.0f;
+    glm::vec3 queryPosition = glm::vec3(0.0f);
     uint32_t outputWidth = 0;
     uint32_t outputHeight = 0;
 };
