@@ -101,9 +101,10 @@ void Skybox::PreparePSO(VkRenderPass renderPass, VkDescriptorSetLayout passLayou
 	// 配置颜色混合状态，指定一个附件。
 	VkPipelineColorBlendStateCreateInfo colorBlendState =
 		vks::initializers::pipelineColorBlendStateCreateInfo(1, &blendAttachmentState);
-	// 配置深度和模板状态，初始禁用深度测试和写入。
+	// 配置深度和模板状态：启用深度测试，禁用深度写入，使用 LESS_OR_EQUAL 比较
+	// 天空盒应该在所有物体后面，深度值为最大值(1.0)
 	VkPipelineDepthStencilStateCreateInfo depthStencilState =
-		vks::initializers::pipelineDepthStencilStateCreateInfo(VK_FALSE, VK_FALSE, VK_COMPARE_OP_LESS_OR_EQUAL);
+		vks::initializers::pipelineDepthStencilStateCreateInfo(VK_TRUE, VK_FALSE, VK_COMPARE_OP_LESS_OR_EQUAL);
 	// 配置视口状态，指定一个视口和裁剪矩形。
 	VkPipelineViewportStateCreateInfo viewportState =
 		vks::initializers::pipelineViewportStateCreateInfo(1, 1);

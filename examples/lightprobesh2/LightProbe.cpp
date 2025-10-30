@@ -51,7 +51,7 @@ void LightProbe::CaptureCubeMap(VkQueue queue, VkCommandBuffer cmd)
 {
     // --- 1. 准备 UBO（修复 viewproj）---
     CaptureScenePass::GlobalUbo ubo = {};
-    glm::mat4 projection = glm::perspective(glm::radians(90.0f), 1.0f, 0.1f, 256.0f);
+    glm::mat4 projection = glm::perspective(glm::radians(90.0f), 1.0f, 0.1f, 10000.0f);
 
     std::array<glm::mat4, 6> viewMatrices = {
         glm::lookAt(position, position + glm::vec3( 1, 0, 0), glm::vec3(0, -1,  0)), // +X
@@ -63,7 +63,7 @@ void LightProbe::CaptureCubeMap(VkQueue queue, VkCommandBuffer cmd)
     };
 
     for (uint32_t face = 0; face < 6; ++face) {
-        ubo.viewproj[face] = projection * viewMatrices[face];  // 保留平移！
+        ubo.viewproj[face] = projection * viewMatrices[face];  // 保留平移（其他物体需要）
         ubo.cameraPos[face] = glm::vec4(position, 1.0f);
     }
     
@@ -73,6 +73,12 @@ void LightProbe::CaptureCubeMap(VkQueue queue, VkCommandBuffer cmd)
     ubo.gamma = 2.2f;     // 默认伽马值
 
     capturePass->UpdateGlobal(ubo);
+
+    // ✅ 关键修复：更新天空盒transform为单位矩阵
+    // 天空盒应该以探针位置为中心，视图变换已在CaptureScenePass的viewproj中处理
+    if (skybox) {
+        skybox->Update(glm::mat4(1.0f));  // 单位矩阵，不移除任何平移
+    }
 
     // --- 2. 执行渲染 ---
     VkCommandBuffer cmdBuf = cmd;

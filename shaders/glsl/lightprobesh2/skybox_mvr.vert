@@ -29,6 +29,12 @@ out gl_PerVertex
 void main() 
 {
 	outUVW = inPos;
-	gl_Position = global.viewProject[gl_ViewIndex] * vec4(inPos.xyz, 1.0);
-	gl_Position.z = gl_Position.w;
+	
+	// ✅ 关键修复：使用w=0.0使天空盒不受平移影响
+	// 在齐次坐标中：
+	// - w=1.0: 位置向量，受平移影响
+	// - w=0.0: 方向向量，只受旋转影响
+	// 这是标准的天空盒渲染技巧
+	vec4 pos = global.viewProject[gl_ViewIndex] * vec4(inPos.xyz, 0.0);
+	gl_Position = vec4(pos.xy, pos.w, pos.w);  // 确保天空盒在最远处
 }

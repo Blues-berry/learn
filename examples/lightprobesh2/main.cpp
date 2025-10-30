@@ -274,6 +274,10 @@ private:
     std::vector<std::string> interpolationModeNames = {"IDW", "Linear", "Cubic"};
 };
 
+// =============================================================================
+// 资源加载相关函数
+// =============================================================================
+
 void VulkanExample::LoadAssets()
 {
     // 加载资产，包括立方体贴图和 glTF 模型。
@@ -384,6 +388,10 @@ void VulkanExample::LoadCubeMap(const std::string& name, const std::string& cube
     cubemapNames.emplace_back(name); // 添加贴图名称。
 }
 
+// =============================================================================
+// 渲染通道和场景准备函数
+// =============================================================================
+
 void VulkanExample::PreparePasses()
 {
     // 准备描述符池
@@ -435,6 +443,10 @@ void VulkanExample::ReginPrefilterPasses()
 {
     // 重新生成预过滤通道（未实现）。
 }
+
+// =============================================================================
+// Light Probe 相关函数
+// =============================================================================
 
 void VulkanExample::PrepareProbes()
 {
@@ -543,6 +555,10 @@ void VulkanExample::CaptureAllProbes()
     }
 }
 
+// =============================================================================
+// 渲染相关函数
+// =============================================================================
+
 void VulkanExample::prepareData()
 {
     // 准备渲染数据。
@@ -583,10 +599,20 @@ void VulkanExample::drawFrame(VkCommandBuffer cmd)
     });
 }
 
+// =============================================================================
+// UI 相关函数
+// =============================================================================
+
 void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
 {
     // 更新 UI 覆盖界面。
     if (overlay->header("Settings")) { // 显示“设置”标题。
+        // 显示当前相机位置（只读）
+        overlay->text("Camera Position:");
+        overlay->text("  X: %.2f", camera.position.x);
+        overlay->text("  Y: %.2f", camera.position.y);
+        overlay->text("  Z: %.2f", camera.position.z);
+        
         if (overlay->inputFloat("Exposure", &mainPassData.exposure, 0.1f, 2)) { // 曝光度调节控件。
             globalDirty = true; // 标记全局数据需要更新。
         }
@@ -598,6 +624,14 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
         }
         if (overlay->comboBox("PreviewModel", &modelIndex, previewModelNames)) { // 预览模型选择下拉框。
             previewModel->UpdateModel(previewModels[modelIndex]); // 更新预览模型。
+        }
+        
+        // GLTF 模型切换
+        if (!gltfModelNames.empty() && gltfModel) {
+            if (overlay->comboBox("GLTF Model", &gltfmodelIndex, gltfModelNames)) {
+                gltfModel->UpdateModel(gltfModels[gltfmodelIndex]);
+                std::cout << "[VulkanExample] Switched to GLTF model: " << gltfModelNames[gltfmodelIndex] << std::endl;
+            }
         }
 
         if (overlay->button("Capture Cubemap at Camera")) { // 捕获立方体贴图按钮。
@@ -720,6 +754,11 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
 
     previewModel->ShowUI(overlay); // 显示预览模型的 UI 控件。
 }
+
+// =============================================================================
+// 立方体贴图捕获函数
+// =============================================================================
+
 void VulkanExample::CaptureCubemap(const glm::vec3& position)
 {
     probe = std::make_unique<LightProbe>(vulkanDevice, this, 1024, 1024);
