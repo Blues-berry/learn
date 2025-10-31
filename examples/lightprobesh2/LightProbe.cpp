@@ -3,6 +3,7 @@
 #include <array>
 #include <stdexcept>
 #include <fstream>
+#include <iostream>
 
 
 
@@ -339,4 +340,150 @@ void LightProbe::SaveCubeMapFaces(VkQueue queue, const std::string& basePath)
     }
     
     std::cout << "Successfully saved 6 cubemap faces with base path: " << basePath << std::endl;
+}
+
+// =============================================================================
+// 静态方法实现：探针网格UI、生成和批量捕获
+// =============================================================================
+
+void LightProbe::ShowProbeGridUI(vks::UIOverlay* overlay, ProbeGridConfig& config, bool& showProbes)
+{
+    if (overlay->header("Light Probe Grid")) {
+        // 启用/禁用探针网格
+        if (overlay->checkBox("Enable Probe Grid", &config.enabled)) {
+            // 配置改变时的逻辑可以在外部处理
+        }
+
+        if (config.enabled) {
+            overlay->text("Bounds:");
+            overlay->inputFloat("  Min X", &config.minBounds.x, 0.1f, 2);
+            overlay->inputFloat("  Min Y", &config.minBounds.y, 0.1f, 2);
+            overlay->inputFloat("  Min Z", &config.minBounds.z, 0.1f, 2);
+            overlay->inputFloat("  Max X", &config.maxBounds.x, 0.1f, 2);
+            overlay->inputFloat("  Max Y", &config.maxBounds.y, 0.1f, 2);
+            overlay->inputFloat("  Max Z", &config.maxBounds.z, 0.1f, 2);
+            
+            overlay->text("Grid Dimensions:");
+            overlay->sliderInt("  X", &config.dimensions.x, 1, 10);
+            overlay->sliderInt("  Y", &config.dimensions.y, 1, 10);
+            overlay->sliderInt("  Z", &config.dimensions.z, 1, 10);
+            
+            int32_t res = static_cast<int32_t>(config.resolution);
+            overlay->sliderInt("Resolution", &res, 4, 256);
+            config.resolution = static_cast<uint32_t>(res);
+            
+            // 计算并显示探针总数
+            int totalProbes = config.dimensions.x * config.dimensions.y * config.dimensions.z;
+            overlay->text("Total Probes: %d", totalProbes);
+        }
+        
+        // 探针可视化开关
+        overlay->checkBox("Show Probes", &showProbes);
+    }
+}
+
+std::vector<std::unique_ptr<LightProbe>> LightProbe::GenerateProbeGrid(
+    vks::VulkanDevice* device,
+    IExampleInterfasce* example,
+    const ProbeGridConfig& config,
+    Skybox* skybox,
+    PreviewModel* previewModel,
+    GltfModel* gltfModel)
+{
+    std::vector<std::unique_ptr<LightProbe>> probes;
+    
+    if (!config.enabled) {
+        std::cout << "[LightProbe::GenerateProbeGrid] Probe grid disabled, creating single center probe" << std::endl;
+        // 创建单个中心探针
+        glm::vec3 center = (config.minBounds + config.maxBounds) * 0.5f;
+        auto probe = std::make_unique<LightProbe>(device, example, 512, 512);
+        probe->SetPosition(center);
+        probe->setSkybox(skybox);
+        probe->setPreviewModel(previewModel);
+        if (gltfModel) probe->SetGltfModel(gltfModel);
+        probes.push_back(std::move(probe));
+        return probes;
+    }
+    
+    // 验证维度
+    glm::ivec3 dims = config.dimensions;
+    if (dims.x <= 0 || dims.y <= 0 || dims.z <= 0) {
+        std::cerr << "[LightProbe::GenerateProbeGrid] Invalid dimensions, using 2x2x2" << std::endl;
+        dims = glm::ivec3(2, 2, 2);
+    }
+    
+    // 计算网格
+    glm::vec3 extent = config.maxBounds - config.minBounds;
+    glm::vec3 cellSize = glm::vec3(
+        extent.x / static_cast<float>(dims.x),
+        extent.y / static_cast<float>(dims.y),
+        extent.z / static_cast<float>(dims.z)
+    );
+    
+    std::cout << "[LightProbe::GenerateProbeGrid] Generating " 
+              << dims.x << "x" << dims.y << "x" << dims.z 
+              << " probe grid (" << (dims.x * dims.y * dims.z) << " total probes)" << std::endl;
+    
+    // 生成探针网格
+    for (int x = 0; x < dims.x; ++x) {
+        for (int y = 0; y < dims.y; ++y) {
+            for (int z = 0; z < dims.z; ++z) {
+                glm::vec3 pos = config.minBounds + (glm::vec3(x, y, z) + 0.5f) * cellSize;
+                auto probe = std::make_unique<LightProbe>(device, example, config.resolution, config.resolution);
+                probe->SetPosition(pos);
+                probe->setSkybox(skybox);
+                probe->setPreviewModel(previewModel);
+                if (gltfModel) probe->SetGltfModel(gltfModel);
+                probes.push_back(std::move(probe));
+            }
+        }
+    }
+    
+    std::cout << "[LightProbe::GenerateProbeGrid] Successfully generated " << probes.size() << " probes" << std::endl;
+    return probes;
+}
+
+void LightProbe::CaptureAllProbes(
+    std::vector<std::unique_ptr<LightProbe>>& probes,
+    VkQueue queue,
+    std::vector<std::shared_ptr<vks::TextureCubeMap>>& cubeMaps,
+    std::vector<std::string>& cubemapNames)
+{
+    if (probes.empty()) {
+        std::cerr << "[LightProbe::CaptureAllProbes] No probes to capture!" << std::endl;
+        return;
+    }
+    
+    std::cout << "[LightProbe::CaptureAllProbes] Starting batch capture for " 
+              << probes.size() << " probes..." << std::endl;
+    
+    for (size_t i = 0; i < probes.size(); ++i) {
+        auto& probe = probes[i];
+        std::cout << "  [" << (i + 1) << "/" << probes.size() << "] Capturing probe at (" 
+                  << probe->GetPosition().x << ", " 
+                  << probe->GetPosition().y << ", " 
+                  << probe->GetPosition().z << ")..." << std::endl;
+        
+        // 执行捕获
+        probe->CaptureCubeMap(queue);
+        
+        // 获取捕获的立方体贴图
+        auto capturedCubemap = probe->GetCubemap();
+        if (!capturedCubemap) {
+            std::cerr << "    Error: Failed to get cubemap for probe " << i << std::endl;
+            continue;
+        }
+        
+        // 添加到全局列表
+        cubeMaps.push_back(capturedCubemap);
+        std::string probeName = "Probe_" + std::to_string(i) + "_pos(" + 
+                                std::to_string(static_cast<int>(probe->GetPosition().x)) + "," +
+                                std::to_string(static_cast<int>(probe->GetPosition().y)) + "," +
+                                std::to_string(static_cast<int>(probe->GetPosition().z)) + ")";
+        cubemapNames.push_back(probeName);
+        
+        std::cout << "    ✓ Captured successfully" << std::endl;
+    }
+    
+    std::cout << "[LightProbe::CaptureAllProbes] ✓ All probes captured successfully!" << std::endl;
 }

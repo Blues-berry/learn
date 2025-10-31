@@ -41,12 +41,13 @@
 // - PreviewModel.h：预览模型类。
 // - fstream：文件流操作（为后续扩展保留）。
 
-// 配置：探针网格参数
-struct ProbeGridConfig {
-    glm::vec3 minBounds{ 5.0f, 0.0f, -5.0f };
-    glm::vec3 maxBounds{ 5.0f, 4.0f, 5.0f };
-    glm::ivec3 dimensions{ 2, 2, 2 };
-    uint32_t resolution{ 4 };
+// ✅ 对比渲染模式
+enum class RenderCompareMode {
+    NORMAL = 0,           // 正常渲染
+    ORIGINAL_ONLY,        // 仅原始环境贴图
+    SINGLE_PROBE,         // 单探针捕获效果
+    MULTI_PROBE,          // 多探针捕获效果
+    SPLIT_VIEW            // 分屏对比
 };
 
 class VulkanExample : public VulkanExampleBase, public IExampleInterfasce
@@ -140,6 +141,9 @@ public:
 
     void CaptureAllProbes();
     // ✅ 新增：自动捕获所有探针的立方体贴图
+    
+    void SetCompareMode(RenderCompareMode mode);
+    // ✅ 设置对比渲染模式
 
     void ReginPrefilterPasses();
     // 声明重新生成预过滤通道函数（未实现）。
@@ -272,6 +276,12 @@ private:
     // ✅ 新增：插值算法选择
     int32_t interpolationModeIndex = 0;  // 0=IDW, 1=Linear, 2=Cubic
     std::vector<std::string> interpolationModeNames = {"IDW", "Linear", "Cubic"};
+    
+    // ✅ 对比渲染
+    RenderCompareMode compareMode = RenderCompareMode::NORMAL;
+    std::shared_ptr<vks::TextureCubeMap> originalCubemap;      // 原始环境贴图
+    std::shared_ptr<vks::TextureCubeMap> singleProbeCubemap;   // 单探针捕获
+    std::shared_ptr<vks::TextureCubeMap> multiProbeCubemap;    // 多探针捕获/插值
 };
 
 // =============================================================================
@@ -546,6 +556,11 @@ void VulkanExample::CaptureAllProbes()
 
     // 等待所有操作完成
     vkDeviceWaitIdle(vulkanDevice->logicalDevice);
+    
+    // ✅ 保存多探针捕获结果用于对比（使用最后一个探针或插值结果）
+    if (!lightProbes.empty()) {
+        multiProbeCubemap = lightProbes.back()->GetCubemap();
+    }
 
     // 更新天空盒为最后一个捕获的探针
     if (!cubeMaps.empty()) {
@@ -637,32 +652,10 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
         if (overlay->button("Capture Cubemap at Camera")) { // 捕获立方体贴图按钮。
             CaptureCubemap(camera.position); // 在相机位置捕获立方体贴图。
         }
-        // Probe grid controls
-        // ✅ 修复：分离 "Use Multiple Probes" 和 "Generate Probes" 的逻辑
-        // 不在勾选时自动调用 PrepareProbes()，而是让用户手动点击 "Generate Probes"
-        if (overlay->checkBox("Use Multiple Probes", &useMultipleProbes)) {
-            if (!useMultipleProbes) {
-                // 取消勾选时清空探针
-                lightProbes.clear();
-            }
-            // 勾选时不自动生成，等待用户点击 "Generate Probes" 按钮
-        }
-
-        if (useMultipleProbes) {
-            float step = 0.1f;
-            overlay->inputFloat("Probe Min X", &probeGridConfig.minBounds.x, step, 3);
-            overlay->inputFloat("Probe Min Y", &probeGridConfig.minBounds.y, step, 3);
-            overlay->inputFloat("Probe Min Z", &probeGridConfig.minBounds.z, step, 3);
-            overlay->inputFloat("Probe Max X", &probeGridConfig.maxBounds.x, step, 3);
-            overlay->inputFloat("Probe Max Y", &probeGridConfig.maxBounds.y, step, 3);
-            overlay->inputFloat("Probe Max Z", &probeGridConfig.maxBounds.z, step, 3);
-            overlay->sliderInt("Probe Dim X", &probeGridConfig.dimensions.x, 1, 20);
-            overlay->sliderInt("Probe Dim Y", &probeGridConfig.dimensions.y, 1, 20);
-            overlay->sliderInt("Probe Dim Z", &probeGridConfig.dimensions.z, 1, 20);
-            int res = static_cast<int>(probeGridConfig.resolution);
-            overlay->sliderInt("Probe Resolution", &res, 4, 256);
-            probeGridConfig.resolution = static_cast<uint32_t>(res);
-
+        // ✅ 使用LightProbe的静态UI方法（包含探针网格配置）
+        LightProbe::ShowProbeGridUI(overlay, probeGridConfig, showProbes);
+        
+        if (probeGridConfig.enabled) {
             // ✅ 修复：现在点击 "Generate Probes" 会真正生成探针
             if (overlay->button("Generate Probes")) {
                 PrepareProbes();
@@ -747,9 +740,34 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
                 }
             }
         }
-
-        // Add toggle for probe visualization
-        overlay->checkBox("Show Probes", &showProbes);
+    }
+    
+    // ✅ 对比渲染模式UI
+    if (overlay->header("Rendering Comparison")) {
+        const char* compareModeNames[] = { "Normal", "Original Only", "Single Probe", "Multi Probe", "Split View" };
+        int currentMode = static_cast<int>(compareMode);
+        if (overlay->comboBox("Compare Mode", &currentMode, std::vector<std::string>(compareModeNames, compareModeNames + 5))) {
+            SetCompareMode(static_cast<RenderCompareMode>(currentMode));
+        }
+        
+        overlay->text("Current Mode:");
+        switch (compareMode) {
+            case RenderCompareMode::NORMAL:
+                overlay->text("  Normal rendering");
+                break;
+            case RenderCompareMode::ORIGINAL_ONLY:
+                overlay->text("  Original environment only");
+                break;
+            case RenderCompareMode::SINGLE_PROBE:
+                overlay->text("  Single probe capture");
+                break;
+            case RenderCompareMode::MULTI_PROBE:
+                overlay->text("  Multi-probe/interpolated");
+                break;
+            case RenderCompareMode::SPLIT_VIEW:
+                overlay->text("  Split view comparison");
+                break;
+        }
     }
 
     previewModel->ShowUI(overlay); // 显示预览模型的 UI 控件。
@@ -758,7 +776,6 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
 // =============================================================================
 // 立方体贴图捕获函数
 // =============================================================================
-
 void VulkanExample::CaptureCubemap(const glm::vec3& position)
 {
     probe = std::make_unique<LightProbe>(vulkanDevice, this, 1024, 1024);
@@ -833,6 +850,67 @@ void VulkanExample::CaptureCubemap(const glm::vec3& position)
     }
 
     lightProbes.push_back(std::move(probe));
-}  
+    
+    // ✅ 保存单探针捕获结果用于对比
+    singleProbeCubemap = capturedCubemap;
+    
+    // 保存第一个cubemap作为original如果还未设置
+    if (!originalCubemap && !cubeMaps.empty()) {
+        originalCubemap = cubeMaps[0];
+    }
+}
+
+// ✅ 对比渲染模式切换
+void VulkanExample::SetCompareMode(RenderCompareMode mode)
+{
+    compareMode = mode;
+    
+    // 根据模式切换环境贴图
+    switch (mode) {
+        case RenderCompareMode::ORIGINAL_ONLY:
+            if (!originalCubemap && !cubeMaps.empty()) {
+                originalCubemap = cubeMaps[0]; // 假设第一个是原始贴图
+            }
+            if (originalCubemap) {
+                skybox->UpdateCubemap(originalCubemap);
+                shGenPass->SetCubeMap(originalCubemap);
+                genIBL->SetCubeMap(originalCubemap);
+            }
+            break;
+            
+        case RenderCompareMode::SINGLE_PROBE:
+            if (singleProbeCubemap) {
+                skybox->UpdateCubemap(singleProbeCubemap);
+                shGenPass->SetCubeMap(singleProbeCubemap);
+                genIBL->SetCubeMap(singleProbeCubemap);
+            }
+            break;
+            
+        case RenderCompareMode::MULTI_PROBE:
+            if (multiProbeCubemap) {
+                skybox->UpdateCubemap(multiProbeCubemap);
+                shGenPass->SetCubeMap(multiProbeCubemap);
+                genIBL->SetCubeMap(multiProbeCubemap);
+            }
+            break;
+            
+        case RenderCompareMode::NORMAL:
+        case RenderCompareMode::SPLIT_VIEW:
+        default:
+            // 保持当前
+            break;
+    }
+    
+    // 重新生成SH和IBL
+    if (mode != RenderCompareMode::NORMAL && mode != RenderCompareMode::SPLIT_VIEW) {
+        VkCommandBuffer cmdBuf = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
+        shGenPass->Draw(cmdBuf);
+        genIBL->Draw(cmdBuf);
+        vulkanDevice->flushCommandBuffer(cmdBuf, queue);
+        mainPass->UpdateBindings();
+    }
+    
+    std::cout << "[VulkanExample] Compare mode set to: " << static_cast<int>(mode) << std::endl;
+}
    
 VULKAN_EXAMPLE_MAIN()
