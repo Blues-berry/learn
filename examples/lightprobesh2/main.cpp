@@ -169,6 +169,9 @@ public:
 
     void drawFrame(VkCommandBuffer cmd);
     // 声明绘制单帧函数，记录渲染命令。
+    
+    void drawSplitView(VkCommandBuffer cmd);
+    // ✅ 分屏对比渲染：同时显示原始、单探针、多探针效果
 
     void prepareData();
     // 声明准备数据函数，更新相机和全局数据。
@@ -590,8 +593,11 @@ void VulkanExample::prepareData()
 
 void VulkanExample::drawFrame(VkCommandBuffer cmd)
 {
-    // ✅ 删除：不应该在每帧都捕获立方体贴图
-    // 捕获应该只在用户点击按钮时执行（在 CaptureCubemap() 中）
+    // ✅ 根据对比模式选择渲染方式
+    if (compareMode == RenderCompareMode::SPLIT_VIEW) {
+        drawSplitView(cmd);
+        return;
+    }
 
     // 绘制单帧。
     mainPass->Draw(cmd, frameBuffers[currentBuffer], width, height, [this](VkCommandBuffer cmd) {
@@ -601,8 +607,6 @@ void VulkanExample::drawFrame(VkCommandBuffer cmd)
         if (gltfModel) { gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); } // ✅ 添加空指针检查
         for (auto& m : gltfClones) { m->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
 
-        // ✅ 修复：删除重复的数据更新，数据已在prepareData中更新
-
         // 新增：渲染探针为球体
         if (showProbes) {
             for (const auto& probe : lightProbes) {
@@ -611,6 +615,122 @@ void VulkanExample::drawFrame(VkCommandBuffer cmd)
         }
 
         drawUI(cmd); // 绘制 UI（基类方法）。
+    });
+}
+
+// ✅ 分屏对比渲染实现（简化版本）
+void VulkanExample::drawSplitView(VkCommandBuffer cmd)
+{
+    // 保存原始设置
+    auto savedCubemap = cubeMaps[skyboxIndex];
+    
+    // 计算每个视口的宽度（三分屏：原始 | 单探针 | 多探针）
+    uint32_t viewportWidth = width / 3;
+    
+    mainPass->Draw(cmd, frameBuffers[currentBuffer], width, height, [this, viewportWidth, savedCubemap](VkCommandBuffer cmd) {
+        // === 左侧：原始环境 ===
+        if (originalCubemap) {
+            VkViewport viewport{};
+            viewport.x = 0.0f;
+            viewport.y = 0.0f;
+            viewport.width = static_cast<float>(viewportWidth);
+            viewport.height = static_cast<float>(height);
+            viewport.minDepth = 0.0f;
+            viewport.maxDepth = 1.0f;
+            
+            VkRect2D scissor{};
+            scissor.offset = {0, 0};
+            scissor.extent = {viewportWidth, height};
+            
+            vkCmdSetViewport(cmd, 0, 1, &viewport);
+            vkCmdSetScissor(cmd, 0, 1, &scissor);
+            
+            // 临时切换到原始cubemap
+            skybox->UpdateCubemap(originalCubemap);
+            skybox->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
+            previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
+            if (gltfModel) { gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
+            for (auto& m : gltfClones) { m->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
+        }
+        
+        // === 中间：单探针捕获 ===
+        if (singleProbeCubemap) {
+            VkViewport viewport{};
+            viewport.x = static_cast<float>(viewportWidth);
+            viewport.y = 0.0f;
+            viewport.width = static_cast<float>(viewportWidth);
+            viewport.height = static_cast<float>(height);
+            viewport.minDepth = 0.0f;
+            viewport.maxDepth = 1.0f;
+            
+            VkRect2D scissor{};
+            scissor.offset = {static_cast<int32_t>(viewportWidth), 0};
+            scissor.extent = {viewportWidth, height};
+            
+            vkCmdSetViewport(cmd, 0, 1, &viewport);
+            vkCmdSetScissor(cmd, 0, 1, &scissor);
+            
+            // 临时切换到单探针cubemap
+            skybox->UpdateCubemap(singleProbeCubemap);
+            skybox->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
+            previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
+            if (gltfModel) { gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
+            for (auto& m : gltfClones) { m->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
+        }
+        
+        // === 右侧：多探针捕获/插值 ===
+        if (multiProbeCubemap) {
+            VkViewport viewport{};
+            viewport.x = static_cast<float>(viewportWidth * 2);
+            viewport.y = 0.0f;
+            viewport.width = static_cast<float>(viewportWidth);
+            viewport.height = static_cast<float>(height);
+            viewport.minDepth = 0.0f;
+            viewport.maxDepth = 1.0f;
+            
+            VkRect2D scissor{};
+            scissor.offset = {static_cast<int32_t>(viewportWidth * 2), 0};
+            scissor.extent = {viewportWidth, height};
+            
+            vkCmdSetViewport(cmd, 0, 1, &viewport);
+            vkCmdSetScissor(cmd, 0, 1, &scissor);
+            
+            // 临时切换到多探针cubemap
+            skybox->UpdateCubemap(multiProbeCubemap);
+            skybox->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
+            previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
+            if (gltfModel) { gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
+            for (auto& m : gltfClones) { m->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
+            
+            // 在多探针视图中显示探针位置
+            if (showProbes) {
+                for (const auto& probe : lightProbes) {
+                    probe->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
+                }
+            }
+        }
+        
+        // 恢复全屏viewport和scissor用于UI
+        VkViewport fullViewport{};
+        fullViewport.x = 0.0f;
+        fullViewport.y = 0.0f;
+        fullViewport.width = static_cast<float>(width);
+        fullViewport.height = static_cast<float>(height);
+        fullViewport.minDepth = 0.0f;
+        fullViewport.maxDepth = 1.0f;
+        
+        VkRect2D fullScissor{};
+        fullScissor.offset = {0, 0};
+        fullScissor.extent = {width, height};
+        
+        vkCmdSetViewport(cmd, 0, 1, &fullViewport);
+        vkCmdSetScissor(cmd, 0, 1, &fullScissor);
+        
+        // 恢复原始cubemap
+        skybox->UpdateCubemap(savedCubemap);
+        
+        // 绘制UI
+        drawUI(cmd);
     });
 }
 
@@ -765,8 +885,33 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
                 overlay->text("  Multi-probe/interpolated");
                 break;
             case RenderCompareMode::SPLIT_VIEW:
-                overlay->text("  Split view comparison");
+                overlay->text("  Split view (3-way)");
+                overlay->text("  Left: Original | Middle: Single | Right: Multi");
+                
+                // 显示每个cubemap的状态
+                overlay->text("Status:");
+                overlay->text("  Original: %s", originalCubemap ? "Ready" : "Not captured");
+                overlay->text("  Single: %s", singleProbeCubemap ? "Ready" : "Not captured");
+                overlay->text("  Multi: %s", multiProbeCubemap ? "Ready" : "Not captured");
+                
+                if (!originalCubemap || !singleProbeCubemap || !multiProbeCubemap) {
+                    overlay->text("Tip: Capture all modes first!");
+                }
                 break;
+        }
+        
+        // 快速捕获按钮
+        if (compareMode == RenderCompareMode::SPLIT_VIEW) {
+            if (overlay->button("Quick Setup Split View")) {
+                // 自动捕获所需的cubemap
+                if (!originalCubemap && !cubeMaps.empty()) {
+                    originalCubemap = cubeMaps[0];
+                }
+                if (!singleProbeCubemap) {
+                    CaptureCubemap(camera.position);
+                }
+                std::cout << "[VulkanExample] Split view setup complete!" << std::endl;
+            }
         }
     }
 
