@@ -1,11 +1,19 @@
 #include "gltfload.h"
 #include "VulkanDevice.h"
 #include <glm/gtc/matrix_transform.hpp>
+#include <iostream>
+#include <cstring>
 
-GltfModel::GltfModel(vks::VulkanDevice* dev, IExampleInterfasce* example) : device(dev), iLoader(example)
+GltfModel::GltfModel(vks::VulkanDevice* dev, IExampleInterfasce* example, VkQueue queue) 
+	: device(dev), iLoader(example), copyQueue(queue)
 {
 	PreparePerBatchResource();
 	UpdateSet();
+}
+
+GltfModel::~GltfModel()
+{
+	Destroy();
 }
 
 void GltfModel::UpdateModel(const std::shared_ptr<vkglTF::Model>& model_)
@@ -18,6 +26,26 @@ void GltfModel::Destroy()
 	localBuffer.destroy();
 	materialBuffer.destroy();
 	model = nullptr;
+	
+	// ✅ 清理纹理资源
+	for (auto& image : images) {
+		if (image.texture.view != VK_NULL_HANDLE) {
+			vkDestroyImageView(device->logicalDevice, image.texture.view, nullptr);
+		}
+		if (image.texture.image != VK_NULL_HANDLE) {
+			vkDestroyImage(device->logicalDevice, image.texture.image, nullptr);
+		}
+		if (image.texture.sampler != VK_NULL_HANDLE) {
+			vkDestroySampler(device->logicalDevice, image.texture.sampler, nullptr);
+		}
+		if (image.texture.deviceMemory != VK_NULL_HANDLE) {
+			vkFreeMemory(device->logicalDevice, image.texture.deviceMemory, nullptr);
+		}
+	}
+	images.clear();
+	textures.clear();
+	materials.clear();
+	
 	if (descriptorPool != VK_NULL_HANDLE)
 	{
 		vkDestroyDescriptorPool(device->logicalDevice, descriptorPool, nullptr);
@@ -43,7 +71,6 @@ void GltfModel::Destroy()
 			tech.pso = VK_NULL_HANDLE;
 		}
 	}
-
 }
 
 void GltfModel::Draw(VkCommandBuffer cmd, VkDescriptorSet globalSet, ETechnique tech)
@@ -299,6 +326,7 @@ void GltfModel::ShowUI(vks::UIOverlay* overlay)
 		materialDirty |= overlay->colorPicker("elbedo", &materialData.elbedo.r);
 		materialDirty |= overlay->checkBox("UseSH", &materialData.useSH);
 		materialDirty |= overlay->checkBox("UseReflection", &materialData.useReflection);
+		materialDirty |= overlay->checkBox("UseTexture", &materialData.useTexture);
 	}
 
 	if (materialDirty)
@@ -306,4 +334,138 @@ void GltfModel::ShowUI(vks::UIOverlay* overlay)
 		memcpy(materialBuffer.mapped, &materialData, sizeof(MaterialBuffer));
 		materialDirty = false;
 	}
+}
+
+// =============================================================================
+// 纹理加载方法（参考gltfloading.cpp）
+// =============================================================================
+
+void GltfModel::loadImages(tinygltf::Model& input)
+{
+	images.resize(input.images.size());
+	for (size_t i = 0; i < input.images.size(); i++) {
+		tinygltf::Image& glTFImage = input.images[i];
+		unsigned char* buffer = nullptr;
+		VkDeviceSize bufferSize = 0;
+		bool deleteBuffer = false;
+		
+		// 将RGB转换为RGBA
+		if (glTFImage.component == 3) {
+			bufferSize = glTFImage.width * glTFImage.height * 4;
+			buffer = new unsigned char[bufferSize];
+			unsigned char* rgba = buffer;
+			unsigned char* rgb = &glTFImage.image[0];
+			for (size_t j = 0; j < glTFImage.width * glTFImage.height; ++j) {
+				memcpy(rgba, rgb, sizeof(unsigned char) * 3);
+				rgba += 4;
+				rgb += 3;
+			}
+			deleteBuffer = true;
+		}
+		else {
+			buffer = &glTFImage.image[0];
+			bufferSize = glTFImage.image.size();
+		}
+		
+		// 加载纹理到Vulkan
+		images[i].texture.fromBuffer(buffer, bufferSize, VK_FORMAT_R8G8B8A8_UNORM, 
+		                             glTFImage.width, glTFImage.height, device, copyQueue);
+		
+		if (deleteBuffer) {
+			delete[] buffer;
+		}
+	}
+	
+	std::cout << "[GltfModel::loadImages] Loaded " << images.size() << " images" << std::endl;
+}
+
+void GltfModel::loadTextures(tinygltf::Model& input)
+{
+	textures.resize(input.textures.size());
+	for (size_t i = 0; i < input.textures.size(); i++) {
+		textures[i].imageIndex = input.textures[i].source;
+	}
+	
+	std::cout << "[GltfModel::loadTextures] Loaded " << textures.size() << " texture references" << std::endl;
+}
+
+void GltfModel::loadMaterials(tinygltf::Model& input)
+{
+	materials.resize(input.materials.size());
+	for (size_t i = 0; i < input.materials.size(); i++) {
+		tinygltf::Material glTFMaterial = input.materials[i];
+		
+		// 获取基础颜色因子
+		if (glTFMaterial.values.find("baseColorFactor") != glTFMaterial.values.end()) {
+			materials[i].baseColorFactor = glm::make_vec4(
+				glTFMaterial.values["baseColorFactor"].ColorFactor().data());
+		}
+		
+		// 获取基础颜色纹理索引
+		if (glTFMaterial.values.find("baseColorTexture") != glTFMaterial.values.end()) {
+			materials[i].baseColorTextureIndex = 
+				glTFMaterial.values["baseColorTexture"].TextureIndex();
+		}
+		
+		// 获取粗糙度
+		if (glTFMaterial.values.find("roughnessFactor") != glTFMaterial.values.end()) {
+			materials[i].roughness = 
+				static_cast<float>(glTFMaterial.values["roughnessFactor"].Factor());
+		}
+		
+		// 获取金属度
+		if (glTFMaterial.values.find("metallicFactor") != glTFMaterial.values.end()) {
+			materials[i].metallic = 
+				static_cast<float>(glTFMaterial.values["metallicFactor"].Factor());
+		}
+	}
+	
+	std::cout << "[GltfModel::loadMaterials] Loaded " << materials.size() << " materials" << std::endl;
+}
+
+void GltfModel::LoadModelWithTextures(const std::string& filename, uint32_t fileLoadingFlags)
+{
+	std::cout << "[GltfModel::LoadModelWithTextures] Loading: " << filename << std::endl;
+	
+	// 使用tinygltf加载glTF文件以获取纹理数据
+	tinygltf::TinyGLTF loader;
+	std::string error, warning;
+	
+	bool fileLoaded = loader.LoadASCIIFromFile(&gltfInput, &error, &warning, filename);
+	
+	if (!fileLoaded) {
+		std::cerr << "[GltfModel] Failed to load glTF file: " << filename << std::endl;
+		if (!error.empty()) {
+			std::cerr << "  Error: " << error << std::endl;
+		}
+		if (!warning.empty()) {
+			std::cerr << "  Warning: " << warning << std::endl;
+		}
+		return;
+	}
+	
+	// 加载纹理数据
+	loadImages(gltfInput);
+	loadTextures(gltfInput);
+	loadMaterials(gltfInput);
+	
+	// 使用vkglTF加载几何数据
+	auto vkModel = std::make_shared<vkglTF::Model>();
+	vkModel->loadFromFile(filename, device, copyQueue, fileLoadingFlags);
+	UpdateModel(vkModel);
+	
+	// 更新材质参数（使用第一个材质）
+	if (!materials.empty()) {
+		materialData.roughness = materials[0].roughness;
+		materialData.metallic = materials[0].metallic;
+		materialData.elbedo = materials[0].baseColorFactor;
+		materialData.useTexture = (materials[0].baseColorTextureIndex >= 0) ? 1 : 0;
+		memcpy(materialBuffer.mapped, &materialData, sizeof(MaterialBuffer));
+		
+		std::cout << "[GltfModel] Material 0: roughness=" << materials[0].roughness 
+		          << ", metallic=" << materials[0].metallic 
+		          << ", hasTexture=" << (materials[0].baseColorTextureIndex >= 0 ? "yes" : "no") << std::endl;
+	}
+	
+	std::cout << "[GltfModel::LoadModelWithTextures] ✓ Completed" << std::endl;
 }

@@ -336,7 +336,7 @@ void VulkanExample::PrepareScene()
 
     // ✅ 准备gltfModel - 为MainPass和CapturePass都准备PSO
     if (!gltfModels.empty()) {
-        gltfModel = std::make_unique<GltfModel>(vulkanDevice, this); // 创建 glTF 模型对象。
+        gltfModel = std::make_unique<GltfModel>(vulkanDevice, this, queue); // 创建 glTF 模型对象，传入queue用于纹理加载
         gltfModel->PreparePSO(renderPass, mainPass->descriptorSetLayout, ETechnique::MAIN); // 为MainPass准备PSO
         gltfModel->PreparePSO(capturePass->renderPass, capturePass->descriptorSetLayout, ETechnique::CAPTURE_SCENE); // 为CapturePass准备PSO
         gltfModel->UpdateModel(gltfModels[gltfmodelIndex]); // 设置第一个模型
@@ -931,7 +931,7 @@ void VulkanExample::CaptureCubemap(const glm::vec3& position)
     // ✅ 使用已经存在的 gltfModel（在 PrepareScene 中创建）
     // 如果 gltfModel 不存在，则创建一个新的
     if (!gltfModel) {
-        gltfModel = std::make_unique<GltfModel>(vulkanDevice, this);
+        gltfModel = std::make_unique<GltfModel>(vulkanDevice, this, queue); // 传入queue用于纹理加载
         gltfModel->UpdateModel(previewModel->getModel());
 
         // ✅ 为MAIN技术准备PSO（用于主渲染）
