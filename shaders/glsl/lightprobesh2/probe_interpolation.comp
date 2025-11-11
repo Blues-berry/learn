@@ -201,6 +201,7 @@ void main() {
     vec3 queryPos = probeBuffer.queryPosition.xyz;
     
     // 根据插值模式选择插值方法
+    // TOFIX 可以考虑替换掉if 使用更高效的方式
     vec4 interpolatedColor;
     if (probeBuffer.interpolationMode == 0u) {
         // IDW 插值

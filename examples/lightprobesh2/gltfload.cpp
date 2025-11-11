@@ -27,7 +27,7 @@ void GltfModel::Destroy()
 	materialBuffer.destroy();
 	model = nullptr;
 	
-	// ✅ 清理纹理资源
+	// 清理纹理资源
 	for (auto& image : images) {
 		if (image.texture.view != VK_NULL_HANDLE) {
 			vkDestroyImageView(device->logicalDevice, image.texture.view, nullptr);
@@ -82,7 +82,7 @@ void GltfModel::Draw(VkCommandBuffer cmd, VkDescriptorSet globalSet, ETechnique 
 
 	uint32_t techIdx = (uint32_t)tech;
 
-	// ✅ 安全检查：确保 PSO 已经准备好
+	// 安全检查：确保 PSO 已经准备好
 	if (techniques[techIdx].pso == VK_NULL_HANDLE || techniques[techIdx].pipelineLayout == VK_NULL_HANDLE)
 	{
 		std::cerr << "GltfModel::Draw - PSO not prepared for technique " << techIdx << "\n";

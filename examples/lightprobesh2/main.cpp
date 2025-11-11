@@ -41,7 +41,7 @@
 // - PreviewModel.h：预览模型类。
 // - fstream：文件流操作（为后续扩展保留）。
 
-// ✅ 对比渲染模式
+// 对比渲染模式设置
 enum class RenderCompareMode {
     NORMAL = 0,           // 正常渲染
     ORIGINAL_ONLY,        // 仅原始环境贴图
@@ -140,10 +140,10 @@ public:
     // 声明捕获立方体贴图函数，在指定位置生成新的立方体贴图。
 
     void CaptureAllProbes();
-    // ✅ 新增：自动捕获所有探针的立方体贴图
+    // 自动捕获所有探针的立方体贴图
     
     void SetCompareMode(RenderCompareMode mode);
-    // ✅ 设置对比渲染模式
+    // 设置对比渲染模式
 
     void ReginPrefilterPasses();
     // 声明重新生成预过滤通道函数（未实现）。
@@ -171,7 +171,7 @@ public:
     // 声明绘制单帧函数，记录渲染命令。
     
     void drawSplitView(VkCommandBuffer cmd);
-    // ✅ 分屏对比渲染：同时显示原始、单探针、多探针效果
+    // 分屏对比渲染：同时显示原始、单探针、多探针效果
 
     void prepareData();
     // 声明准备数据函数，更新相机和全局数据。
@@ -195,7 +195,7 @@ public:
         submitInfo.commandBufferCount = 1; // 设置提交的命令缓冲区数量。
         submitInfo.pCommandBuffers = &cmdBuffer; // 指定命令缓冲区。
         VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE)); // 提交命令到队列。
-        VulkanExampleBase::submitFrame(); // 提交帧（基类方法，可能包括呈现交换链）。
+        VulkanExampleBase::submitFrame(); // 提交帧（基类方法，包括呈现交换链）。
     }
 
     void OnUpdateUIOverlay(vks::UIOverlay* overlay) override;
@@ -273,14 +273,14 @@ private:
 
     bool showProbes = false; // Toggle for visualizing probes
 
-    // ✅ 新增：立方体贴图插值
+    // 立方体贴图插值
     std::unique_ptr<CubemapInterpolation> cubemapInterpolation;
 
-    // ✅ 新增：插值算法选择
+    // 插值算法选择
     int32_t interpolationModeIndex = 0;  // 0=IDW, 1=Linear, 2=Cubic
     std::vector<std::string> interpolationModeNames = {"IDW", "Linear", "Cubic"};
     
-    // ✅ 对比渲染
+    // 对比渲染
     RenderCompareMode compareMode = RenderCompareMode::NORMAL;
     std::shared_ptr<vks::TextureCubeMap> originalCubemap;      // 原始环境贴图
     std::shared_ptr<vks::TextureCubeMap> singleProbeCubemap;   // 单探针捕获
@@ -309,17 +309,13 @@ void VulkanExample::LoadAssets()
     LoadPreviewModel("sibenik", "models/sibenik.gltf", glTFLoadingFlags); // 加载维纳斯模型。
     LoadPreviewModel("fireplace", "models/fireplace.gltf", glTFLoadingFlags); // 加载维纳斯模型。
     LoadPreviewModel("glowsphere", "models/glowsphere.gltf", glTFLoadingFlags); // 加载维纳斯模型。
-    LoadPreviewModel("rock01", "models/rock01.gltf", glTFLoadingFlags); // 加载维纳斯模型。
+    LoadPreviewModel("rock01", "models/rock01.gltf", glTFLoadingFlags); // 加载模型。
 
    
     LoadgltfModel("FlightHelmet", "models/FlightHelmet/glTF/FlightHelmet.gltf", glTFLoadingFlags); // 
     LoadgltfModel("CesiumMan", "models/CesiumMan/glTF/CesiumMan.gltf", glTFLoadingFlags); // 
     skyboxModel = std::make_shared<vkglTF::Model>(); // 创建天空盒模型对象。
     skyboxModel->loadFromFile(getAssetPath() + "models/cube.gltf", vulkanDevice, queue, glTFLoadingFlags); // 加载立方体模型作为天空盒。
-    
-    // auto gltfModel = std::make_shared<vkglTF::Model>(); // 创建 glTF 模型对象。
-    // gltfModel->loadFromFile(getAssetPath() + "models/FlightHelmet/glTF/FlightHelmet.gltf", vulkanDevice, queue, glTFLoadingFlags); // 从文件加载模型。
-
 }
 
 void VulkanExample::PrepareScene()
@@ -334,17 +330,14 @@ void VulkanExample::PrepareScene()
     previewModel->PreparePSO(renderPass, mainPass->descriptorSetLayout, ETechnique::MAIN); // 准备预览模型的 PSO。
     previewModel->UpdateModel(previewModels[modelIndex]); // 设置初始预览模型。
 
-    // ✅ 准备gltfModel - 为MainPass和CapturePass都准备PSO
+    // 准备gltfModel - 为MainPass和CapturePass都准备PSO
     if (!gltfModels.empty()) {
         gltfModel = std::make_unique<GltfModel>(vulkanDevice, this, queue); // 创建 glTF 模型对象，传入queue用于纹理加载
         gltfModel->PreparePSO(renderPass, mainPass->descriptorSetLayout, ETechnique::MAIN); // 为MainPass准备PSO
         gltfModel->PreparePSO(capturePass->renderPass, capturePass->descriptorSetLayout, ETechnique::CAPTURE_SCENE); // 为CapturePass准备PSO
         gltfModel->UpdateModel(gltfModels[gltfmodelIndex]); // 设置第一个模型
 
-        // 设置gltfModel的位置和缩放
-        glm::mat4 t = glm::translate(glm::mat4(1.0f), glm::vec3(-20.0f, 0.0f, 0.0f));
-        glm::mat4 s = glm::scale(glm::mat4(1.0f), glm::vec3(2.0f));
-        gltfModel->SetTransform(t * s);
+
     }
 }
 
@@ -418,12 +411,9 @@ void VulkanExample::PreparePasses()
     // 准备所有渲染通道。
     mainPass = std::make_unique<MainPass>(vulkanDevice); // 创建主渲染通道。
     mainPass->SetUp(renderPass); // 设置主渲染通道的渲染通道对象。
-
-
     // 创建 capturePass（1024×1024，R16G16B16A16_SFLOAT）
     capturePass = std::make_unique<CaptureScenePass>(vulkanDevice, this, VK_FORMAT_R16G16B16A16_SFLOAT, 1024, 1024);
 
-    
     brdfPass = std::make_unique<GenBRDFLutPass>(vulkanDevice, this); // 创建 BRDF 查找表生成通道。
     brdfPass->Prepare(); // 准备 BRDF 通道资源。
     brdfPass->FeedDescriptor(mainPass->environmemts.brdfView); // 设置主渲染通道的 BRDF 描述符。
@@ -441,7 +431,7 @@ void VulkanExample::PreparePasses()
     genIBL->FeedIrradianceMap(mainPass->environmemts.irradianceCube); // 设置主渲染通道的辐照度贴图描述符。
     genIBL->FeedPrefilteredMap(mainPass->environmemts.prefilteredCube); // 设置主渲染通道的预过滤贴图描述符。
 
-    // 执行一次 BRDF、球谐和 IBL 的渲染。
+    // 执行一次 BRDF、球谐和 IBL 的渲染。否则初始会是黑球
     {
         VkCommandBuffer cmdBuf = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true); // 创建主命令缓冲区。
         brdfPass->Draw(cmdBuf); // 绘制 BRDF 查找表。
@@ -454,7 +444,7 @@ void VulkanExample::PreparePasses()
 
 void VulkanExample::ReginPrefilterPasses()
 {
-    // 重新生成预过滤通道（未实现）。
+    // 重新生成预过滤通道（TODO）。
 }
 
 // =============================================================================
@@ -469,7 +459,8 @@ void VulkanExample::PrepareProbes()
     }
     lightProbes.clear();
 
-    // ✅ 新增：初始化立方体贴图插值对象（支持GPU加速）
+    // 初始化立方体贴图插值对象（支持GPU加速）
+    // 在多探针模式下，插值后再次插值将销毁之前所有探针
     if (!cubemapInterpolation) {
         cubemapInterpolation = std::make_unique<CubemapInterpolation>(vulkanDevice, this);
     } else {
@@ -481,7 +472,7 @@ void VulkanExample::PrepareProbes()
     glm::vec3 minB = probeGridConfig.minBounds;
     glm::vec3 maxB = probeGridConfig.maxBounds;
     glm::ivec3 dims = probeGridConfig.dimensions;
-    // ✅ 修改：多探针模式使用 16×16 分辨率
+    // 多探针模式使用 16×16 分辨率
     uint32_t res = 16;
 
     if (dims.x <= 0 || dims.y <= 0 || dims.z <= 0) {
@@ -519,7 +510,7 @@ void VulkanExample::PrepareProbes()
     }
 }
 
-// ✅ 新增：自动捕获所有探针的立方体贴图
+// 自动捕获所有探针的立方体贴图
 void VulkanExample::CaptureAllProbes()
 {
     if (lightProbes.empty()) {
@@ -533,38 +524,32 @@ void VulkanExample::CaptureAllProbes()
     for (size_t i = 0; i < lightProbes.size(); ++i) {
         auto& p = lightProbes[i];
         std::cout << "  Capturing probe " << (i + 1) << "/" << lightProbes.size() << "..." << std::endl;
-
         // 执行捕获
         p->CaptureCubeMap(queue);
-
         // 获取捕获的立方体贴图
         auto capturedCubemap = p->GetCubemap();
         if (!capturedCubemap) {
             std::cerr << "    Error: Failed to get cubemap for probe " << i << std::endl;
             continue;
         }
-
         // 添加到全局 cubeMaps 列表
         cubeMaps.push_back(capturedCubemap);
         std::string probeName = "Probe_" + std::to_string(i) + "_" + std::to_string(cubeMaps.size() - 1);
         cubemapNames.push_back(probeName);
-
-        // ✅ 新增：添加到插值对象
+        // 添加到插值对象
         if (cubemapInterpolation) {
             cubemapInterpolation->AddProbe(p->GetPosition(), capturedCubemap);
         }
-
         std::cout << "    ✓ Probe " << i << " captured successfully" << std::endl;
     }
-
     // 等待所有操作完成
     vkDeviceWaitIdle(vulkanDevice->logicalDevice);
-    
-    // ✅ 保存多探针捕获结果用于对比（使用最后一个探针或插值结果）
+    // 保存多探针捕获结果用于对比（使用最后一个探针或插值结果）
+    // 此处直接用最后一个可能有bug
+    // (TO FIX)
     if (!lightProbes.empty()) {
         multiProbeCubemap = lightProbes.back()->GetCubemap();
     }
-
     // 更新天空盒为最后一个捕获的探针
     if (!cubeMaps.empty()) {
         skyboxIndex = static_cast<int>(cubeMaps.size() - 1);
@@ -580,11 +565,11 @@ void VulkanExample::CaptureAllProbes()
 void VulkanExample::prepareData()
 {
     // 准备渲染数据。
-    // ✅ 修复：使用分开的 projection 和 view 矩阵，与着色器匹配
+    // 使用分开的 projection 和 view 矩阵，与着色器匹配
     mainPassData.projection = camera.matrices.perspective;
     mainPassData.view = camera.matrices.view;
     mainPassData.cameraPos = glm::vec4(camera.position, 1.0f); // 设置相机位置（齐次坐标）。
-    mainPassData.light[0] = glm::vec4(10.0f, 10.0f, 10.0f, 1.0f); // ✅ 设置光源位置
+    mainPassData.light[0] = glm::vec4(10.0f, 10.0f, 10.0f, 1.0f); // 设置光源位置
 
     mainPass->UpdateGlobal(mainPassData); // 更新主渲染通道的全局 UBO 数据。
 
@@ -593,7 +578,7 @@ void VulkanExample::prepareData()
 
 void VulkanExample::drawFrame(VkCommandBuffer cmd)
 {
-    // ✅ 根据对比模式选择渲染方式
+    // 根据对比模式选择渲染方式
     if (compareMode == RenderCompareMode::SPLIT_VIEW) {
         drawSplitView(cmd);
         return;
@@ -604,10 +589,11 @@ void VulkanExample::drawFrame(VkCommandBuffer cmd)
         // 匿名函数：记录绘制命令。
         skybox->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); // 绘制天空盒。
         previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); // 绘制预览模型。
-        if (gltfModel) { gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); } // ✅ 添加空指针检查
+        if (gltfModel) { gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); } // 添加空指针检查
         for (auto& m : gltfClones) { m->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
 
-        // 新增：渲染探针为球体
+        // 渲染探针为球体
+        // TO FIX(探针可视化有问题)
         if (showProbes) {
             for (const auto& probe : lightProbes) {
                 probe->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
@@ -618,15 +604,16 @@ void VulkanExample::drawFrame(VkCommandBuffer cmd)
     });
 }
 
-// ✅ 分屏对比渲染实现（简化版本）
+// 分屏对比渲染实现（简化版本）
 void VulkanExample::drawSplitView(VkCommandBuffer cmd)
 {
     // 保存原始设置
     auto savedCubemap = cubeMaps[skyboxIndex];
     
     // 计算每个视口的宽度（三分屏：原始 | 单探针 | 多探针）
+    // TOFIX(分屏尺寸不对)
     uint32_t viewportWidth = width / 3;
-    
+    // uint32_t viewportHeight = height / 3;
     mainPass->Draw(cmd, frameBuffers[currentBuffer], width, height, [this, viewportWidth, savedCubemap](VkCommandBuffer cmd) {
         // === 左侧：原始环境 ===
         if (originalCubemap) {
@@ -772,21 +759,21 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
         if (overlay->button("Capture Cubemap at Camera")) { // 捕获立方体贴图按钮。
             CaptureCubemap(camera.position); // 在相机位置捕获立方体贴图。
         }
-        // ✅ 使用LightProbe的静态UI方法（包含探针网格配置）
+        // 使用LightProbe的静态UI方法（包含探针网格配置）
         LightProbe::ShowProbeGridUI(overlay, probeGridConfig, showProbes);
         
         if (probeGridConfig.enabled) {
-            // ✅ 修复：现在点击 "Generate Probes" 会真正生成探针
+            // 点击 "Generate Probes" 会生成探针
             if (overlay->button("Generate Probes")) {
                 PrepareProbes();
             }
 
-            // ✅ 新增：自动捕获所有探针的按钮
+            // 动捕获所有探针的按钮
             if (overlay->button("Capture All Probes")) {
                 CaptureAllProbes();
             }
 
-            // ✅ 新增：插值算法选择
+            // 插值算法选择
             if (overlay->comboBox("Interpolation Mode", &interpolationModeIndex, interpolationModeNames)) {
                 if (cubemapInterpolation) {
                     auto mode = static_cast<CubemapInterpolation::InterpolationMode>(interpolationModeIndex);
@@ -795,7 +782,7 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
                 }
             }
 
-            // ✅ 新增：立方体贴图插值按钮（支持GPU加速和多种算法）
+            // 立方体贴图插值按钮（支持GPU加速和多种算法）
             if (overlay->button("Interpolate Cubemap (GPU)")) {
                 if (cubemapInterpolation && cubemapInterpolation->GetProbeCount() > 0) {
                     // 在相机位置进行插值，使用GPU加速，分辨率256x256
@@ -810,15 +797,19 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
                         cubemapNames.push_back("Interpolated_" + interpolationModeNames[interpolationModeIndex] + "_" + std::to_string(cubeMaps.size() - 1));
                         skyboxIndex = static_cast<int>(cubeMaps.size() - 1);
                         UpdateSkyBox();
+                        // 更新天空盒(用于multiview)
+                        multiProbeCubemap = interpolatedCubemap;
                         std::cout << "[VulkanExample] GPU-accelerated interpolated cubemap created using "
                                   << interpolationModeNames[interpolationModeIndex] << " at camera position" << std::endl;
-                    }
+                    
+                                }
                 } else {
                     std::cerr << "[VulkanExample] No probes available for interpolation!" << std::endl;
                 }
+                
             }
 
-            // ✅ 新增：权重可视化按钮
+            // 权重可视化按钮
             if (overlay->button("Visualize Weights (Heatmap)")) {
                 if (cubemapInterpolation && cubemapInterpolation->GetProbeCount() > 0) {
                     // 可视化权重热力图
@@ -839,7 +830,7 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
                 }
             }
 
-            // ✅ 新增：显示最近探针ID的可视化
+            // 显示最近探针ID的可视化
             if (overlay->button("Visualize Closest Probe ID")) {
                 if (cubemapInterpolation && cubemapInterpolation->GetProbeCount() > 0) {
                     // 可视化最近探针的ID
@@ -862,7 +853,7 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
         }
     }
     
-    // ✅ 对比渲染模式UI
+    // 对比渲染模式UI
     if (overlay->header("Rendering Comparison")) {
         const char* compareModeNames[] = { "Normal", "Original Only", "Single Probe", "Multi Probe", "Split View" };
         int currentMode = static_cast<int>(compareMode);
@@ -928,27 +919,27 @@ void VulkanExample::CaptureCubemap(const glm::vec3& position)
     probe->setSkybox(skybox.get());
     probe->setPreviewModel(previewModel.get());
 
-    // ✅ 使用已经存在的 gltfModel（在 PrepareScene 中创建）
+    // 使用已经存在的 gltfModel（在 PrepareScene 中创建）
     // 如果 gltfModel 不存在，则创建一个新的
     if (!gltfModel) {
         gltfModel = std::make_unique<GltfModel>(vulkanDevice, this, queue); // 传入queue用于纹理加载
         gltfModel->UpdateModel(previewModel->getModel());
 
-        // ✅ 为MAIN技术准备PSO（用于主渲染）
+        // 为MAIN技术准备PSO（用于主渲染）
         gltfModel->PreparePSO(
             renderPass,
             mainPass->descriptorSetLayout,
             ETechnique::MAIN
         );
 
-        // ✅ CAPTURE_SCENE: 使用 capturePass 的 renderPass
+        // CAPTURE_SCENE: 使用 capturePass 的 renderPass
         gltfModel->PreparePSO(
             capturePass->renderPass,
             capturePass->descriptorSetLayout,
             ETechnique::CAPTURE_SCENE
         );
     } else {
-        // ✅ 如果 gltfModel 已存在，确保 CAPTURE_SCENE PSO 已准备
+        // 如果 gltfModel 已存在，确保 CAPTURE_SCENE PSO 已准备
         // 检查 CAPTURE_SCENE PSO 是否已准备
         gltfModel->PreparePSO(
             capturePass->renderPass,
@@ -996,7 +987,7 @@ void VulkanExample::CaptureCubemap(const glm::vec3& position)
 
     lightProbes.push_back(std::move(probe));
     
-    // ✅ 保存单探针捕获结果用于对比
+    // 保存单探针捕获结果用于对比
     singleProbeCubemap = capturedCubemap;
     
     // 保存第一个cubemap作为original如果还未设置
@@ -1005,7 +996,7 @@ void VulkanExample::CaptureCubemap(const glm::vec3& position)
     }
 }
 
-// ✅ 对比渲染模式切换
+// 对比渲染模式切换
 void VulkanExample::SetCompareMode(RenderCompareMode mode)
 {
     compareMode = mode;
