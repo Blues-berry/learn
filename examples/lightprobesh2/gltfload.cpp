@@ -11,6 +11,42 @@ GltfModel::GltfModel(vks::VulkanDevice* dev, IExampleInterfasce* example, VkQueu
 	UpdateSet();
 }
 
+void GltfModel::RefreshMaterialDataFromModel()
+{
+	if (!materialBuffer.mapped)
+	{
+		return;
+	}
+
+	if (model && !model->materials.empty())
+	{
+		const auto& mat = model->materials[0];
+		materialData.roughness = mat.roughnessFactor;
+		materialData.metallic = mat.metallicFactor;
+		materialData.elbedo = mat.baseColorFactor;
+		materialData.useTexture = (mat.baseColorTexture != nullptr && mat.baseColorTexture->descriptor.imageView != VK_NULL_HANDLE) ? 1 : 0;
+	}
+	else if (!materials.empty())
+	{
+		materialData.roughness = materials[0].roughness;
+		materialData.metallic = materials[0].metallic;
+		materialData.elbedo = materials[0].baseColorFactor;
+		materialData.useTexture = (materials[0].baseColorTextureIndex >= 0) ? 1 : 0;
+	}
+	else
+	{
+		materialData.roughness = 1.0f;
+		materialData.metallic = 0.5f;
+		materialData.elbedo = glm::vec4(1.0f);
+		materialData.useTexture = 0;
+	}
+
+	materialData.padding = 0.0f;
+	materialData.padding2 = 0;
+
+	memcpy(materialBuffer.mapped, &materialData, sizeof(MaterialBuffer));
+}
+
 GltfModel::~GltfModel()
 {
 	Destroy();
@@ -19,6 +55,7 @@ GltfModel::~GltfModel()
 void GltfModel::UpdateModel(const std::shared_ptr<vkglTF::Model>& model_)
 {
 	model = model_;
+	RefreshMaterialDataFromModel();
 }
 
 void GltfModel::Destroy()
@@ -108,11 +145,6 @@ void GltfModel::Draw(VkCommandBuffer cmd, VkDescriptorSet globalSet, ETechnique 
 		glm::vec3(0.0f,   0.0f, 20.0f)  // 前
 	};
 	const float scale = 50.0f;
-	const glm::vec3 colors[3] = {
-		glm::vec3(1.0f, 0.3f, 0.3f),
-		glm::vec3(0.3f, 1.0f, 0.3f),
-		glm::vec3(0.3f, 0.5f, 1.0f)
-	};
 
 	// ============ 根据技术类型选择不同的绘制方式 ============
 	if (tech == ETechnique::CAPTURE_SCENE) {
@@ -138,28 +170,28 @@ void GltfModel::Draw(VkCommandBuffer cmd, VkDescriptorSet globalSet, ETechnique 
 
 		for (int i = 0; i < 4; ++i) {
 			pc.modelOffset = glm::translate(glm::mat4(1.0f), offsets[i]) *
-							glm::scale(glm::mat4(1.0f), glm::vec3(scale));
-			pc.tint = glm::vec4(colors[i % 3], 1.0f);
+						glm::scale(glm::mat4(1.0f), glm::vec3(scale));
+			pc.tint = glm::vec4(1.0f);
 
 			vkCmdPushConstants(cmd, techniques[techIdx].pipelineLayout,
 							  VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
 							  0, sizeof(PushConstantBlock), &pc);
 
-			model->draw(cmd);
+			model->draw(cmd, vkglTF::RenderFlags::BindImages, techniques[techIdx].pipelineLayout, imageSetIndex);
 		}
 	}
 	else {
 		// ✅ MAIN 模式：绘制 4 个不同位置的模型实例
 		for (int i = 0; i < 4; ++i) {
 			pc.modelOffset = glm::translate(glm::mat4(1.0f), offsets[i]) *
-							glm::scale(glm::mat4(1.0f), glm::vec3(scale));
-			pc.tint = glm::vec4(colors[i % 3], 1.0f);
+						glm::scale(glm::mat4(1.0f), glm::vec3(scale));
+			pc.tint = glm::vec4(1.0f);
 
 			vkCmdPushConstants(cmd, techniques[techIdx].pipelineLayout,
 							  VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
 							  0, sizeof(PushConstantBlock), &pc);
 
-			model->draw(cmd);
+			model->draw(cmd, vkglTF::RenderFlags::BindImages, techniques[techIdx].pipelineLayout, imageSetIndex);
 		}
 	}
 }
@@ -170,7 +202,6 @@ void GltfModel::PreparePerBatchResource()
 	std::vector<VkDescriptorPoolSize> poolSizes = {
 		{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 },
 		{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 },
-        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 15 },
 	};
 	VkDescriptorPoolCreateInfo descriptorPoolInfo = vks::initializers::descriptorPoolCreateInfo(poolSizes, 1);
 	VK_CHECK_RESULT(vkCreateDescriptorPool(device->logicalDevice, &descriptorPoolInfo, nullptr, &descriptorPool));
@@ -181,8 +212,6 @@ void GltfModel::PreparePerBatchResource()
 		vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0),
 		// 绑定 1: 材质参数（片段着色器）
 		vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT, 1),
-		// 绑定 2: 模型纹理（片段着色器）
-		vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 2),
 	};
 	VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCI = vks::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings);
 	VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device->logicalDevice, &descriptorSetLayoutCI, nullptr, &descriptorSetLayout));
@@ -276,6 +305,12 @@ void GltfModel::PreparePSO(VkRenderPass renderPass, VkDescriptorSetLayout passLa
 		passLayout,        // 绑定点 0: 来自 mainpass 的全局数据
 		descriptorSetLayout  // 绑定点 1: 模型自己的数据
 	};
+	imageSetIndex = static_cast<uint32_t>(setLayouts.size());
+	if (vkglTF::descriptorSetLayoutImage != VK_NULL_HANDLE) {
+		setLayouts.push_back(vkglTF::descriptorSetLayoutImage);
+	} else {
+		imageSetIndex = 1; // 没有额外的纹理描述符集
+	}
 
 	// 创建管线布局（加入 Push Constant 范围：mat4 + vec4）
 	VkPushConstantRange pushConstantRange{};
@@ -302,7 +337,12 @@ void GltfModel::PreparePSO(VkRenderPass renderPass, VkDescriptorSetLayout passLa
 	pipelineCI.pDynamicState = &dynamicState;
 	pipelineCI.stageCount = static_cast<uint32_t>(shaderStages.size());
 	pipelineCI.pStages = shaderStages.data();
-	pipelineCI.pVertexInputState = vkglTF::Vertex::getPipelineVertexInputState({ vkglTF::VertexComponent::Position, vkglTF::VertexComponent::Normal, vkglTF::VertexComponent::UV });
+	pipelineCI.pVertexInputState = vkglTF::Vertex::getPipelineVertexInputState({
+		vkglTF::VertexComponent::Position,
+		vkglTF::VertexComponent::Normal,
+		vkglTF::VertexComponent::UV,
+		vkglTF::VertexComponent::Color
+	});
 
 	// 加载着色器 - 根据技术类型选择不同的着色器
 	if (technique == ETechnique::CAPTURE_SCENE) {
@@ -447,25 +487,4 @@ void GltfModel::LoadModelWithTextures(const std::string& filename, uint32_t file
 	// 加载纹理数据
 	loadImages(gltfInput);
 	loadTextures(gltfInput);
-	loadMaterials(gltfInput);
-	
-	// 使用vkglTF加载几何数据
-	auto vkModel = std::make_shared<vkglTF::Model>();
-	vkModel->loadFromFile(filename, device, copyQueue, fileLoadingFlags);
-	UpdateModel(vkModel);
-	
-	// 更新材质参数（使用第一个材质）
-	if (!materials.empty()) {
-		materialData.roughness = materials[0].roughness;
-		materialData.metallic = materials[0].metallic;
-		materialData.elbedo = materials[0].baseColorFactor;
-		materialData.useTexture = (materials[0].baseColorTextureIndex >= 0) ? 1 : 0;
-		memcpy(materialBuffer.mapped, &materialData, sizeof(MaterialBuffer));
-		
-		std::cout << "[GltfModel] Material 0: roughness=" << materials[0].roughness 
-		          << ", metallic=" << materials[0].metallic 
-		          << ", hasTexture=" << (materials[0].baseColorTextureIndex >= 0 ? "yes" : "no") << std::endl;
-	}
-	
-	std::cout << "[GltfModel::LoadModelWithTextures] ✓ Completed" << std::endl;
 }

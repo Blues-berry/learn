@@ -33,6 +33,7 @@ public:
 		int32_t baseColorTextureIndex = -1;
 		float roughness = 1.0f;
 		float metallic = 0.5f;
+		vkglTF::Texture* baseColorTexture = nullptr; // 指向 vkglTF 模型中的纹理
 	};
 
 	struct MaterialBuffer {
@@ -44,7 +45,7 @@ public:
 
 		int32_t useSH = 1;
 		int32_t useReflection = 0;
-		int32_t useTexture = 0;  // ✅ 新增：是否使用纹理
+		int32_t useTexture = 0;  // 是否使用纹理
 		int32_t padding2 = 0;
 	};
 
@@ -53,7 +54,7 @@ public:
 	};
 
 	void UpdateModel(const std::shared_ptr<vkglTF::Model>& model);
-	void LoadModelWithTextures(const std::string& filename, uint32_t fileLoadingFlags);  // ✅ 新增：加载带纹理的模型
+	void LoadModelWithTextures(const std::string& filename, uint32_t fileLoadingFlags);  // 加载带纹理的模型
 	void Destroy();
 	void Draw(VkCommandBuffer cmd, VkDescriptorSet globalSet, ETechnique tech);
 	void PreparePSO(VkRenderPass renderPass, VkDescriptorSetLayout passLayout, ETechnique technique);
@@ -62,15 +63,16 @@ public:
 	void SetTransform(const glm::mat4& transform);
     std::shared_ptr<vkglTF::Model> getModel() const { return model; }
     
-    // ✅ 新增：纹理加载相关方法
+    // 纹理加载相关方法
     const std::vector<Image>& GetImages() const { return images; }
     const std::vector<Material>& GetMaterials() const { return materials; }
 
 private:
 	void PreparePerBatchResource();
 	void UpdateSet();
+	void RefreshMaterialDataFromModel();
 	
-	// ✅ 纹理加载方法（参考gltfloading.cpp）
+	// 纹理加载方法（参考gltfloading.cpp）
 	void loadImages(tinygltf::Model& input);
 	void loadTextures(tinygltf::Model& input);
 	void loadMaterials(tinygltf::Model& input);
@@ -92,6 +94,7 @@ private:
 	vks::Buffer materialBuffer;
 
 	bool materialDirty = false;
+	uint32_t imageSetIndex = 1; // Which descriptor set index vkglTF textures are bound to
 	
 	// ✅ 纹理数据
 	std::vector<Image> images;
