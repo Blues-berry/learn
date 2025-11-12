@@ -12,7 +12,7 @@
 #include "PreviewModel.h"
 #include "CubemapInterpolation.h"
 #include <fstream>
-#include "tiny_gltf.h"
+#include <arra#include "tiny_gltf.h"
 #include "../base/VulkanTools.h"
 
 // 注意：不定义TINYGLTF_IMPLEMENTATION，因为它已经在base.lib中实现
@@ -309,11 +309,13 @@ void VulkanExample::LoadAssets()
     LoadPreviewModel("sibenik", "models/sibenik.gltf", glTFLoadingFlags); // 加载维纳斯模型。
     LoadPreviewModel("fireplace", "models/fireplace.gltf", glTFLoadingFlags); // 加载维纳斯模型。
     LoadPreviewModel("glowsphere", "models/glowsphere.gltf", glTFLoadingFlags); // 加载维纳斯模型。
-    LoadPreviewModel("rock01", "models/rock01.gltf", glTFLoadingFlags); // 加载模型。
+    LoadPreviewModel("", "models/rock01.gltf", glTFLoadingFlags); // 加载模型。
 
    
     LoadgltfModel("FlightHelmet", "models/FlightHelmet/glTF/FlightHelmet.gltf", glTFLoadingFlags); // 
     LoadgltfModel("CesiumMan", "models/CesiumMan/glTF/CesiumMan.gltf", glTFLoadingFlags); // 
+    LoadgltfModel("vulkanscenemodels", "models/vulkanscenemodels.gltf", glTFLoadingFlags); // 
+    LoadgltfModel("sibenik", "models/sibenik.gltf", glTFLoadingFlags); // 
     skyboxModel = std::make_shared<vkglTF::Model>(); // 创建天空盒模型对象。
     skyboxModel->loadFromFile(getAssetPath() + "models/cube.gltf", vulkanDevice, queue, glTFLoadingFlags); // 加载立方体模型作为天空盒。
 }
@@ -332,12 +334,30 @@ void VulkanExample::PrepareScene()
 
     // 准备gltfModel - 为MainPass和CapturePass都准备PSO
     if (!gltfModels.empty()) {
-        gltfModel = std::make_unique<GltfModel>(vulkanDevice, this, queue); // 创建 glTF 模型对象，传入queue用于纹理加载
-        gltfModel->PreparePSO(renderPass, mainPass->descriptorSetLayout, ETechnique::MAIN); // 为MainPass准备PSO
-        gltfModel->PreparePSO(capturePass->renderPass, capturePass->descriptorSetLayout, ETechnique::CAPTURE_SCENE); // 为CapturePass准备PSO
-        gltfModel->UpdateModel(gltfModels[gltfmodelIndex]); // 设置第一个模型
+        gltfModel = std::make_unique<GltfModel>(vulkanDevice, this, queue); // 主模型
+        gltfModel->PreparePSO(renderPass, mainPass->descriptorSetLayout, ETechnique::MAIN);
+        gltfModel->PreparePSO(capturePass->renderPass, capturePass->descriptorSetLayout, ETechnique::CAPTURE_SCENE);
+        gltfModel->UpdateModel(gltfModels[gltfmodelIndex]);
 
+        gltfClones.clear();
+        const glm::vec3 cloneOffsets[4] = {
+            glm::vec3(-8.0f, 0.0f, 0.0f),
+            glm::vec3(8.0f, 0.0f, 0.0f),
+            glm::vec3(0.0f, 0.0f, -8.0f),
+            glm::vec3(0.0f, 0.0f, 8.0f)
+        };
 
+        for (int i = 0; i < 4 && i < static_cast<int>(gltfModels.size()); ++i) {
+            auto clone = std::make_unique<GltfModel>(vulkanDevice, this, queue);
+            clone->PreparePSO(renderPass, mainPass->descriptorSetLayout, ETechnique::MAIN);
+            clone->PreparePSO(capturePass->renderPass, capturePass->descriptorSetLayout, ETechnique::CAPTURE_SCENE);
+            clone->UpdateModel(gltfModels[(gltfmodelIndex + i) % gltfModels.size()]);
+
+            glm::mat4 transform = glm::translate(glm::mat4(1.0f), cloneOffsets[i]);
+            transform = glm::scale(transform, glm::vec3(0.35f));
+            clone->SetTransform(transform);
+            gltfClones.emplace_back(std::move(clone));
+        }
     }
 }
 
@@ -688,54 +708,7 @@ void VulkanExample::drawSplitView(VkCommandBuffer cmd)
             previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
             if (gltfModel) { gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
             for (auto& m : gltfClones) { m->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
-            
-            // 在多探针视图中显示探针位置
-            if (showProbes) {
-                for (const auto& probe : lightProbes) {
-                    probe->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
-                }
-            }
-        }
-        
-        // 恢复全屏viewport和scissor用于UI
-        VkViewport fullViewport{};
-        fullViewport.x = 0.0f;
-        fullViewport.y = 0.0f;
-        fullViewport.width = static_cast<float>(width);
-        fullViewport.height = static_cast<float>(height);
-        fullViewport.minDepth = 0.0f;
-        fullViewport.maxDepth = 1.0f;
-        
-        VkRect2D fullScissor{};
-        fullScissor.offset = {0, 0};
-        fullScissor.extent = {width, height};
-        
-        vkCmdSetViewport(cmd, 0, 1, &fullViewport);
-        vkCmdSetScissor(cmd, 0, 1, &fullScissor);
-        
-        // 恢复原始cubemap
-        skybox->UpdateCubemap(savedCubemap);
-        
-        // 绘制UI
-        drawUI(cmd);
-    });
-}
-
-// =============================================================================
-// UI 相关函数
-// =============================================================================
-
-void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
-{
-    // 更新 UI 覆盖界面。
-    if (overlay->header("Settings")) { // 显示“设置”标题。
-        // 显示当前相机位置（只读）
-        overlay->text("Camera Position:");
-        overlay->text("  X: %.2f", camera.position.x);
-        overlay->text("  Y: %.2f", camera.position.y);
-        overlay->text("  Z: %.2f", camera.position.z);
-        
-        if (overlay->inputFloat("Exposure", &mainPassData.exposure, 0.1f, 2)) { // 曝光度调节控件。
+, 0.1f, 2)) { // 曝光度调节控件。
             globalDirty = true; // 标记全局数据需要更新。
         }
         if (overlay->inputFloat("Gamma", &mainPassData.gamma, 0.1f, 2)) { // 伽马值调节控件。
