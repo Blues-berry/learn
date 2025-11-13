@@ -12,7 +12,7 @@
 #include "PreviewModel.h"
 #include "CubemapInterpolation.h"
 #include <fstream>
-#include <arra#include "tiny_gltf.h"
+#include "tiny_gltf.h"
 #include "../base/VulkanTools.h"
 
 // 注意：不定义TINYGLTF_IMPLEMENTATION，因为它已经在base.lib中实现
@@ -708,178 +708,8 @@ void VulkanExample::drawSplitView(VkCommandBuffer cmd)
             previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
             if (gltfModel) { gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
             for (auto& m : gltfClones) { m->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
-, 0.1f, 2)) { // 曝光度调节控件。
-            globalDirty = true; // 标记全局数据需要更新。
         }
-        if (overlay->inputFloat("Gamma", &mainPassData.gamma, 0.1f, 2)) { // 伽马值调节控件。
-            globalDirty = true; // 标记全局数据需要更新。
-        }
-        if (overlay->comboBox("Skybox", &skyboxIndex, cubemapNames)) { // 天空盒选择下拉框。
-            UpdateSkyBox(); // 更新天空盒。
-        }
-        if (overlay->comboBox("PreviewModel", &modelIndex, previewModelNames)) { // 预览模型选择下拉框。
-            previewModel->UpdateModel(previewModels[modelIndex]); // 更新预览模型。
-        }
-        
-        // GLTF 模型切换
-        if (!gltfModelNames.empty() && gltfModel) {
-            if (overlay->comboBox("GLTF Model", &gltfmodelIndex, gltfModelNames)) {
-                gltfModel->UpdateModel(gltfModels[gltfmodelIndex]);
-                std::cout << "[VulkanExample] Switched to GLTF model: " << gltfModelNames[gltfmodelIndex] << std::endl;
-            }
-        }
-
-        if (overlay->button("Capture Cubemap at Camera")) { // 捕获立方体贴图按钮。
-            CaptureCubemap(camera.position); // 在相机位置捕获立方体贴图。
-        }
-        // 使用LightProbe的静态UI方法（包含探针网格配置）
-        LightProbe::ShowProbeGridUI(overlay, probeGridConfig, showProbes);
-        
-        if (probeGridConfig.enabled) {
-            // 点击 "Generate Probes" 会生成探针
-            if (overlay->button("Generate Probes")) {
-                PrepareProbes();
-            }
-
-            // 动捕获所有探针的按钮
-            if (overlay->button("Capture All Probes")) {
-                CaptureAllProbes();
-            }
-
-            // 插值算法选择
-            if (overlay->comboBox("Interpolation Mode", &interpolationModeIndex, interpolationModeNames)) {
-                if (cubemapInterpolation) {
-                    auto mode = static_cast<CubemapInterpolation::InterpolationMode>(interpolationModeIndex);
-                    cubemapInterpolation->SetInterpolationMode(mode);
-                    std::cout << "[VulkanExample] Interpolation mode changed to " << interpolationModeNames[interpolationModeIndex] << std::endl;
-                }
-            }
-
-            // 立方体贴图插值按钮（支持GPU加速和多种算法）
-            if (overlay->button("Interpolate Cubemap (GPU)")) {
-                if (cubemapInterpolation && cubemapInterpolation->GetProbeCount() > 0) {
-                    // 在相机位置进行插值，使用GPU加速，分辨率256x256
-                    auto interpolatedCubemap = cubemapInterpolation->InterpolateAt(
-                        camera.position,
-                        50.0f,      // maxDistance
-                        256,        // outputResolution
-                        queue       // Vulkan队列
-                    );
-                    if (interpolatedCubemap) {
-                        cubeMaps.push_back(interpolatedCubemap);
-                        cubemapNames.push_back("Interpolated_" + interpolationModeNames[interpolationModeIndex] + "_" + std::to_string(cubeMaps.size() - 1));
-                        skyboxIndex = static_cast<int>(cubeMaps.size() - 1);
-                        UpdateSkyBox();
-                        // 更新天空盒(用于multiview)
-                        multiProbeCubemap = interpolatedCubemap;
-                        std::cout << "[VulkanExample] GPU-accelerated interpolated cubemap created using "
-                                  << interpolationModeNames[interpolationModeIndex] << " at camera position" << std::endl;
-                    
-                                }
-                } else {
-                    std::cerr << "[VulkanExample] No probes available for interpolation!" << std::endl;
-                }
-                
-            }
-
-            // 权重可视化按钮
-            if (overlay->button("Visualize Weights (Heatmap)")) {
-                if (cubemapInterpolation && cubemapInterpolation->GetProbeCount() > 0) {
-                    // 可视化权重热力图
-                    auto weightVisualization = cubemapInterpolation->VisualizeWeights(
-                        256,        // outputResolution
-                        queue,      // Vulkan队列
-                        1           // visualizationMode: WEIGHT_HEATMAP
-                    );
-                    if (weightVisualization) {
-                        cubeMaps.push_back(weightVisualization);
-                        cubemapNames.push_back("WeightHeatmap_" + std::to_string(cubeMaps.size() - 1));
-                        skyboxIndex = static_cast<int>(cubeMaps.size() - 1);
-                        UpdateSkyBox();
-                        std::cout << "[VulkanExample] Weight heatmap visualization created" << std::endl;
-                    }
-                } else {
-                    std::cerr << "[VulkanExample] No probes available for weight visualization!" << std::endl;
-                }
-            }
-
-            // 显示最近探针ID的可视化
-            if (overlay->button("Visualize Closest Probe ID")) {
-                if (cubemapInterpolation && cubemapInterpolation->GetProbeCount() > 0) {
-                    // 可视化最近探针的ID
-                    auto probeIDVisualization = cubemapInterpolation->VisualizeWeights(
-                        256,        // outputResolution
-                        queue,      // Vulkan队列
-                        2           // visualizationMode: CLOSEST_PROBE_ID
-                    );
-                    if (probeIDVisualization) {
-                        cubeMaps.push_back(probeIDVisualization);
-                        cubemapNames.push_back("ProbeID_" + std::to_string(cubeMaps.size() - 1));
-                        skyboxIndex = static_cast<int>(cubeMaps.size() - 1);
-                        UpdateSkyBox();
-                        std::cout << "[VulkanExample] Probe ID visualization created" << std::endl;
-                    }
-                } else {
-                    std::cerr << "[VulkanExample] No probes available for probe ID visualization!" << std::endl;
-                }
-            }
-        }
-    }
-    
-    // 对比渲染模式UI
-    if (overlay->header("Rendering Comparison")) {
-        const char* compareModeNames[] = { "Normal", "Original Only", "Single Probe", "Multi Probe", "Split View" };
-        int currentMode = static_cast<int>(compareMode);
-        if (overlay->comboBox("Compare Mode", &currentMode, std::vector<std::string>(compareModeNames, compareModeNames + 5))) {
-            SetCompareMode(static_cast<RenderCompareMode>(currentMode));
-        }
-        
-        overlay->text("Current Mode:");
-        switch (compareMode) {
-            case RenderCompareMode::NORMAL:
-                overlay->text("  Normal rendering");
-                break;
-            case RenderCompareMode::ORIGINAL_ONLY:
-                overlay->text("  Original environment only");
-                break;
-            case RenderCompareMode::SINGLE_PROBE:
-                overlay->text("  Single probe capture");
-                break;
-            case RenderCompareMode::MULTI_PROBE:
-                overlay->text("  Multi-probe/interpolated");
-                break;
-            case RenderCompareMode::SPLIT_VIEW:
-                overlay->text("  Split view (3-way)");
-                overlay->text("  Left: Original | Middle: Single | Right: Multi");
-                
-                // 显示每个cubemap的状态
-                overlay->text("Status:");
-                overlay->text("  Original: %s", originalCubemap ? "Ready" : "Not captured");
-                overlay->text("  Single: %s", singleProbeCubemap ? "Ready" : "Not captured");
-                overlay->text("  Multi: %s", multiProbeCubemap ? "Ready" : "Not captured");
-                
-                if (!originalCubemap || !singleProbeCubemap || !multiProbeCubemap) {
-                    overlay->text("Tip: Capture all modes first!");
-                }
-                break;
-        }
-        
-        // 快速捕获按钮
-        if (compareMode == RenderCompareMode::SPLIT_VIEW) {
-            if (overlay->button("Quick Setup Split View")) {
-                // 自动捕获所需的cubemap
-                if (!originalCubemap && !cubeMaps.empty()) {
-                    originalCubemap = cubeMaps[0];
-                }
-                if (!singleProbeCubemap) {
-                    CaptureCubemap(camera.position);
-                }
-                std::cout << "[VulkanExample] Split view setup complete!" << std::endl;
-            }
-        }
-    }
-
-    previewModel->ShowUI(overlay); // 显示预览模型的 UI 控件。
+    });
 }
 
 // =============================================================================
@@ -1021,5 +851,180 @@ void VulkanExample::SetCompareMode(RenderCompareMode mode)
     
     std::cout << "[VulkanExample] Compare mode set to: " << static_cast<int>(mode) << std::endl;
 }
-   
+
+// UI覆盖更新函数
+void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
+{
+    // 曝光度和伽马值调节
+    if (overlay->inputFloat("Exposure", &mainPassData.exposure, 0.1f, 2)) {
+        globalDirty = true;
+    }
+    if (overlay->inputFloat("Gamma", &mainPassData.gamma, 0.1f, 2)) {
+        globalDirty = true;
+    }
+
+    // 天空盒选择
+    if (overlay->comboBox("Skybox", &skyboxIndex, cubemapNames)) {
+        UpdateSkyBox();
+    }
+
+    // 预览模型选择
+    if (overlay->comboBox("PreviewModel", &modelIndex, previewModelNames)) {
+        previewModel->UpdateModel(previewModels[modelIndex]);
+    }
+
+    // GLTF 模型切换
+    if (!gltfModelNames.empty() && gltfModel) {
+        if (overlay->comboBox("GLTF Model", &gltfmodelIndex, gltfModelNames)) {
+            gltfModel->UpdateModel(gltfModels[gltfmodelIndex]);
+            std::cout << "[VulkanExample] Switched to GLTF model: " << gltfModelNames[gltfmodelIndex] << std::endl;
+        }
+    }
+
+    // 捕获立方体贴图按钮
+    if (overlay->button("Capture Cubemap at Camera")) {
+        CaptureCubemap(camera.position);
+    }
+
+    // 使用LightProbe的静态UI方法（包含探针网格配置）
+    LightProbe::ShowProbeGridUI(overlay, probeGridConfig, showProbes);
+
+    if (probeGridConfig.enabled) {
+        // 生成探针按钮
+        if (overlay->button("Generate Probes")) {
+            PrepareProbes();
+        }
+
+        // 捕获所有探针的按钮
+        if (overlay->button("Capture All Probes")) {
+            CaptureAllProbes();
+        }
+
+        // 插值算法选择
+        if (overlay->comboBox("Interpolation Mode", &interpolationModeIndex, interpolationModeNames)) {
+            if (cubemapInterpolation) {
+                auto mode = static_cast<CubemapInterpolation::InterpolationMode>(interpolationModeIndex);
+                cubemapInterpolation->SetInterpolationMode(mode);
+                std::cout << "[VulkanExample] Interpolation mode changed to " << interpolationModeNames[interpolationModeIndex] << std::endl;
+            }
+        }
+
+        // 立方体贴图插值按钮（支持GPU加速和多种算法）
+        if (overlay->button("Interpolate Cubemap (GPU)")) {
+            if (cubemapInterpolation && cubemapInterpolation->GetProbeCount() > 0) {
+                auto interpolatedCubemap = cubemapInterpolation->InterpolateAt(
+                    camera.position,
+                    50.0f,
+                    256,
+                    queue
+                );
+                if (interpolatedCubemap) {
+                    cubeMaps.push_back(interpolatedCubemap);
+                    cubemapNames.push_back("Interpolated_" + interpolationModeNames[interpolationModeIndex] + "_" + std::to_string(cubeMaps.size() - 1));
+                    skyboxIndex = static_cast<int>(cubeMaps.size() - 1);
+                    UpdateSkyBox();
+                    multiProbeCubemap = interpolatedCubemap;
+                    std::cout << "[VulkanExample] GPU-accelerated interpolated cubemap created using "
+                              << interpolationModeNames[interpolationModeIndex] << " at camera position" << std::endl;
+                }
+            } else {
+                std::cerr << "[VulkanExample] No probes available for interpolation!" << std::endl;
+            }
+        }
+
+        // 权重可视化按钮
+        if (overlay->button("Visualize Weights (Heatmap)")) {
+            if (cubemapInterpolation && cubemapInterpolation->GetProbeCount() > 0) {
+                auto weightVisualization = cubemapInterpolation->VisualizeWeights(
+                    256,
+                    queue,
+                    1
+                );
+                if (weightVisualization) {
+                    cubeMaps.push_back(weightVisualization);
+                    cubemapNames.push_back("WeightHeatmap_" + std::to_string(cubeMaps.size() - 1));
+                    skyboxIndex = static_cast<int>(cubeMaps.size() - 1);
+                    UpdateSkyBox();
+                    std::cout << "[VulkanExample] Weight heatmap visualization created" << std::endl;
+                }
+            } else {
+                std::cerr << "[VulkanExample] No probes available for weight visualization!" << std::endl;
+            }
+        }
+
+        // 显示最近探针ID的可视化
+        if (overlay->button("Visualize Closest Probe ID")) {
+            if (cubemapInterpolation && cubemapInterpolation->GetProbeCount() > 0) {
+                auto probeIDVisualization = cubemapInterpolation->VisualizeWeights(
+                    256,
+                    queue,
+                    2
+                );
+                if (probeIDVisualization) {
+                    cubeMaps.push_back(probeIDVisualization);
+                    cubemapNames.push_back("ProbeID_" + std::to_string(cubeMaps.size() - 1));
+                    skyboxIndex = static_cast<int>(cubeMaps.size() - 1);
+                    UpdateSkyBox();
+                    std::cout << "[VulkanExample] Probe ID visualization created" << std::endl;
+                }
+            } else {
+                std::cerr << "[VulkanExample] No probes available for probe ID visualization!" << std::endl;
+            }
+        }
+    }
+
+    // 对比渲染模式UI
+    if (overlay->header("Rendering Comparison")) {
+        const char* compareModeNames[] = { "Normal", "Original Only", "Single Probe", "Multi Probe", "Split View" };
+        int currentMode = static_cast<int>(compareMode);
+        if (overlay->comboBox("Compare Mode", &currentMode, std::vector<std::string>(compareModeNames, compareModeNames + 5))) {
+            SetCompareMode(static_cast<RenderCompareMode>(currentMode));
+        }
+
+        overlay->text("Current Mode:");
+        switch (compareMode) {
+            case RenderCompareMode::NORMAL:
+                overlay->text("  Normal rendering");
+                break;
+            case RenderCompareMode::ORIGINAL_ONLY:
+                overlay->text("  Original environment only");
+                break;
+            case RenderCompareMode::SINGLE_PROBE:
+                overlay->text("  Single probe capture");
+                break;
+            case RenderCompareMode::MULTI_PROBE:
+                overlay->text("  Multi-probe/interpolated");
+                break;
+            case RenderCompareMode::SPLIT_VIEW:
+                overlay->text("  Split view (3-way)");
+                overlay->text("  Left: Original | Middle: Single | Right: Multi");
+
+                overlay->text("Status:");
+                overlay->text("  Original: %s", originalCubemap ? "Ready" : "Not captured");
+                overlay->text("  Single: %s", singleProbeCubemap ? "Ready" : "Not captured");
+                overlay->text("  Multi: %s", multiProbeCubemap ? "Ready" : "Not captured");
+
+                if (!originalCubemap || !singleProbeCubemap || !multiProbeCubemap) {
+                    overlay->text("Tip: Capture all modes first!");
+                }
+                break;
+        }
+
+        // 快速捕获按钮
+        if (compareMode == RenderCompareMode::SPLIT_VIEW) {
+            if (overlay->button("Quick Setup Split View")) {
+                if (!originalCubemap && !cubeMaps.empty()) {
+                    originalCubemap = cubeMaps[0];
+                }
+                if (!singleProbeCubemap) {
+                    CaptureCubemap(camera.position);
+                }
+                std::cout << "[VulkanExample] Split view setup complete!" << std::endl;
+            }
+        }
+    }
+
+    previewModel->ShowUI(overlay);
+}
+
 VULKAN_EXAMPLE_MAIN()
