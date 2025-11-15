@@ -35,6 +35,10 @@ public:
     void setmodel(std::shared_ptr<vkglTF::Model> model_) { model = model_; }
     // 新增：专门用于 GltfModel 指针
     void SetGltfModel(GltfModel* model_) { gltfModel = model_; }
+    // 新增：捕获阶段要绘制的 glTF 模型集合管理（不包含 previewModel）
+    void AddCaptureModel(GltfModel* model_) { if (model_) captureModels.push_back(model_); }
+    void ClearCaptureModels() { captureModels.clear(); }
+    void SetCaptureModels(const std::vector<GltfModel*>& models_) { captureModels = models_; }
     // void SetExternalCubeMap(std::shared_ptr<vks::TextureCubeMap>& cubemap_);
     void setSkybox(Skybox* skybox_);
     void setPreviewModel(PreviewModel* previewModel_) { previewModel = previewModel_; }
@@ -87,6 +91,7 @@ private:
     Skybox* skybox = nullptr; // 可选的天空盒对象
     PreviewModel* previewModel = nullptr; // 可选的预览模型对象
     GltfModel* gltfModel=nullptr;
+    std::vector<GltfModel*> captureModels; // 捕获时绘制的模型集合（不包含 previewModel）
     std::unique_ptr<CaptureScenePass> capturePass;
 };
 

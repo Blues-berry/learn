@@ -127,6 +127,9 @@ public:
     void PrepareScene();
     // 声明准备场景函数，初始化天空盒和预览模型。
 
+    void InitializeLightSources();
+    // 初始化光源和光源标识模型
+
     void UpdateSkyBox();
     // 声明更新天空盒函数，切换立方体贴图并重新生成相关资源。
 
@@ -278,6 +281,15 @@ private:
 
     // 插值算法选择
     int32_t interpolationModeIndex = 0;  // 0=IDW, 1=Linear, 2=Cubic
+
+    // 光源相关成员
+    struct LightSource {
+        glm::vec3 position;
+        glm::vec3 color;
+        float intensity;
+    };
+    std::vector<LightSource> lightSources;
+    std::vector<std::unique_ptr<GltfModel>> lightMarkers;  // 用于标识光源位置的模型
     std::vector<std::string> interpolationModeNames = {"IDW", "Linear", "Cubic"};
     
     // 对比渲染
@@ -340,11 +352,13 @@ void VulkanExample::PrepareScene()
         gltfModel->UpdateModel(gltfModels[gltfmodelIndex]);
 
         gltfClones.clear();
+        // 将模型放置在更远的位置，避免遮挡previewModel
+        // 使用更大的偏移距离和不同的高度
         const glm::vec3 cloneOffsets[4] = {
-            glm::vec3(-8.0f, 0.0f, 0.0f),
-            glm::vec3(8.0f, 0.0f, 0.0f),
-            glm::vec3(0.0f, 0.0f, -8.0f),
-            glm::vec3(0.0f, 0.0f, 8.0f)
+            glm::vec3(-20.0f, 5.0f, -15.0f),   // 左前方，抬高
+            glm::vec3(20.0f, 5.0f, -15.0f),    // 右前方，抬高
+            glm::vec3(-20.0f, 5.0f, 15.0f),    // 左后方，抬高
+            glm::vec3(20.0f, 5.0f, 15.0f)      // 右后方，抬高
         };
 
         for (int i = 0; i < 4 && i < static_cast<int>(gltfModels.size()); ++i) {
@@ -359,6 +373,51 @@ void VulkanExample::PrepareScene()
             gltfClones.emplace_back(std::move(clone));
         }
     }
+
+    // 初始化光源和光源标识模型
+    InitializeLightSources();
+}
+
+void VulkanExample::InitializeLightSources()
+{
+    // 清空之前的光源
+    lightSources.clear();
+    lightMarkers.clear();
+
+    // 定义4个彩色光源
+    // 红色光源 - 左前方
+    lightSources.push_back({glm::vec3(-15.0f, 8.0f, -12.0f), glm::vec3(1.0f, 0.2f, 0.2f), 1.0f});
+
+    // 绿色光源 - 右前方
+    lightSources.push_back({glm::vec3(15.0f, 8.0f, -12.0f), glm::vec3(0.2f, 1.0f, 0.2f), 1.0f});
+
+    // 蓝色光源 - 左后方
+    lightSources.push_back({glm::vec3(-15.0f, 8.0f, 12.0f), glm::vec3(0.2f, 0.2f, 1.0f), 1.0f});
+
+    // 黄色光源 - 右后方
+    lightSources.push_back({glm::vec3(15.0f, 8.0f, 12.0f), glm::vec3(1.0f, 1.0f, 0.2f), 1.0f});
+
+    // 为每个光源创建标识模型（使用rock01）
+    // 注意：这里假设previewModels中有rock01模型，如果没有则跳过
+    if (!previewModels.empty()) {
+        for (size_t i = 0; i < lightSources.size(); ++i) {
+            auto marker = std::make_unique<GltfModel>(vulkanDevice, this, queue);
+            marker->PreparePSO(renderPass, mainPass->descriptorSetLayout, ETechnique::MAIN);
+            marker->PreparePSO(capturePass->renderPass, capturePass->descriptorSetLayout, ETechnique::CAPTURE_SCENE);
+
+            // 使用第一个预览模型作为光源标识
+            marker->UpdateModel(previewModels[0]);
+
+            // 设置光源标识的位置和缩放
+            glm::mat4 transform = glm::translate(glm::mat4(1.0f), lightSources[i].position);
+            transform = glm::scale(transform, glm::vec3(11.15f));  // 缩小模型
+            marker->SetTransform(transform);
+
+            lightMarkers.emplace_back(std::move(marker));
+        }
+    }
+
+    std::cout << "[VulkanExample] Initialized " << lightSources.size() << " light sources with markers" << std::endl;
 }
 
 void VulkanExample::UpdateSkyBox()
@@ -589,7 +648,11 @@ void VulkanExample::prepareData()
     mainPassData.projection = camera.matrices.perspective;
     mainPassData.view = camera.matrices.view;
     mainPassData.cameraPos = glm::vec4(camera.position, 1.0f); // 设置相机位置（齐次坐标）。
-    mainPassData.light[0] = glm::vec4(10.0f, 10.0f, 10.0f, 1.0f); // 设置光源位置
+
+    // 设置多个彩色光源
+    for (int i = 0; i < 4 && i < static_cast<int>(lightSources.size()); ++i) {
+        mainPassData.light[i] = glm::vec4(lightSources[i].position, 1.0f);
+    }
 
     mainPass->UpdateGlobal(mainPassData); // 更新主渲染通道的全局 UBO 数据。
 
@@ -611,6 +674,11 @@ void VulkanExample::drawFrame(VkCommandBuffer cmd)
         previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); // 绘制预览模型。
         if (gltfModel) { gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); } // 添加空指针检查
         for (auto& m : gltfClones) { m->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
+
+        // 绘制光源标识模型
+        for (auto& marker : lightMarkers) {
+            marker->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
+        }
 
         // 渲染探针为球体
         // TO FIX(探针可视化有问题)
@@ -658,6 +726,7 @@ void VulkanExample::drawSplitView(VkCommandBuffer cmd)
             previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
             if (gltfModel) { gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
             for (auto& m : gltfClones) { m->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
+            for (auto& marker : lightMarkers) { marker->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
         }
         
         // === 中间：单探针捕获 ===
@@ -683,6 +752,7 @@ void VulkanExample::drawSplitView(VkCommandBuffer cmd)
             previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
             if (gltfModel) { gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
             for (auto& m : gltfClones) { m->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
+            for (auto& marker : lightMarkers) { marker->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
         }
         
         // === 右侧：多探针捕获/插值 ===
@@ -708,6 +778,7 @@ void VulkanExample::drawSplitView(VkCommandBuffer cmd)
             previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
             if (gltfModel) { gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
             for (auto& m : gltfClones) { m->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
+            for (auto& marker : lightMarkers) { marker->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
         }
     });
 }
