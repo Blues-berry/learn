@@ -35,16 +35,16 @@ public:
 		float metallic = 0.5f;
 	};
 
-	struct MaterialBuffer {
+	struct MaterialUniform {
 		float roughness = 1.f;
 		float metallic = 0.5;
 		float specular = 0.5;
 		float padding = 0.f;
-		glm::vec4 elbedo = glm::vec4(1.f, 1.f, 1.f, 1.f);
+		glm::vec4 albedo = glm::vec4(1.f, 1.f, 1.f, 1.f);
 
 		int32_t useSH = 1;
 		int32_t useReflection = 0;
-		int32_t useTexture = 0;  // ✅ 新增：是否使用纹理
+		int32_t useTexture = 0;
 		int32_t padding2 = 0;
 	};
 
@@ -88,7 +88,7 @@ private:
 	LocalBuffer localData;
 	vks::Buffer localBuffer;
 
-	MaterialBuffer materialData;
+	MaterialUniform materialData;
 	vks::Buffer materialBuffer;
 
 	bool materialDirty = false;

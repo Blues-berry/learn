@@ -63,8 +63,9 @@ public:
         camera.rotationSpeed = 0.25f; // 设置相机旋转速度为 0.25。
 
         // 设置相机初始位置和朝向。
-        camera.setRotation({ -3.75f, 180.0f, 0.0f }); // 设置初始旋转（俯仰、偏航、滚转）。
-        camera.setPosition({ 0.55f, 0.85f, 12.0f }); // 设置初始位置 (x, y, z)。
+        camera.setRotation({ -90.0f, 0.0f, 0.0f }); // 初始视角俯视盒内，保持左右墙体对称.
+        camera.setPosition({ 0.84f, .16f, 7.43f });  // 靠近盒口上方，贴近平面截图的取景.
+
         // 启用多视图扩展（VK_KHR_multiview），用于同时渲染多个视角（如立方体贴图的 6 个面）。
         enabledDeviceExtensions.push_back(VK_KHR_MULTIVIEW_EXTENSION_NAME);
 
@@ -301,20 +302,22 @@ void VulkanExample::LoadAssets()
     uint32_t glTFLoadingFlags = vkglTF::FileLoadingFlags::PreTransformVertices | vkglTF::FileLoadingFlags::FlipY; // 设置 glTF 加载标志：预变换顶点，翻转 Y 轴。
 
     LoadPreviewModel("sphere", "models/sphere.gltf", glTFLoadingFlags); // 加载球体模型。
-    LoadPreviewModel("teapot", "models/teapot.gltf", glTFLoadingFlags); // 加载茶壶模型。
-    LoadPreviewModel("torusknot", "models/torusknot.gltf", glTFLoadingFlags); // 加载环面结模型。
-    LoadPreviewModel("venus", "models/venus.gltf", glTFLoadingFlags); // 加载维纳斯模型。
-    LoadPreviewModel("armor", "models/armor/armor.gltf", glTFLoadingFlags); // 加载维纳斯模型。
-    LoadPreviewModel("chinesedragon", "models/chinesedragon.gltf", glTFLoadingFlags); // 加载维纳斯模型。
-    LoadPreviewModel("sibenik", "models/sibenik.gltf", glTFLoadingFlags); // 加载维纳斯模型。
-    LoadPreviewModel("fireplace", "models/fireplace.gltf", glTFLoadingFlags); // 加载维纳斯模型。
-    LoadPreviewModel("glowsphere", "models/glowsphere.gltf", glTFLoadingFlags); // 加载维纳斯模型。
-    LoadPreviewModel("rock01", "models/rock01.gltf", glTFLoadingFlags); // 加载模型。
+    // LoadPreviewModel("teapot", "models/teapot.gltf", glTFLoadingFlags); // 加载茶壶模型。
+    // LoadPreviewModel("torusknot", "models/torusknot.gltf", glTFLoadingFlags); // 加载环面结模型。
+    // LoadPreviewModel("venus", "models/venus.gltf", glTFLoadingFlags); // 加载维纳斯模型。
+    // LoadPreviewModel("armor", "models/armor/armor.gltf", glTFLoadingFlags); // 加载维纳斯模型。
+    // LoadPreviewModel("chinesedragon", "models/chinesedragon.gltf", glTFLoadingFlags); // 加载维纳斯模型。
+    // LoadPreviewModel("sibenik", "models/sibenik.gltf", glTFLoadingFlags); // 加载维纳斯模型。
+    // LoadPreviewModel("fireplace", "models/fireplace.gltf", glTFLoadingFlags); // 加载维纳斯模型。
+    // LoadPreviewModel("glowsphere", "models/glowsphere.gltf", glTFLoadingFlags); // 加载维纳斯模型。
+    // LoadPreviewModel("rock01", "models/rock01.gltf", glTFLoadingFlags); // 加载模型。scene
 
+
+    // LoadgltfModel("CornellBox-scene", "models/scene.gltf", glTFLoadingFlags); // 
     LoadgltfModel("CornellBox-Original", "models/CornellBox-Original.gltf", glTFLoadingFlags); // 
-    LoadgltfModel("cornell", "models/cornell.gltf", glTFLoadingFlags); // 
-    LoadgltfModel("FlightHelmet", "models/FlightHelmet/glTF/FlightHelmet.gltf", glTFLoadingFlags); // 
-    LoadgltfModel("CesiumMan", "models/CesiumMan/glTF/CesiumMan.gltf", glTFLoadingFlags); // 
+    LoadgltfModel("cornell", "models/scene.gltf", glTFLoadingFlags); // 
+    // LoadgltfModel("FlightHelmet", "models/FlightHelmet/glTF/FlightHelmet.gltf", glTFLoadingFlags); // 
+    // LoadgltfModel("CesiumMan", "models/CesiumMan/glTF/CesiumMan.gltf", glTFLoadingFlags); // 
     skyboxModel = std::make_shared<vkglTF::Model>(); // 创建天空盒模型对象。
     skyboxModel->loadFromFile(getAssetPath() + "models/cube.gltf", vulkanDevice, queue, glTFLoadingFlags); // 加载立方体模型作为天空盒。
 }
@@ -589,7 +592,7 @@ void VulkanExample::drawFrame(VkCommandBuffer cmd)
     mainPass->Draw(cmd, frameBuffers[currentBuffer], width, height, [this](VkCommandBuffer cmd) {
         // 匿名函数：记录绘制命令。
         skybox->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); // 绘制天空盒。
-        previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); // 绘制预览模型。
+        previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN, glm::vec3(0.0f, 3.0f, 1.5f)); // 绘制预览模型。
         if (gltfModel) { gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); } // 添加空指针检查
         for (auto& m : gltfClones) { m->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
 
