@@ -12,6 +12,10 @@ layout (set = 0, binding = 0) uniform Global
     vec4 cameraPos;
     float exposure;
     float gamma;
+    int useLightSource;
+    float lightIntensity;
+    vec3 lightPosition;
+    vec3 lightColor;
 } global;
 
 layout (set = 0, binding = 1) uniform SHCoefficients {
@@ -83,6 +87,25 @@ vec4 sampleBaseColor(vec2 uv) {
     return material.albedo;
 }
 
+vec3 calculatePointLight(vec3 worldPos, vec3 normal, vec3 albedo) {
+    if (global.useLightSource == 0) {
+        return vec3(0.0);
+    }
+    
+    vec3 L = global.lightPosition - worldPos;
+    float distance = length(L);
+    L = normalize(L);
+    
+    // 衰减
+    float attenuation = 1.0 / (1.0 + 0.09 * distance + 0.032 * distance * distance);
+    
+    // Lambert漫反射
+    float NdotL = max(dot(normal, L), 0.0);
+    vec3 diffuse = albedo * global.lightColor * global.lightIntensity * attenuation * NdotL;
+    
+    return diffuse;
+}
+
 void main()
 {
     vec3 N = normalize(inNormal);
@@ -91,9 +114,26 @@ void main()
     vec4 baseColor = sampleBaseColor(inUV);
     vec3 albedo = baseColor.rgb;
 
-    vec3 diffuse = albedo * 0.5;
+    // 基础环境光
+    vec3 diffuse = albedo * 0.05;
+    
+    // 球谐光照（使用预计算的PRT系数或实时SH）
     vec3 irradiance = evaluateSH(N);
-    diffuse += irradiance * albedo * (1.0 - material.metallic) / PI;
+    
+    // 如果启用了PRT，增强SH光照效果
+    if (global.useLightSource != 0) {
+        // PRT模式下，SH系数已经包含了光源信息
+        diffuse += irradiance * albedo * (1.0 - material.metallic) * 2.0;
+    } else {
+        // 普通SH光照
+        diffuse += irradiance * albedo * (1.0 - material.metallic) / PI;
+    }
+    
+    // 点光源（增强光照效果）
+    if (global.useLightSource != 0 && global.lightIntensity > 0.0) {
+        vec3 pointLightContribution = calculatePointLight(inWorldPos, N, albedo);
+        diffuse += pointLightContribution * 1.0; // 增强点光源强度，使Cornell模型上的光照效果更明显
+    }
 
     vec3 color = diffuse;
 

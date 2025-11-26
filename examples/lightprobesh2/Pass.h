@@ -154,6 +154,10 @@ public:
         glm::vec4 cameraPos;
         float exposure = 4.5f;
         float gamma = 2.2f;
+        int useLightSource = 0;
+        float lightIntensity = 50.0f;
+        glm::vec3 lightPosition = glm::vec3(0.0f, 1.5f, 0.0f);
+        glm::vec3 lightColor = glm::vec3(1.0f, 1.0f, 1.0f);
     };
 
     void UpdateGlobal(const GlobalUbo& ubo);

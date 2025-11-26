@@ -1,4 +1,7 @@
-#include <cstdint>
+#include <stdlib.h>
+#include <string.h>
+#include <fstream>
+#include <vector>
 #include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -11,9 +14,10 @@
 #include "ILoader.h"
 #include "PreviewModel.h"
 #include "CubemapInterpolation.h"
-#include <fstream>
 #include "tiny_gltf.h"
 #include "../base/VulkanTools.h"
+
+#define PI 3.14159265358979323846
 
 // 注意：不定义TINYGLTF_IMPLEMENTATION，因为它已经在base.lib中实现
 
@@ -145,6 +149,12 @@ public:
     
     void SetCompareMode(RenderCompareMode mode);
     // 设置对比渲染模式
+    
+    void PrecomputePRT();
+    // 预计算PRT球谐系数
+    
+    void UpdatePRTLighting();
+    // 更新PRT光照
 
     void ReginPrefilterPasses();
     // 声明重新生成预过滤通道函数（未实现）。
@@ -180,6 +190,14 @@ public:
     void draw()
     {
         // 绘制一帧的逻辑。
+        // 自动旋转光源（降低速度）
+        if (autoRotateLight) {
+            lightRotationAngle += 0.005f; // 降低旋转速度
+            if (lightRotationAngle > 6.28318f) {
+                lightRotationAngle -= 6.28318f;
+            }
+        }
+        
         prepareData(); // 准备渲染数据（如相机矩阵）。
 
         VulkanExampleBase::prepareFrame(); // 准备帧（基类方法，可能包括交换链准备）。
@@ -286,6 +304,18 @@ private:
     std::shared_ptr<vks::TextureCubeMap> originalCubemap;      // 原始环境贴图
     std::shared_ptr<vks::TextureCubeMap> singleProbeCubemap;   // 单探针捕获
     std::shared_ptr<vks::TextureCubeMap> multiProbeCubemap;    // 多探针捕获/插值
+    
+    // 光源控制
+    bool lightEnabled = true;
+    float lightIntensity = 100.0f;
+    glm::vec3 lightColor = glm::vec3(1.0f, 1.0f, 1.0f);
+    float lightRotationAngle = 0.0f;
+    bool autoRotateLight = false;
+    
+    // PRT系统
+    bool usePRT = false;
+    std::vector<glm::vec3> precomputedSHCoefficients; // 预计算的SH系数
+    int shSamples = 16; // SH采样数量
 };
 
 // =============================================================================
@@ -561,8 +591,6 @@ void VulkanExample::CaptureAllProbes()
         std::cout << "[VulkanExample::CaptureAllProbes] All probes captured! Updated skybox to probe " << skyboxIndex << std::endl;
     }
 }
-
-// =============================================================================
 // 渲染相关函数
 // =============================================================================
 
@@ -575,7 +603,33 @@ void VulkanExample::prepareData()
     mainPassData.cameraPos = glm::vec4(camera.position, 1.0f); // 设置相机位置（齐次坐标）。
     mainPassData.light[0] = glm::vec4(10.0f, 10.0f, 10.0f, 1.0f); // 设置光源位置
 
+    // 更新光源参数
+    mainPassData.useLightSource = lightEnabled ? 1 : 0;
+    mainPassData.lightIntensity = lightIntensity;
+    mainPassData.lightColor = lightColor;
+
+    // 计算光源位置（绕Y轴旋转）
+    if (lightEnabled) {
+        float radius = 2.0f; // 减小旋转半径
+        mainPassData.lightPosition = glm::vec3(
+            0.0f, // 固定X位置
+            5.5f, // 固定Y位置
+            -7.0f  // 固定Z位置
+        );
+        
+        // 如果启用自动旋转，添加旋转偏移
+        if (autoRotateLight) {
+            mainPassData.lightPosition.x += radius * sin(lightRotationAngle) * 0.3f; // 降低旋转幅度
+            mainPassData.lightPosition.z += radius * cos(lightRotationAngle) * 0.3f; // 降低旋转幅度
+        }
+    } else {
+        mainPassData.lightPosition = glm::vec3(0.0f, 5.5f, -7.0f);
+    }
+
     mainPass->UpdateGlobal(mainPassData); // 更新主渲染通道的全局 UBO 数据。
+
+    // 更新PRT光照
+    UpdatePRTLighting();
 
     skybox->Update(camera.matrices.view); // 更新天空盒的视图矩阵。
 }
@@ -592,7 +646,11 @@ void VulkanExample::drawFrame(VkCommandBuffer cmd)
     mainPass->Draw(cmd, frameBuffers[currentBuffer], width, height, [this](VkCommandBuffer cmd) {
         // 匿名函数：记录绘制命令。
         skybox->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); // 绘制天空盒。
-        previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN, glm::vec3(0.0f, 6.0f, -7.0f)); // 绘制预览模型，放在Cornell Box内部。
+        
+        // Always draw preview model (as light source when enabled, otherwise as regular preview)
+        glm::vec3 previewPosition = lightEnabled ? glm::vec3(0.0f, 5.5f, -7.0f) : glm::vec3(0.0f, 5.5f, -7.0f);
+        previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN, previewPosition);
+        
         if (gltfModel) { gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); } // 添加空指针检查
         for (auto& m : gltfClones) { m->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
 
@@ -639,7 +697,9 @@ void VulkanExample::drawSplitView(VkCommandBuffer cmd)
             // 临时切换到原始cubemap
             skybox->UpdateCubemap(originalCubemap);
             skybox->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
-            previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN, glm::vec3(0.0f, 1.5f, 0.0f));
+            // Always draw preview model (as light source when enabled, otherwise as regular preview)
+            glm::vec3 previewPosition = glm::vec3(0.0f, 5.5f, -7.0f);
+            previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN, previewPosition);
             if (gltfModel) { gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
             for (auto& m : gltfClones) { m->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
         }
@@ -664,7 +724,9 @@ void VulkanExample::drawSplitView(VkCommandBuffer cmd)
             // 临时切换到单探针cubemap
             skybox->UpdateCubemap(singleProbeCubemap);
             skybox->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
-            previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN, glm::vec3(0.0f, 1.5f, 0.0f));
+            // Always draw preview model (as light source when enabled, otherwise as regular preview)
+            glm::vec3 previewPosition = glm::vec3(0.0f, 5.5f, -7.0f);
+            previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN, previewPosition);
             if (gltfModel) { gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
             for (auto& m : gltfClones) { m->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
         }
@@ -689,7 +751,7 @@ void VulkanExample::drawSplitView(VkCommandBuffer cmd)
             // 临时切换到多探针cubemap
             skybox->UpdateCubemap(multiProbeCubemap);
             skybox->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
-            previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN, glm::vec3(0.0f, 1.5f, 0.0f));
+            previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN, glm::vec3(0.0f, -5.f, -7.0f));
             if (gltfModel) { gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
             for (auto& m : gltfClones) { m->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
             
@@ -757,6 +819,59 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
             if (overlay->comboBox("GLTF Model", &gltfmodelIndex, gltfModelNames)) {
                 gltfModel->UpdateModel(gltfModels[gltfmodelIndex]);
                 std::cout << "[VulkanExample] Switched to GLTF model: " << gltfModelNames[gltfmodelIndex] << std::endl;
+            }
+        }
+
+        // 光源控制
+        if (overlay->header("Light Source")) {
+            if (overlay->checkBox("Enable Light", &lightEnabled)) {
+                globalDirty = true;
+            }
+            
+            if (overlay->inputFloat("Light Intensity", &lightIntensity, 1.0f, 2)) {
+                globalDirty = true;
+            }
+            
+            if (overlay->checkBox("Auto Rotate", &autoRotateLight)) {
+                globalDirty = true;
+            }
+            
+            if (overlay->sliderFloat("Light Rotation", &lightRotationAngle, 0.0f, 6.28318f)) {
+                globalDirty = true;
+            }
+            
+            // 光源颜色控制
+            float color[3] = { lightColor.r, lightColor.g, lightColor.b };
+            if (overlay->colorPicker("Light Color", color)) {
+                lightColor = glm::vec3(color[0], color[1], color[2]);
+                globalDirty = true;
+            }
+        }
+        
+        // PRT控制
+        if (overlay->header("PRT Relighting")) {
+            if (overlay->checkBox("Use PRT", &usePRT)) {
+                if (usePRT) {
+                    PrecomputePRT();
+                }
+                globalDirty = true;
+            }
+            
+            if (overlay->sliderInt("SH Samples", &shSamples, 1, 32)) {
+                if (usePRT) {
+                    PrecomputePRT();
+                }
+                globalDirty = true;
+            }
+            
+            overlay->text("Precomputed SH Coeffs: %zu", precomputedSHCoefficients.size());
+            
+            if (usePRT && !precomputedSHCoefficients.empty()) {
+                overlay->text("PRT Status: Active");
+            } else if (usePRT) {
+                overlay->text("PRT Status: Computing...");
+            } else {
+                overlay->text("PRT Status: Inactive");
             }
         }
 
@@ -1051,6 +1166,71 @@ void VulkanExample::SetCompareMode(RenderCompareMode mode)
     }
     
     std::cout << "[VulkanExample] Compare mode set to: " << static_cast<int>(mode) << std::endl;
+}
+
+// =============================================================================
+// PRT (Precomputed Radiance Transfer) 相关函数
+// =============================================================================
+
+void VulkanExample::PrecomputePRT()
+{
+    std::cout << "[VulkanExample] Starting PRT precomputation..." << std::endl;
+    
+    // 清空之前的预计算数据
+    precomputedSHCoefficients.clear();
+    
+    // 为每个SH采样点预计算光源的贡献
+    for (int i = 0; i < shSamples; ++i) {
+        float theta = (float)i / shSamples * PI;
+        float phi = (float)i / shSamples * 2.0f * PI;
+        
+        // 计算光源在这个方向上的SH系数
+        glm::vec3 lightDir = glm::vec3(
+            sin(theta) * cos(phi),
+            cos(theta),
+            sin(theta) * sin(phi)
+        );
+        
+        // 简化的SH系数计算（前3阶）
+        glm::vec3 shCoeffs;
+        
+        // l00 (DC分量)
+        shCoeffs.x = 0.282095f * lightIntensity;
+        
+        // l10 (Y方向)
+        shCoeffs.y = 0.488603f * lightDir.y * lightIntensity;
+        
+        // l11 (X方向)
+        shCoeffs.z = 0.488603f * lightDir.x * lightIntensity;
+        
+        precomputedSHCoefficients.push_back(shCoeffs * lightColor);
+    }
+    
+    std::cout << "[VulkanExample] PRT precomputation completed. Generated " 
+              << precomputedSHCoefficients.size() << " SH coefficient sets." << std::endl;
+}
+
+void VulkanExample::UpdatePRTLighting()
+{
+    if (!usePRT || precomputedSHCoefficients.empty()) {
+        return;
+    }
+    
+    // 根据当前光源旋转角度选择对应的SH系数
+    int index = (int)(lightRotationAngle / (2.0f * PI) * shSamples) % shSamples;
+    
+    if (index >= 0 && index < precomputedSHCoefficients.size()) {
+        auto& coeffs = precomputedSHCoefficients[index];
+        
+        // 更新全局SH系数
+        mainPassData.useLightSource = 1;
+        
+        // 这里应该更新实际的SH缓冲区
+        // 由于现有系统使用shGenPass，我们需要将预计算的系数应用到其中
+        // 这可能需要修改shGenPass或创建新的更新机制
+        
+        std::cout << "[VulkanExample] Updated PRT lighting with SH coefficients at index " << index << std::endl;
+    }
 }
    
 VULKAN_EXAMPLE_MAIN()

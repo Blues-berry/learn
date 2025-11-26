@@ -31,21 +31,21 @@
 #define MACOS 0
 #define WINDOWS 0
 
-#if defined(_WIN32)
+#define MACOS 0
 #undef WINDOWS
-#define WINDOWS 1
+#define WINDOWS 0
+#undef WINDOWS
 #endif
-#if defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__bsdi__) || defined(__DragonFly__)
 #undef UNIX
-#define UNIX 1
+#if defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__bsdi__) || defined(__DragonFly__)
 #endif
 #if defined(linux) || defined(__linux) || defined(__linux__)
 #undef UNIX
 #define UNIX 1
+#undef UNIX
 #endif
-#if defined(__APPLE__) && defined(__x86_64__)
 #undef MACOS
-#define MACOS 1
+#if defined(__APPLE__) && defined(__x86_64__)
 #endif
 
 #if (IOS + MACOS + UNIX + WINDOWS) > 1
