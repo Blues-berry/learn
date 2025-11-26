@@ -207,25 +207,49 @@ void PreviewModel::PreparePSO(VkRenderPass renderPass, VkDescriptorSetLayout pas
 	pipelineCI.stageCount = static_cast<uint32_t>(shaderStages.size());
 	// 设置着色器阶段数组。
 	pipelineCI.pStages = shaderStages.data();
-	// 设置顶点输入状态，包括位置、法线和UV坐标。
-	pipelineCI.pVertexInputState = vkglTF::Vertex::getPipelineVertexInputState({ vkglTF::VertexComponent::Position, vkglTF::VertexComponent::Normal, vkglTF::VertexComponent::UV });
+	// 设置顶点输入状态，只需要位置属性
+	pipelineCI.pVertexInputState = vkglTF::Vertex::getPipelineVertexInputState({ vkglTF::VertexComponent::Position });
 
-	// Skybox pipeline (background cube)
-
+	// 使用简化后的光源着色器
 	shaderStages[0] = iLoader->LoadShader("lightprobesh2/lightprobesh.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
-	shaderStages[1] = iLoader->LoadShader("lightprobesh2/lightprobesh.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
+	shaderStages[1] = iLoader->LoadShader("lightprobesh2/light_source.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
 	VK_CHECK_RESULT(vkCreateGraphicsPipelines(rawDevice, VK_NULL_HANDLE, 1, &pipelineCI, nullptr, &techniques[(uint32_t)technique].pso));
 }
 
 void PreviewModel::ShowUI(vks::UIOverlay* overlay)
 {
 	if (overlay->header("Material")) {
-		materialDirty |= overlay->inputFloat("roughness", &materialData.roughness, 0.1f, 2);
-		materialDirty |= overlay->inputFloat("metallic", &materialData.metallic, 0.1f, 2);
-		materialDirty |= overlay->inputFloat("specular", &materialData.specular, 0.1f, 2);
-		materialDirty |= overlay->colorPicker("elbedo", &materialData.elbedo.r);
-		materialDirty |= overlay->checkBox("UseSH", &materialData.useSH);
-		materialDirty |= overlay->checkBox("UseReflection", &materialData.useReflection);
+		// Lighting toggle
+		if (overlay->checkBox("Enable Lighting", &materialData.useLighting)) {
+			// When lighting is enabled, disable SH to avoid over-lighting
+			if (materialData.useLighting) {
+				materialData.useSH = 0;
+			}
+			materialDirty = true;
+		}
+
+		// Only show material properties when lighting is enabled
+		if (materialData.useLighting) {
+			overlay->text("Lighting Properties:");
+			materialDirty |= overlay->inputFloat("Roughness", &materialData.roughness, 0.1f, 2);
+			materialDirty |= overlay->inputFloat("Metallic", &materialData.metallic, 0.1f, 2);
+			materialDirty |= overlay->inputFloat("Specular", &materialData.specular, 0.1f, 2);
+		}
+
+		// Always show color
+		materialDirty |= overlay->colorPicker("Albedo", &materialData.elbedo.r);
+
+		// SH toggle (mutually exclusive with direct lighting)
+		if (overlay->checkBox("Use SH (Spherical Harmonics)", &materialData.useSH)) {
+			// When SH is enabled, disable direct lighting to avoid over-brightness
+			if (materialData.useSH) {
+				materialData.useLighting = 0;
+			}
+			materialDirty = true;
+		}
+
+		// Reflection toggle
+		materialDirty |= overlay->checkBox("Use Reflection", &materialData.useReflection);
 	}
 
 	if (materialDirty)

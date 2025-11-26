@@ -6,12 +6,16 @@ layout (location = 2) in vec2 inUV;
 
 layout (set = 0, binding = 0) uniform Global
 {
-    mat4 projection;   // ✅ 修复：改为分开的 projection 和 view，与 skybox 一致
+    mat4 projection;
     mat4 view;
     vec4 lights[4];
     vec4 cameraPos;
     float exposure;
     float gamma;
+    int useLightSource;      // 是否启用光源
+    float lightIntensity;    // 光源强度
+    vec3 lightPosition;      // 光源位置
+    vec3 lightColor;         // 光源颜色
 } global;
 
 layout (set = 0, binding = 1) uniform SHCoefficients {
@@ -83,35 +87,66 @@ vec4 sampleBaseColor(vec2 uv) {
 	return material.albedo;
 }
 
+// 计算点光源的漫反射和镜面反射贡献
+vec3 calculatePointLightContribution(vec3 lightPos, vec3 lightColor, float lightIntensity, vec3 N, vec3 V, vec3 albedo, float roughness, float metallic, float specularStrength) {
+    vec3 L = lightPos - inWorldPos;
+    float distance = length(L);
+    L = normalize(L);
+    
+    // 计算衰减（简单的平方反比衰减）
+    float attenuation = 1.0 / (distance * distance);
+    vec3 radiance = lightColor * lightIntensity * attenuation;
+    
+    // 漫反射
+    float NdotL = max(dot(N, L), 0.0);
+    vec3 diffuse = radiance * NdotL * albedo / PI;
+    
+    // 镜面反射 (Blinn-Phong)
+    vec3 H = normalize(V + L);
+    float NdotH = max(dot(N, H), 0.0);
+    float specularPower = exp2(10.0 * (1.0 - roughness) + 1.0);
+    vec3 specular = vec3(specularStrength) * radiance * pow(NdotH, specularPower) * NdotL;
+    
+    return diffuse + specular;
+}
+
 void main()
 {
-	vec3 N = normalize(inNormal);
-	vec3 V = normalize(global.cameraPos.xyz - inWorldPos);
-
-	vec4 sampled = sampleBaseColor(inUV);
-	vec3 albedo = sampled.rgb;
-	if (material.useTexture == 0) {
-		albedo = pc.baseColor.rgb;
-	}
-
-	vec3 color = albedo * 0.2f; // baseline ambient
-	if (material.useSH != 0) {
-		color += clamp(evaluateSH(N), vec3(0.0f), vec3(4.0f)) * albedo;
-	}
-
-	vec3 lightDir = normalize(vec3(1.0f, 1.0f, 1.0f));
-	float NdotL = max(dot(N, lightDir), 0.0f);
-	color += albedo * NdotL;
-
-	vec3 H = normalize(V + lightDir);
-	float NdotH = max(dot(N, H), 0.0f);
-	float gloss = mix(8.0f, 32.0f, clamp(material.roughness, 0.0f, 1.0f));
-	color += vec3(material.specular) * pow(NdotH, gloss);
-
-	color = clamp(color, vec3(0.0f), vec3(20.0f));
-	vec3 mapped = color * global.exposure;
-	mapped = mapped / (mapped + vec3(1.0f));
-	mapped = pow(mapped, vec3(1.0f / max(global.gamma, 0.0001f)));
-
-	outColor = vec4(mapped, sampled.a);
+    // 法线和视角向量
+    vec3 N = normalize(inNormal);
+    vec3 V = normalize(global.cameraPos.xyz - inWorldPos);
+    
+    // 获取基础颜色
+    vec4 sampled = sampleBaseColor(inUV);
+    vec3 albedo = material.useTexture != 0 ? sampled.rgb : pc.baseColor.rgb;
+    
+    // 基础环境光
+    vec3 color = albedo * 0.1f;
+    
+    // 球谐光照（如果启用）
+    if (material.useSH != 0 && global.useLightSource == 0) {
+        color += clamp(evaluateSH(N), vec3(0.0f), vec3(4.0f)) * albedo;
+    }
+    
+    // 点光源（如果启用）
+    if (global.useLightSource != 0) {
+        color += calculatePointLightContribution(
+            global.lightPosition,
+            global.lightColor,
+            global.lightIntensity,
+            N, V,
+            albedo,
+            material.roughness,
+            material.metallic,
+            material.specular
+        );
+    }
+    
+    // 色调映射和伽马校正
+    color = clamp(color, vec3(0.0f), vec3(20.0f));
+    vec3 mapped = color * global.exposure;
+    mapped = mapped / (mapped + vec3(1.0f));
+    mapped = pow(mapped, vec3(1.0f / max(global.gamma, 0.0001f)));
+    
+    outColor = vec4(mapped, sampled.a);
 }

@@ -19,7 +19,7 @@ public:
 		float roughness = 1.f;
 		float metallic = 0.5;
 		float specular = 0.5;
-		float padding = 0.f;
+		int32_t useLighting = 1;  // Enable lighting by default
 		glm::vec4 elbedo = glm::vec4(1.f, 1.f, 1.f, 1.f);
 
 		int32_t useSH = 1;

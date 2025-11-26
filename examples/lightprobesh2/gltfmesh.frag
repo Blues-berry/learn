@@ -30,7 +30,7 @@ layout (set = 1, binding = 1) uniform Material
     float roughness;
     float metallic;
     float specular;
-    float padding;
+    int useLighting;  // New: Toggle for direct lighting
     vec4 albedo;
     int useSH;
     int useReflection;
@@ -120,20 +120,28 @@ void main()
     // 球谐光照（使用预计算的PRT系数或实时SH）
     vec3 irradiance = evaluateSH(N);
     
-    // 如果启用了PRT，增强SH光照效果
-    if (global.useLightSource != 0) {
-        // PRT模式下，SH系数已经包含了光源信息
-        diffuse += irradiance * albedo * (1.0 - material.metallic) * 2.0;
-    } else {
-        // 普通SH光照
-        diffuse += irradiance * albedo * (1.0 - material.metallic) / PI;
+    // 如果启用了直接光照
+    if (material.useLighting != 0) {
+        // 直接光照模式：使用点光源
+        if (global.useLightSource != 0 && global.lightIntensity > 0.0) {
+            vec3 pointLightContribution = calculatePointLight(inWorldPos, N, albedo);
+            diffuse += pointLightContribution;
+        }
+        // 直接光照模式下禁用SH
+        material.useSH = 0;
+    } 
+    // 如果启用了SH
+    else if (material.useSH != 0) {
+        // SH光照模式：使用球谐光照
+        if (global.useLightSource != 0) {
+            // PRT模式：SH系数已经包含了光源信息
+            diffuse += irradiance * albedo * (1.0 - material.metallic) * 2.0;
+        } else {
+            // 普通SH光照
+            diffuse += irradiance * albedo * (1.0 - material.metallic) / PI;
+        }
     }
-    
-    // 点光源（增强光照效果）
-    if (global.useLightSource != 0 && global.lightIntensity > 0.0) {
-        vec3 pointLightContribution = calculatePointLight(inWorldPos, N, albedo);
-        diffuse += pointLightContribution * 1.0; // 增强点光源强度，使Cornell模型上的光照效果更明显
-    }
+    // 如果既没有启用直接光照也没有启用SH，则只保留基础环境光
 
     vec3 color = diffuse;
 
