@@ -592,7 +592,7 @@ void VulkanExample::drawFrame(VkCommandBuffer cmd)
     mainPass->Draw(cmd, frameBuffers[currentBuffer], width, height, [this](VkCommandBuffer cmd) {
         // 匿名函数：记录绘制命令。
         skybox->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); // 绘制天空盒。
-        previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN, glm::vec3(0.0f, 3.0f, 1.5f)); // 绘制预览模型。
+        previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN, glm::vec3(0.0f, 6.0f, -7.0f)); // 绘制预览模型，放在Cornell Box内部。
         if (gltfModel) { gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); } // 添加空指针检查
         for (auto& m : gltfClones) { m->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
 
@@ -639,7 +639,7 @@ void VulkanExample::drawSplitView(VkCommandBuffer cmd)
             // 临时切换到原始cubemap
             skybox->UpdateCubemap(originalCubemap);
             skybox->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
-            previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
+            previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN, glm::vec3(0.0f, 1.5f, 0.0f));
             if (gltfModel) { gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
             for (auto& m : gltfClones) { m->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
         }
@@ -664,7 +664,7 @@ void VulkanExample::drawSplitView(VkCommandBuffer cmd)
             // 临时切换到单探针cubemap
             skybox->UpdateCubemap(singleProbeCubemap);
             skybox->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
-            previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
+            previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN, glm::vec3(0.0f, 1.5f, 0.0f));
             if (gltfModel) { gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
             for (auto& m : gltfClones) { m->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
         }
@@ -689,7 +689,7 @@ void VulkanExample::drawSplitView(VkCommandBuffer cmd)
             // 临时切换到多探针cubemap
             skybox->UpdateCubemap(multiProbeCubemap);
             skybox->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
-            previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
+            previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN, glm::vec3(0.0f, 1.5f, 0.0f));
             if (gltfModel) { gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
             for (auto& m : gltfClones) { m->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
             
