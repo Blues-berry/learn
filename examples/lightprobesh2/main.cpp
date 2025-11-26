@@ -311,7 +311,8 @@ void VulkanExample::LoadAssets()
     LoadPreviewModel("glowsphere", "models/glowsphere.gltf", glTFLoadingFlags); // 加载维纳斯模型。
     LoadPreviewModel("rock01", "models/rock01.gltf", glTFLoadingFlags); // 加载模型。
 
-   
+    LoadgltfModel("CornellBox-Original", "models/CornellBox-Original.gltf", glTFLoadingFlags); // 
+    LoadgltfModel("cornell", "models/cornell.gltf", glTFLoadingFlags); // 
     LoadgltfModel("FlightHelmet", "models/FlightHelmet/glTF/FlightHelmet.gltf", glTFLoadingFlags); // 
     LoadgltfModel("CesiumMan", "models/CesiumMan/glTF/CesiumMan.gltf", glTFLoadingFlags); // 
     skyboxModel = std::make_shared<vkglTF::Model>(); // 创建天空盒模型对象。
