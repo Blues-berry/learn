@@ -610,11 +610,11 @@ void VulkanExample::prepareData()
 
     // 计算光源位置（绕Y轴旋转）
     if (lightEnabled) {
-        float radius = 2.0f; // 减小旋转半径
+        float radius = 5.0f; // 减小旋转半径
         mainPassData.lightPosition = glm::vec3(
             0.0f, // 固定X位置
             5.5f, // 固定Y位置
-            -7.0f  // 固定Z位置
+            -9.0f  // 固定Z位置
         );
         
         // 如果启用自动旋转，添加旋转偏移
@@ -623,7 +623,7 @@ void VulkanExample::prepareData()
             mainPassData.lightPosition.z += radius * cos(lightRotationAngle) * 0.3f; // 降低旋转幅度
         }
     } else {
-        mainPassData.lightPosition = glm::vec3(0.0f, 5.5f, -7.0f);
+        mainPassData.lightPosition = glm::vec3(0.0f, 5.5f, -9.0f);
     }
 
     mainPass->UpdateGlobal(mainPassData); // 更新主渲染通道的全局 UBO 数据。
