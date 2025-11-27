@@ -363,6 +363,7 @@ void VulkanExample::PrepareScene()
     previewModel = std::make_unique<PreviewModel>(vulkanDevice, this); // 创建预览模型对象。
     previewModel->PreparePSO(renderPass, mainPass->descriptorSetLayout, ETechnique::MAIN); // 准备预览模型的 PSO。
     previewModel->UpdateModel(previewModels[modelIndex]); // 设置初始预览模型。
+    previewModel->SetLightColor(lightColor); // 设置初始光源颜色
 
     // 准备gltfModel - 为MainPass和CapturePass都准备PSO
     if (!gltfModels.empty()) {
@@ -610,7 +611,7 @@ void VulkanExample::prepareData()
 
     // 计算光源位置（绕Y轴旋转）
     if (lightEnabled) {
-        float radius = 5.0f; // 减小旋转半径
+        float radius = 15.0f; // 减小旋转半径
         mainPassData.lightPosition = glm::vec3(
             0.0f, // 固定X位置
             5.5f, // 固定Y位置
@@ -621,6 +622,7 @@ void VulkanExample::prepareData()
         if (autoRotateLight) {
             mainPassData.lightPosition.x += radius * sin(lightRotationAngle) * 0.3f; // 降低旋转幅度
             mainPassData.lightPosition.z += radius * cos(lightRotationAngle) * 0.3f; // 降低旋转幅度
+            mainPassData.lightPosition.y += radius * cos(lightRotationAngle) * 0.3f; // 降低旋转幅度
         }
     } else {
         mainPassData.lightPosition = glm::vec3(0.0f, 5.5f, -9.0f);
@@ -647,9 +649,10 @@ void VulkanExample::drawFrame(VkCommandBuffer cmd)
         // 匿名函数：记录绘制命令。
         skybox->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); // 绘制天空盒。
         
-        // Always draw preview model (as light source when enabled, otherwise as regular preview)
-        glm::vec3 previewPosition = lightEnabled ? glm::vec3(0.0f, 5.5f, -7.0f) : glm::vec3(0.0f, 5.5f, -7.0f);
-        previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN, previewPosition);
+        // 绘制预览模型，使用光源位置
+        if (previewModel) {
+            previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN, mainPassData.lightPosition);
+        }
         
         if (gltfModel) { gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); } // 添加空指针检查
         for (auto& m : gltfClones) { m->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
@@ -844,6 +847,7 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
             float color[3] = { lightColor.r, lightColor.g, lightColor.b };
             if (overlay->colorPicker("Light Color", color)) {
                 lightColor = glm::vec3(color[0], color[1], color[2]);
+                previewModel->SetLightColor(lightColor);
                 globalDirty = true;
             }
         }

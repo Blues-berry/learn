@@ -71,6 +71,7 @@ void PreviewModel::Draw(VkCommandBuffer cmd, VkDescriptorSet globalSet, ETechniq
 {
     if (!model)
     {
+        printf("[ERROR] Model is null!\n");
         return;
     }
 
@@ -79,14 +80,37 @@ void PreviewModel::Draw(VkCommandBuffer cmd, VkDescriptorSet globalSet, ETechniq
         globalSet, descriptorSet
     };
 
-    // Apply position transformation
-    localData.transform = glm::translate(glm::mat4(1.0f), position);
+    printf("[DEBUG] Drawing preview model at position: (%.2f, %.2f, %.2f)\n", position.x, position.y, position.z);
+    
+    // Update the model's position to match the light source
+    // Use a simple scale to make the light source visible
+    float scale = 0.5f; // Adjust size as needed
+    glm::mat4 modelMatrix = glm::translate(glm::mat4(1.0f), position);
+    modelMatrix = glm::scale(modelMatrix, glm::vec3(scale));
+    
+    // Update the local buffer with the new transform
+    localData.transform = modelMatrix;
     memcpy(localBuffer.mapped, &localData, sizeof(LocalBuffer));
 
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, techniques[techIdx].pipelineLayout, 0, static_cast<uint32_t>(sets.size()), sets.data(), 0, NULL);
+    // Make sure the material is updated with the latest light color
+    if (materialDirty) {
+        printf("[DEBUG] Material is dirty, updating material buffer...\n");
+        printf("[DEBUG] Current material color: (%.2f, %.2f, %.2f, %.2f)\n", 
+               materialData.elbedo.r, materialData.elbedo.g, materialData.elbedo.b, materialData.elbedo.a);
+        
+        if (materialBuffer.mapped) {
+            memcpy(materialBuffer.mapped, &materialData, sizeof(MaterialBuffer));
+            printf("[DEBUG] Material buffer updated\n");
+        } else {
+            printf("[ERROR] Material buffer not mapped!\n");
+        }
+        materialDirty = false;
+    }
+
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, techniques[techIdx].pipelineLayout, 
+                           0, static_cast<uint32_t>(sets.size()), sets.data(), 0, NULL);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, techniques[techIdx].pso);
 
-    // ✅ 修复: 绑定顶点和索引缓冲，并传递正确的参数
     VkDeviceSize offsets[1] = { 0 };
     vkCmdBindVertexBuffers(cmd, 0, 1, &model->vertices.buffer, offsets);
     vkCmdBindIndexBuffer(cmd, model->indices.buffer, 0, VK_INDEX_TYPE_UINT32);
@@ -133,11 +157,30 @@ void PreviewModel::PreparePerBatchResource()
 
 void PreviewModel::UpdateSet()
 {
-	std::vector<VkWriteDescriptorSet> writeDescriptorSets = {
-	vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &localBuffer.descriptor),
-	vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, &materialBuffer.descriptor)
-	};
-	vkUpdateDescriptorSets(device->logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, NULL);
+    printf("[DEBUG] Updating descriptor sets...\n");
+    
+    // Print material buffer info
+    printf("[DEBUG] Material buffer info:\n");
+    printf("  - Size: %zu bytes\n", materialBuffer.size);
+    printf("  - Mapped: %s\n", materialBuffer.mapped ? "yes" : "no");
+    
+    // Print current material data
+    printf("[DEBUG] Current material data before update:\n");
+    printf("  - Albedo: (%.2f, %.2f, %.2f, %.2f)\n", 
+           materialData.elbedo.r, materialData.elbedo.g, materialData.elbedo.b, materialData.elbedo.a);
+    printf("  - Roughness: %.2f\n", materialData.roughness);
+    printf("  - Metallic: %.2f\n", materialData.metallic);
+    printf("  - Specular: %.2f\n", materialData.specular);
+    printf("  - useLighting: %d\n", materialData.useLighting);
+    
+    std::vector<VkWriteDescriptorSet> writeDescriptorSets = {
+        vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &localBuffer.descriptor),
+        vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, &materialBuffer.descriptor)
+    };
+    
+    printf("[DEBUG] Updating %zu descriptor sets...\n", writeDescriptorSets.size());
+    vkUpdateDescriptorSets(device->logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, NULL);
+    printf("[DEBUG] Descriptor sets updated\n");
 }
 
 void PreviewModel::PreparePSO(VkRenderPass renderPass, VkDescriptorSetLayout passLayout, ETechnique technique)
@@ -267,4 +310,31 @@ void PreviewModel::SetUseSHAndReflection(bool useSH, bool useReflection)
 	if (materialBuffer.mapped) {
 		memcpy(materialBuffer.mapped, &materialData, sizeof(MaterialBuffer));
 	}
+}
+
+void PreviewModel::SetLightColor(const glm::vec3& color)
+{
+    printf("[DEBUG] SetLightColor called with color: (%.2f, %.2f, %.2f)\n", color.r, color.g, color.b);
+    
+    // Set the material color to match the light color with full brightness
+    materialData.elbedo = glm::vec4(color, 1.0f);
+    
+    // Set material properties to make it look like a bright light source
+    materialData.roughness = 0.0f;  // Make it very smooth
+    materialData.metallic = 0.0f;   // Non-metallic
+    materialData.specular = 1.0f;   // Full specular
+    materialData.useLighting = 0;   // Disable lighting calculations, use pure color
+    
+    // Force update the material buffer immediately
+    if (materialBuffer.mapped) {
+        printf("[DEBUG] Updating material buffer with color: (%.2f, %.2f, %.2f, %.2f)\n", 
+               materialData.elbedo.r, materialData.elbedo.g, materialData.elbedo.b, materialData.elbedo.a);
+        memcpy(materialBuffer.mapped, &materialData, sizeof(MaterialBuffer));
+    } else {
+        printf("[ERROR] Material buffer not mapped!\n");
+    }
+    
+    // Mark as dirty to ensure the changes are applied
+    materialDirty = true;
+    printf("[DEBUG] Material dirty flag set to: %s\n", materialDirty ? "true" : "false");
 }

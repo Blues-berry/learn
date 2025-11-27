@@ -40,6 +40,8 @@ public:
     std::shared_ptr<vkglTF::Model> getModel() const { return model; }
 	// Allow enabling/disabling SH and reflection from external code
 	void SetUseSHAndReflection(bool useSH, bool useReflection);
+	// Set material color to match light color
+	void SetLightColor(const glm::vec3& color);
 
 private:
 	void PreparePerBatchResource();
