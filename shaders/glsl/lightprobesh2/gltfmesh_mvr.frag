@@ -12,6 +12,10 @@ layout (set = 0, binding = 0) uniform Global
 	vec4 mainLight;
 	float exposure;
 	float gamma;
+	int useLightSource;
+	float lightIntensity;
+	vec3 lightPosition;
+	vec3 lightColor;
 } global;
 
 layout (set = 0, binding = 1) uniform SHCoefficients {
@@ -93,13 +97,17 @@ void main()
 		diffuse += max(evaluateSH(N), vec3(0.0)) * albedo;
 	}
 
-	vec3 lightDir = normalize(vec3(1.0, 1.0, 1.0));
+	// 使用动态光源位置和颜色
+	vec3 lightDir = normalize(global.lightPosition - inWorldPos);
 	float NdotL = max(dot(N, lightDir), 0.0);
-	diffuse += albedo * NdotL * 0.5;
+
+	// 应用光源颜色和强度
+	vec3 lightContribution = global.lightColor * global.lightIntensity * NdotL;
+	diffuse += albedo * lightContribution * 0.5;
 
 	vec3 H = normalize(V + lightDir);
 	float NdotH = max(dot(N, H), 0.0);
-	vec3 specular = vec3(material.specular) * pow(NdotH, mix(8.0, 64.0, clamp(material.roughness, 0.0, 1.0)));
+	vec3 specular = vec3(material.specular) * pow(NdotH, mix(8.0, 64.0, clamp(material.roughness, 0.0, 1.0))) * lightContribution;
 
 	vec3 color = diffuse + specular;
 	color = max(color, vec3(0.0));

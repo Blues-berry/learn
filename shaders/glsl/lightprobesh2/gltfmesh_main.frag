@@ -11,6 +11,10 @@ layout (set = 0, binding = 0) uniform Global
     vec4 lights[4];    // 光照信息
     float exposure;    // 曝光
     float gamma;       // 伽马
+    int useLightSource;
+    float lightIntensity;
+    vec3 lightPosition;
+    vec3 lightColor;
 } global;
 
 layout (set = 0, binding = 1) uniform SHCoefficients {
@@ -162,15 +166,18 @@ void main()
 	// 基础漫反射光照
 	vec3 diffuse = albedo * 0.5;  // 基础环境光
 
-	// 添加一个简单的方向光
-	vec3 lightDir = normalize(vec3(1.0, 1.0, 1.0));
+	// 使用动态光源位置和颜色
+	vec3 lightDir = normalize(global.lightPosition - inWorldPos);
 	float NdotL = max(dot(N_normalized, lightDir), 0.0);
-	diffuse += albedo * NdotL * 0.5;  // 方向光贡献
+
+	// 应用光源颜色和强度
+	vec3 lightContribution = global.lightColor * global.lightIntensity * NdotL;
+	diffuse += albedo * lightContribution * 0.5;  // 方向光贡献
 
 	// 简单的镜面反射
 	vec3 H = normalize(V + lightDir);
 	float NdotH = max(dot(N_normalized, H), 0.0);
-	float specular = pow(NdotH, 32.0) * 0.5;  // 镜面高光
+	float specular = pow(NdotH, 32.0) * 0.5 * length(lightContribution);  // 镜面高光
 
 	vec3 color = diffuse + vec3(specular);
 

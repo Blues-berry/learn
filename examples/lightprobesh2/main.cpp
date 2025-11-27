@@ -14,6 +14,7 @@
 #include "ILoader.h"
 #include "PreviewModel.h"
 #include "CubemapInterpolation.h"
+#include "SphericalHarmonics.h"
 #include "tiny_gltf.h"
 #include "../base/VulkanTools.h"
 
@@ -316,6 +317,11 @@ private:
     bool usePRT = false;
     std::vector<glm::vec3> precomputedSHCoefficients; // 预计算的SH系数
     int shSamples = 16; // SH采样数量
+
+    // PRT新系统
+    std::vector<PRTPrecomputer::RotatedCoefficients> prtData; // 预计算的PRT数据
+    SHCoefficients currentSHCoefficients; // 当前的球谐系数
+    std::string prtDataFile = "prt_data.txt"; // PRT数据文件路径
 };
 
 // =============================================================================
@@ -1178,63 +1184,137 @@ void VulkanExample::SetCompareMode(RenderCompareMode mode)
 
 void VulkanExample::PrecomputePRT()
 {
+    std::cout << "\n========================================" << std::endl;
     std::cout << "[VulkanExample] Starting PRT precomputation..." << std::endl;
-    
-    // 清空之前的预计算数据
-    precomputedSHCoefficients.clear();
-    
-    // 为每个SH采样点预计算光源的贡献
-    for (int i = 0; i < shSamples; ++i) {
-        float theta = (float)i / shSamples * PI;
-        float phi = (float)i / shSamples * 2.0f * PI;
-        
-        // 计算光源在这个方向上的SH系数
-        glm::vec3 lightDir = glm::vec3(
-            sin(theta) * cos(phi),
-            cos(theta),
-            sin(theta) * sin(phi)
-        );
-        
-        // 简化的SH系数计算（前3阶）
-        glm::vec3 shCoeffs;
-        
-        // l00 (DC分量)
-        shCoeffs.x = 0.282095f * lightIntensity;
-        
-        // l10 (Y方向)
-        shCoeffs.y = 0.488603f * lightDir.y * lightIntensity;
-        
-        // l11 (X方向)
-        shCoeffs.z = 0.488603f * lightDir.x * lightIntensity;
-        
-        precomputedSHCoefficients.push_back(shCoeffs * lightColor);
+    std::cout << "========================================\n" << std::endl;
+
+    // ============================================================
+    // 第1步: 生成采样方向
+    // ============================================================
+    std::cout << "[Step 1] Generating sample directions..." << std::endl;
+    auto directions = SphericalHarmonics::GenerateFibonacciSamples(shSamples);
+    std::cout << "  - Generated " << directions.size() << " sample directions" << std::endl;
+
+    // ============================================================
+    // 第2步: 预计算Lighting (光源的球谐系数)
+    // ============================================================
+    std::cout << "\n[Step 2] Precomputing Lighting (Light Source)..." << std::endl;
+
+    // 生成采样光照 (使用当前光源颜色)
+    // 在实际应用中，这应该从环境贴图或光源采样
+    std::vector<glm::vec3> radiances;
+    for (int i = 0; i < shSamples; i++) {
+        radiances.push_back(lightColor * lightIntensity);
     }
-    
-    std::cout << "[VulkanExample] PRT precomputation completed. Generated " 
-              << precomputedSHCoefficients.size() << " SH coefficient sets." << std::endl;
+
+    // 预计算光照的球谐系数
+    SHCoefficients lightingCoeffs = PRTPrecomputer::PrecomputeLighting(directions, radiances);
+    std::cout << "  - Lighting SH coefficients computed" << std::endl;
+    std::cout << "  - Light Color: (" << lightColor.x << ", " << lightColor.y << ", " << lightColor.z << ")" << std::endl;
+    std::cout << "  - Light Intensity: " << lightIntensity << std::endl;
+
+    // ============================================================
+    // 第3步: 预计算Light Transport (物体表面对光照的响应)
+    // ============================================================
+    std::cout << "\n[Step 3] Precomputing Light Transport (Surface Response)..." << std::endl;
+
+    // 这里我们为Cornell Box的主表面预计算LT
+    // 实际应用中应该对所有顶点/像素进行预计算
+    glm::vec3 cornellNormal = glm::vec3(0.0f, 1.0f, 0.0f);  // 水平表面
+    glm::vec3 cornellAlbedo = glm::vec3(0.8f, 0.8f, 0.8f);  // 灰色表面
+
+    SHCoefficients ltCoeffs = PRTPrecomputer::PrecomputeLightTransport(
+        glm::vec3(0.0f, 0.0f, 0.0f),
+        cornellNormal,
+        cornellAlbedo,
+        directions
+    );
+    std::cout << "  - Light Transport SH coefficients computed" << std::endl;
+    std::cout << "  - Surface Normal: (" << cornellNormal.x << ", " << cornellNormal.y << ", " << cornellNormal.z << ")" << std::endl;
+    std::cout << "  - Surface Albedo: (" << cornellAlbedo.x << ", " << cornellAlbedo.y << ", " << cornellAlbedo.z << ")" << std::endl;
+
+    // ============================================================
+    // 第4步: 预计算不同旋转角度的光照系数
+    // ============================================================
+    std::cout << "\n[Step 4] Precomputing Light Rotations..." << std::endl;
+
+    // 预计算不同旋转角度的系数 (24个旋转, 每15度一个)
+    prtData = PRTPrecomputer::PrecomputeRotations(lightingCoeffs, 24, 360.0f);
+    std::cout << "  - Precomputed " << prtData.size() << " rotations" << std::endl;
+    std::cout << "  - Rotation step: " << (360.0f / prtData.size()) << " degrees" << std::endl;
+
+    // ============================================================
+    // 第5步: 导出到文件 (三项数据)
+    // ============================================================
+    std::cout << "\n[Step 5] Exporting PRT Data (Three Components)..." << std::endl;
+
+    std::string baseFilename = "prt_data";
+
+    // 导出第1项: Lighting (原始光源系数)
+    std::cout << "\n  [5.1] Exporting Original Lighting..." << std::endl;
+    std::string lightingOriginalFile = baseFilename + "_lighting_original.txt";
+    std::vector<PRTPrecomputer::RotatedCoefficients> singleLighting;
+    singleLighting.push_back({0.0f, lightingCoeffs});
+    if (DataExporter::ExportLighting(lightingOriginalFile, singleLighting)) {
+        std::cout << "    ✓ Exported to: " << lightingOriginalFile << std::endl;
+    }
+
+    // 导出第2项: Light Transport (物体表面响应)
+    std::cout << "\n  [5.2] Exporting Light Transport..." << std::endl;
+    std::string ltFile = baseFilename + "_lt.txt";
+    if (DataExporter::ExportLightTransport(ltFile, ltCoeffs)) {
+        std::cout << "    ✓ Exported to: " << ltFile << std::endl;
+    }
+
+    // 导出第3项: Rotated Lighting (旋转后的光源系数)
+    std::cout << "\n  [5.3] Exporting Rotated Lighting (24 rotations)..." << std::endl;
+    std::string rotatedLightingFile = baseFilename + "_lighting.txt";
+    if (DataExporter::ExportLighting(rotatedLightingFile, prtData)) {
+        std::cout << "    ✓ Exported to: " << rotatedLightingFile << std::endl;
+        std::cout << "    ✓ Contains " << prtData.size() << " rotations" << std::endl;
+    }
+
+    // 设置当前系数
+    currentSHCoefficients = lightingCoeffs;
+    usePRT = true;
+
+    std::cout << "\n========================================" << std::endl;
+    std::cout << "[VulkanExample] PRT precomputation completed successfully!" << std::endl;
+    std::cout << "========================================" << std::endl;
+    std::cout << "\nSummary of exported files:" << std::endl;
+    std::cout << "  1. " << lightingOriginalFile << " (Original Lighting)" << std::endl;
+    std::cout << "  2. " << ltFile << " (Light Transport)" << std::endl;
+    std::cout << "  3. " << rotatedLightingFile << " (Rotated Lighting - 24 angles)" << std::endl;
+    std::cout << "\nYou can now use PRTRenderer to render with these precomputed data." << std::endl;
+    std::cout << "========================================\n" << std::endl;
 }
 
 void VulkanExample::UpdatePRTLighting()
 {
-    if (!usePRT || precomputedSHCoefficients.empty()) {
+    if (!usePRT || prtData.empty()) {
         return;
     }
-    
-    // 根据当前光源旋转角度选择对应的SH系数
-    int index = (int)(lightRotationAngle / (2.0f * PI) * shSamples) % shSamples;
-    
-    if (index >= 0 && index < precomputedSHCoefficients.size()) {
-        auto& coeffs = precomputedSHCoefficients[index];
-        
-        // 更新全局SH系数
-        mainPassData.useLightSource = 1;
-        
-        // 这里应该更新实际的SH缓冲区
-        // 由于现有系统使用shGenPass，我们需要将预计算的系数应用到其中
-        // 这可能需要修改shGenPass或创建新的更新机制
-        
-        std::cout << "[VulkanExample] Updated PRT lighting with SH coefficients at index " << index << std::endl;
-    }
+
+    // 将弧度转换为度数
+    float angleDegrees = lightRotationAngle * 180.0f / PI;
+
+    // 查询对应旋转角度的球谐系数 (带插值)
+    // 这是预计算的Lighting系数，对应当前光源旋转角度
+    currentSHCoefficients = Relighter::QueryCoefficients(angleDegrees, prtData);
+
+    // ============================================================
+    // Relighting计算公式:
+    // L_out = Σ(i=0 to 8) Lighting[i] * LightTransport[i]
+    //
+    // 其中:
+    // - Lighting[i]: 当前旋转角度的光源球谐系数
+    // - LightTransport[i]: 物体表面对光照的响应系数
+    // ============================================================
+
+    // 注意: 实际的relighting计算应该在着色器中进行
+    // 这里只是更新了Lighting系数
+    // 着色器会使用: currentSHCoefficients (Lighting) 和 ltCoeffs (Light Transport)
+    // 来计算最终的relighting结果
 }
    
 VULKAN_EXAMPLE_MAIN()

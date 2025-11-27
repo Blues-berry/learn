@@ -80,7 +80,7 @@ void PreviewModel::Draw(VkCommandBuffer cmd, VkDescriptorSet globalSet, ETechniq
         globalSet, descriptorSet
     };
 
-    printf("[DEBUG] Drawing preview model at position: (%.2f, %.2f, %.2f)\n", position.x, position.y, position.z);
+    //printf("[DEBUG] Drawing preview model at position: (%.2f, %.2f, %.2f)\n", position.x, position.y, position.z);
     
     // Update the model's position to match the light source
     // Use a simple scale to make the light source visible
@@ -157,30 +157,45 @@ void PreviewModel::PreparePerBatchResource()
 
 void PreviewModel::UpdateSet()
 {
-    printf("[DEBUG] Updating descriptor sets...\n");
+    // Update material buffer if dirty
+    if (materialDirty && materialBuffer.mapped) {
+        printf("[DEBUG] Material is dirty, updating buffer...\n");
+        memcpy(materialBuffer.mapped, &materialData, sizeof(MaterialBuffer));
+        
+        // Flush the memory to make sure the GPU sees the update
+        VkMappedMemoryRange memoryRange = {};
+        memoryRange.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+        memoryRange.memory = materialBuffer.memory;
+        memoryRange.offset = 0;
+        memoryRange.size = sizeof(MaterialBuffer);
+        vkFlushMappedMemoryRanges(device->logicalDevice, 1, &memoryRange);
+        
+        materialDirty = false;
+        printf("[DEBUG] Material buffer updated and flushed\n");
+    }
     
-    // Print material buffer info
-    printf("[DEBUG] Material buffer info:\n");
-    printf("  - Size: %zu bytes\n", materialBuffer.size);
-    printf("  - Mapped: %s\n", materialBuffer.mapped ? "yes" : "no");
-    
-    // Print current material data
-    printf("[DEBUG] Current material data before update:\n");
-    printf("  - Albedo: (%.2f, %.2f, %.2f, %.2f)\n", 
-           materialData.elbedo.r, materialData.elbedo.g, materialData.elbedo.b, materialData.elbedo.a);
-    printf("  - Roughness: %.2f\n", materialData.roughness);
-    printf("  - Metallic: %.2f\n", materialData.metallic);
-    printf("  - Specular: %.2f\n", materialData.specular);
-    printf("  - useLighting: %d\n", materialData.useLighting);
-    
+    // Update descriptor sets
     std::vector<VkWriteDescriptorSet> writeDescriptorSets = {
         vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &localBuffer.descriptor),
         vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, &materialBuffer.descriptor)
     };
     
-    printf("[DEBUG] Updating %zu descriptor sets...\n", writeDescriptorSets.size());
-    vkUpdateDescriptorSets(device->logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, NULL);
-    printf("[DEBUG] Descriptor sets updated\n");
+    vkUpdateDescriptorSets(device->logicalDevice, 
+                          static_cast<uint32_t>(writeDescriptorSets.size()), 
+                          writeDescriptorSets.data(), 
+                          0, 
+                          nullptr);
+                          
+    // Debug output
+    #ifdef _DEBUG
+    printf("[DEBUG] Descriptor sets updated with material:\n");
+    printf("  - Albedo: (%.2f, %.2f, %.2f, %.2f)\n", 
+           materialData.elbedo.r, materialData.elbedo.g, materialData.elbedo.b, materialData.elbedo.a);
+    printf("  - Roughness: %.2f, Metallic: %.2f, Specular: %.2f\n", 
+           materialData.roughness, materialData.metallic, materialData.specular);
+    printf("  - useLighting: %d, useSH: %d, useReflection: %d\n", 
+           materialData.useLighting, materialData.useSH, materialData.useReflection);
+    #endif
 }
 
 void PreviewModel::PreparePSO(VkRenderPass renderPass, VkDescriptorSetLayout passLayout, ETechnique technique)
@@ -316,25 +331,37 @@ void PreviewModel::SetLightColor(const glm::vec3& color)
 {
     printf("[DEBUG] SetLightColor called with color: (%.2f, %.2f, %.2f)\n", color.r, color.g, color.b);
     
-    // Set the material color to match the light color with full brightness
+    // Update material properties
     materialData.elbedo = glm::vec4(color, 1.0f);
-    
-    // Set material properties to make it look like a bright light source
-    materialData.roughness = 0.0f;  // Make it very smooth
+    materialData.roughness = 0.1f;  // Slight roughness for better appearance
     materialData.metallic = 0.0f;   // Non-metallic
-    materialData.specular = 1.0f;   // Full specular
-    materialData.useLighting = 0;   // Disable lighting calculations, use pure color
+    materialData.specular = 1.0f;   // Full specular for bright appearance
+    materialData.useLighting = 1;   // Enable lighting for better appearance
     
-    // Force update the material buffer immediately
+    // Update the material buffer if it's mapped
     if (materialBuffer.mapped) {
         printf("[DEBUG] Updating material buffer with color: (%.2f, %.2f, %.2f, %.2f)\n", 
                materialData.elbedo.r, materialData.elbedo.g, materialData.elbedo.b, materialData.elbedo.a);
         memcpy(materialBuffer.mapped, &materialData, sizeof(MaterialBuffer));
+        
+        // Flush the memory to make sure the GPU sees the update
+        VkMappedMemoryRange memoryRange = {};
+        memoryRange.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+        memoryRange.memory = materialBuffer.memory;
+        memoryRange.offset = 0;
+        memoryRange.size = sizeof(MaterialBuffer);
+        vkFlushMappedMemoryRanges(device->logicalDevice, 1, &memoryRange);
     } else {
-        printf("[ERROR] Material buffer not mapped!\n");
+        printf("[WARNING] Material buffer not mapped, color update will be delayed\n");
     }
     
-    // Mark as dirty to ensure the changes are applied
+    // Mark as dirty to ensure the changes are applied in the next frame
     materialDirty = true;
-    printf("[DEBUG] Material dirty flag set to: %s\n", materialDirty ? "true" : "false");
+    
+    // Force update the descriptor set to ensure the changes are picked up
+    UpdateSet();
+    
+    printf("[DEBUG] Material updated - Color: (%.2f, %.2f, %.2f, %.2f), Dirty: %s\n",
+           materialData.elbedo.r, materialData.elbedo.g, materialData.elbedo.b, materialData.elbedo.a,
+           materialDirty ? "true" : "false");
 }
