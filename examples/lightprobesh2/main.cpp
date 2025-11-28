@@ -15,6 +15,7 @@
 #include "PreviewModel.h"
 #include "CubemapInterpolation.h"
 #include "SphericalHarmonics.h"
+#include "PRTComputeShader.h"
 #include "tiny_gltf.h"
 #include "../base/VulkanTools.h"
 
@@ -112,7 +113,7 @@ public:
             vkDestroyDescriptorPool(device, descriptorPool, nullptr);
             descriptorPool = VK_NULL_HANDLE;
         }
-        
+
         // 清空渲染通道对象。
         mainPass = nullptr;
         shGenPass = nullptr;
@@ -147,13 +148,13 @@ public:
 
     void CaptureAllProbes();
     // 自动捕获所有探针的立方体贴图
-    
+
     void SetCompareMode(RenderCompareMode mode);
     // 设置对比渲染模式
-    
+
     void PrecomputePRT();
     // 预计算PRT球谐系数
-    
+
     void UpdatePRTLighting();
     // 更新PRT光照
 
@@ -168,6 +169,12 @@ public:
         PreparePasses(); // 准备渲染通道。
         PrepareProbes(); // 准备光照探针。
         PrepareScene(); // 准备场景（天空盒和预览模型）。
+
+        // 初始化GPU PRT计算器
+        prtCompute = std::make_unique<PRT::PRTComputeShader>(vulkanDevice, queue);
+        if (!prtCompute->Initialize()) {
+            std::cerr << "[VulkanExample] Warning: PRTComputeShader Initialize failed. Will fallback to CPU for now." << std::endl;
+        }
         prepared = true; // 标记初始化完成。
     }
 
@@ -181,7 +188,7 @@ public:
 
     void drawFrame(VkCommandBuffer cmd);
     // 声明绘制单帧函数，记录渲染命令。
-    
+
     void drawSplitView(VkCommandBuffer cmd);
     // 分屏对比渲染：同时显示原始、单探针、多探针效果
 
@@ -198,7 +205,7 @@ public:
                 lightRotationAngle -= 6.28318f;
             }
         }
-        
+
         prepareData(); // 准备渲染数据（如相机矩阵）。
 
         VulkanExampleBase::prepareFrame(); // 准备帧（基类方法，可能包括交换链准备）。
@@ -220,6 +227,12 @@ public:
 
     void OnUpdateUIOverlay(vks::UIOverlay* overlay) override;
     // 声明 UI 覆盖更新函数，用于交互式设置。
+
+    // GPU PRT 预计算与导出
+    void ExportPRTDataGPU();
+    std::unique_ptr<PRT::PRTComputeShader> prtCompute;
+    bool isExportingPRT = false;
+    std::string prtExportStatus;
 
     VkPipelineShaderStageCreateInfo LoadShader(const std::string& path, VkShaderStageFlagBits stage) override
     {
@@ -283,11 +296,11 @@ private:
 
     // 预览模型对象。
     std::unique_ptr<LightProbe> probe;
-    
+
     // glTF模型对象
     std::unique_ptr<GltfModel> gltfModel;
     std::vector<std::unique_ptr<GltfModel>> gltfClones;
-    
+
     // 描述符池
     VkDescriptorPool descriptorPool{ VK_NULL_HANDLE };
 
@@ -299,20 +312,20 @@ private:
     // 插值算法选择
     int32_t interpolationModeIndex = 0;  // 0=IDW, 1=Linear, 2=Cubic
     std::vector<std::string> interpolationModeNames = {"IDW", "Linear", "Cubic"};
-    
+
     // 对比渲染
     RenderCompareMode compareMode = RenderCompareMode::NORMAL;
     std::shared_ptr<vks::TextureCubeMap> originalCubemap;      // 原始环境贴图
     std::shared_ptr<vks::TextureCubeMap> singleProbeCubemap;   // 单探针捕获
     std::shared_ptr<vks::TextureCubeMap> multiProbeCubemap;    // 多探针捕获/插值
-    
+
     // 光源控制
     bool lightEnabled = true;
     float lightIntensity = 100.0f;
     glm::vec3 lightColor = glm::vec3(1.0f, 1.0f, 1.0f);
     float lightRotationAngle = 0.0f;
     bool autoRotateLight = false;
-    
+
     // PRT系统
     bool usePRT = false;
     std::vector<glm::vec3> precomputedSHCoefficients; // 预计算的SH系数
@@ -349,11 +362,11 @@ void VulkanExample::LoadAssets()
     // LoadPreviewModel("rock01", "models/rock01.gltf", glTFLoadingFlags); // 加载模型。scene
 
 
-    // LoadgltfModel("CornellBox-scene", "models/scene.gltf", glTFLoadingFlags); // 
-    LoadgltfModel("CornellBox-Original", "models/CornellBox-Original.gltf", glTFLoadingFlags); // 
-    LoadgltfModel("cornell", "models/scene.gltf", glTFLoadingFlags); // 
-    // LoadgltfModel("FlightHelmet", "models/FlightHelmet/glTF/FlightHelmet.gltf", glTFLoadingFlags); // 
-    // LoadgltfModel("CesiumMan", "models/CesiumMan/glTF/CesiumMan.gltf", glTFLoadingFlags); // 
+    // LoadgltfModel("CornellBox-scene", "models/scene.gltf", glTFLoadingFlags); //
+    LoadgltfModel("CornellBox-Original", "models/CornellBox-Original.gltf", glTFLoadingFlags); //
+    LoadgltfModel("cornell", "models/scene.gltf", glTFLoadingFlags); //
+    // LoadgltfModel("FlightHelmet", "models/FlightHelmet/glTF/FlightHelmet.gltf", glTFLoadingFlags); //
+    // LoadgltfModel("CesiumMan", "models/CesiumMan/glTF/CesiumMan.gltf", glTFLoadingFlags); //
     skyboxModel = std::make_shared<vkglTF::Model>(); // 创建天空盒模型对象。
     skyboxModel->loadFromFile(getAssetPath() + "models/cube.gltf", vulkanDevice, queue, glTFLoadingFlags); // 加载立方体模型作为天空盒。
 }
@@ -394,7 +407,7 @@ void VulkanExample::UpdateSkyBox()
     shGenPass->Draw(cmdBuf); // 执行球谐计算。
     genIBL->Draw(cmdBuf); // 执行 IBL 渲染。
     vulkanDevice->flushCommandBuffer(cmdBuf, queue); // 提交并刷新命令缓冲区。
-    
+
     // 更新mainPass的描述符绑定，确保使用最新的立方体贴图
     mainPass->UpdateBindings();
 }
@@ -448,7 +461,7 @@ void VulkanExample::PreparePasses()
     };
     VkDescriptorPoolCreateInfo descriptorPoolInfo = vks::initializers::descriptorPoolCreateInfo(poolSizes, 33);
     VK_CHECK_RESULT(vkCreateDescriptorPool(device, &descriptorPoolInfo, nullptr, &descriptorPool));
-    
+
     // 准备所有渲染通道。
     mainPass = std::make_unique<MainPass>(vulkanDevice); // 创建主渲染通道。
     mainPass->SetUp(renderPass); // 设置主渲染通道的渲染通道对象。
@@ -623,7 +636,7 @@ void VulkanExample::prepareData()
             5.5f, // 固定Y位置
             -9.0f  // 固定Z位置
         );
-        
+
         // 如果启用自动旋转，添加旋转偏移
         if (autoRotateLight) {
             mainPassData.lightPosition.x += radius * sin(lightRotationAngle) * 0.3f; // 降低旋转幅度
@@ -654,12 +667,12 @@ void VulkanExample::drawFrame(VkCommandBuffer cmd)
     mainPass->Draw(cmd, frameBuffers[currentBuffer], width, height, [this](VkCommandBuffer cmd) {
         // 匿名函数：记录绘制命令。
         skybox->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); // 绘制天空盒。
-        
+
         // 绘制预览模型，使用光源位置
         if (previewModel) {
             previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN, mainPassData.lightPosition);
         }
-        
+
         if (gltfModel) { gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); } // 添加空指针检查
         for (auto& m : gltfClones) { m->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
 
@@ -680,7 +693,7 @@ void VulkanExample::drawSplitView(VkCommandBuffer cmd)
 {
     // 保存原始设置
     auto savedCubemap = cubeMaps[skyboxIndex];
-    
+
     // 计算每个视口的宽度（三分屏：原始 | 单探针 | 多探针）
     // TOFIX(分屏尺寸不对)
     uint32_t viewportWidth = width / 3;
@@ -695,14 +708,14 @@ void VulkanExample::drawSplitView(VkCommandBuffer cmd)
             viewport.height = static_cast<float>(height);
             viewport.minDepth = 0.0f;
             viewport.maxDepth = 1.0f;
-            
+
             VkRect2D scissor{};
             scissor.offset = {0, 0};
             scissor.extent = {viewportWidth, height};
-            
+
             vkCmdSetViewport(cmd, 0, 1, &viewport);
             vkCmdSetScissor(cmd, 0, 1, &scissor);
-            
+
             // 临时切换到原始cubemap
             skybox->UpdateCubemap(originalCubemap);
             skybox->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
@@ -712,7 +725,7 @@ void VulkanExample::drawSplitView(VkCommandBuffer cmd)
             if (gltfModel) { gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
             for (auto& m : gltfClones) { m->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
         }
-        
+
         // === 中间：单探针捕获 ===
         if (singleProbeCubemap) {
             VkViewport viewport{};
@@ -722,14 +735,14 @@ void VulkanExample::drawSplitView(VkCommandBuffer cmd)
             viewport.height = static_cast<float>(height);
             viewport.minDepth = 0.0f;
             viewport.maxDepth = 1.0f;
-            
+
             VkRect2D scissor{};
             scissor.offset = {static_cast<int32_t>(viewportWidth), 0};
             scissor.extent = {viewportWidth, height};
-            
+
             vkCmdSetViewport(cmd, 0, 1, &viewport);
             vkCmdSetScissor(cmd, 0, 1, &scissor);
-            
+
             // 临时切换到单探针cubemap
             skybox->UpdateCubemap(singleProbeCubemap);
             skybox->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
@@ -739,7 +752,7 @@ void VulkanExample::drawSplitView(VkCommandBuffer cmd)
             if (gltfModel) { gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
             for (auto& m : gltfClones) { m->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
         }
-        
+
         // === 右侧：多探针捕获/插值 ===
         if (multiProbeCubemap) {
             VkViewport viewport{};
@@ -749,21 +762,21 @@ void VulkanExample::drawSplitView(VkCommandBuffer cmd)
             viewport.height = static_cast<float>(height);
             viewport.minDepth = 0.0f;
             viewport.maxDepth = 1.0f;
-            
+
             VkRect2D scissor{};
             scissor.offset = {static_cast<int32_t>(viewportWidth * 2), 0};
             scissor.extent = {viewportWidth, height};
-            
+
             vkCmdSetViewport(cmd, 0, 1, &viewport);
             vkCmdSetScissor(cmd, 0, 1, &scissor);
-            
+
             // 临时切换到多探针cubemap
             skybox->UpdateCubemap(multiProbeCubemap);
             skybox->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
             previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN, glm::vec3(0.0f, -5.f, -7.0f));
             if (gltfModel) { gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
             for (auto& m : gltfClones) { m->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
-            
+
             // 在多探针视图中显示探针位置
             if (showProbes) {
                 for (const auto& probe : lightProbes) {
@@ -771,7 +784,7 @@ void VulkanExample::drawSplitView(VkCommandBuffer cmd)
                 }
             }
         }
-        
+
         // 恢复全屏viewport和scissor用于UI
         VkViewport fullViewport{};
         fullViewport.x = 0.0f;
@@ -780,17 +793,17 @@ void VulkanExample::drawSplitView(VkCommandBuffer cmd)
         fullViewport.height = static_cast<float>(height);
         fullViewport.minDepth = 0.0f;
         fullViewport.maxDepth = 1.0f;
-        
+
         VkRect2D fullScissor{};
         fullScissor.offset = {0, 0};
         fullScissor.extent = {width, height};
-        
+
         vkCmdSetViewport(cmd, 0, 1, &fullViewport);
         vkCmdSetScissor(cmd, 0, 1, &fullScissor);
-        
+
         // 恢复原始cubemap
         skybox->UpdateCubemap(savedCubemap);
-        
+
         // 绘制UI
         drawUI(cmd);
     });
@@ -809,7 +822,7 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
         overlay->text("  X: %.2f", camera.position.x);
         overlay->text("  Y: %.2f", camera.position.y);
         overlay->text("  Z: %.2f", camera.position.z);
-        
+
         if (overlay->inputFloat("Exposure", &mainPassData.exposure, 0.1f, 2)) { // 曝光度调节控件。
             globalDirty = true; // 标记全局数据需要更新。
         }
@@ -822,7 +835,7 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
         if (overlay->comboBox("PreviewModel", &modelIndex, previewModelNames)) { // 预览模型选择下拉框。
             previewModel->UpdateModel(previewModels[modelIndex]); // 更新预览模型。
         }
-        
+
         // GLTF 模型切换
         if (!gltfModelNames.empty() && gltfModel) {
             if (overlay->comboBox("GLTF Model", &gltfmodelIndex, gltfModelNames)) {
@@ -836,19 +849,19 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
             if (overlay->checkBox("Enable Light", &lightEnabled)) {
                 globalDirty = true;
             }
-            
+
             if (overlay->inputFloat("Light Intensity", &lightIntensity, 1.0f, 2)) {
                 globalDirty = true;
             }
-            
+
             if (overlay->checkBox("Auto Rotate", &autoRotateLight)) {
                 globalDirty = true;
             }
-            
+
             if (overlay->sliderFloat("Light Rotation", &lightRotationAngle, 0.0f, 6.28318f)) {
                 globalDirty = true;
             }
-            
+
             // 光源颜色控制
             float color[3] = { lightColor.r, lightColor.g, lightColor.b };
             if (overlay->colorPicker("Light Color", color)) {
@@ -857,7 +870,7 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
                 globalDirty = true;
             }
         }
-        
+
         // PRT控制
         if (overlay->header("PRT Relighting")) {
             if (overlay->checkBox("Use PRT", &usePRT)) {
@@ -866,16 +879,16 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
                 }
                 globalDirty = true;
             }
-            
+
             if (overlay->sliderInt("SH Samples", &shSamples, 1, 32)) {
                 if (usePRT) {
                     PrecomputePRT();
                 }
                 globalDirty = true;
             }
-            
+
             overlay->text("Precomputed SH Coeffs: %zu", precomputedSHCoefficients.size());
-            
+
             if (usePRT && !precomputedSHCoefficients.empty()) {
                 overlay->text("PRT Status: Active");
             } else if (usePRT) {
@@ -885,12 +898,22 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
             }
         }
 
+        // === PRT GPU 导出 ===
+        if (overlay->header("PRT GPU Export")) {
+            if (overlay->button("Export PRT (GPU)")) {
+                ExportPRTDataGPU();
+            }
+            if (isExportingPRT) {
+                overlay->text("Exporting: %s", prtExportStatus.c_str());
+            }
+        }
+
         if (overlay->button("Capture Cubemap at Camera")) { // 捕获立方体贴图按钮。
             CaptureCubemap(camera.position); // 在相机位置捕获立方体贴图。
         }
         // 使用LightProbe的静态UI方法（包含探针网格配置）
         LightProbe::ShowProbeGridUI(overlay, probeGridConfig, showProbes);
-        
+
         if (probeGridConfig.enabled) {
             // 点击 "Generate Probes" 会生成探针
             if (overlay->button("Generate Probes")) {
@@ -930,12 +953,12 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
                         multiProbeCubemap = interpolatedCubemap;
                         std::cout << "[VulkanExample] GPU-accelerated interpolated cubemap created using "
                                   << interpolationModeNames[interpolationModeIndex] << " at camera position" << std::endl;
-                    
+
                                 }
                 } else {
                     std::cerr << "[VulkanExample] No probes available for interpolation!" << std::endl;
                 }
-                
+
             }
 
             // 权重可视化按钮
@@ -981,7 +1004,7 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
             }
         }
     }
-    
+
     // 对比渲染模式UI
     if (overlay->header("Rendering Comparison")) {
         const char* compareModeNames[] = { "Normal", "Original Only", "Single Probe", "Multi Probe", "Split View" };
@@ -989,7 +1012,7 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
         if (overlay->comboBox("Compare Mode", &currentMode, std::vector<std::string>(compareModeNames, compareModeNames + 5))) {
             SetCompareMode(static_cast<RenderCompareMode>(currentMode));
         }
-        
+
         overlay->text("Current Mode:");
         switch (compareMode) {
             case RenderCompareMode::NORMAL:
@@ -1007,19 +1030,19 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
             case RenderCompareMode::SPLIT_VIEW:
                 overlay->text("  Split view (3-way)");
                 overlay->text("  Left: Original | Middle: Single | Right: Multi");
-                
+
                 // 显示每个cubemap的状态
                 overlay->text("Status:");
                 overlay->text("  Original: %s", originalCubemap ? "Ready" : "Not captured");
                 overlay->text("  Single: %s", singleProbeCubemap ? "Ready" : "Not captured");
                 overlay->text("  Multi: %s", multiProbeCubemap ? "Ready" : "Not captured");
-                
+
                 if (!originalCubemap || !singleProbeCubemap || !multiProbeCubemap) {
                     overlay->text("Tip: Capture all modes first!");
                 }
                 break;
         }
-        
+
         // 快速捕获按钮
         if (compareMode == RenderCompareMode::SPLIT_VIEW) {
             if (overlay->button("Quick Setup Split View")) {
@@ -1115,10 +1138,10 @@ void VulkanExample::CaptureCubemap(const glm::vec3& position)
     }
 
     lightProbes.push_back(std::move(probe));
-    
+
     // 保存单探针捕获结果用于对比
     singleProbeCubemap = capturedCubemap;
-    
+
     // 保存第一个cubemap作为original如果还未设置
     if (!originalCubemap && !cubeMaps.empty()) {
         originalCubemap = cubeMaps[0];
@@ -1129,7 +1152,7 @@ void VulkanExample::CaptureCubemap(const glm::vec3& position)
 void VulkanExample::SetCompareMode(RenderCompareMode mode)
 {
     compareMode = mode;
-    
+
     // 根据模式切换环境贴图
     switch (mode) {
         case RenderCompareMode::ORIGINAL_ONLY:
@@ -1142,7 +1165,7 @@ void VulkanExample::SetCompareMode(RenderCompareMode mode)
                 genIBL->SetCubeMap(originalCubemap);
             }
             break;
-            
+
         case RenderCompareMode::SINGLE_PROBE:
             if (singleProbeCubemap) {
                 skybox->UpdateCubemap(singleProbeCubemap);
@@ -1150,7 +1173,7 @@ void VulkanExample::SetCompareMode(RenderCompareMode mode)
                 genIBL->SetCubeMap(singleProbeCubemap);
             }
             break;
-            
+
         case RenderCompareMode::MULTI_PROBE:
             if (multiProbeCubemap) {
                 skybox->UpdateCubemap(multiProbeCubemap);
@@ -1158,14 +1181,14 @@ void VulkanExample::SetCompareMode(RenderCompareMode mode)
                 genIBL->SetCubeMap(multiProbeCubemap);
             }
             break;
-            
+
         case RenderCompareMode::NORMAL:
         case RenderCompareMode::SPLIT_VIEW:
         default:
             // 保持当前
             break;
     }
-    
+
     // 重新生成SH和IBL
     if (mode != RenderCompareMode::NORMAL && mode != RenderCompareMode::SPLIT_VIEW) {
         VkCommandBuffer cmdBuf = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
@@ -1174,7 +1197,7 @@ void VulkanExample::SetCompareMode(RenderCompareMode mode)
         vulkanDevice->flushCommandBuffer(cmdBuf, queue);
         mainPass->UpdateBindings();
     }
-    
+
     std::cout << "[VulkanExample] Compare mode set to: " << static_cast<int>(mode) << std::endl;
 }
 
@@ -1266,6 +1289,9 @@ void VulkanExample::PrecomputePRT()
         std::cout << "    ✓ Exported to: " << ltFile << std::endl;
     }
 
+
+/* MOVED ExportPRTDataGPU() below, after PrecomputePRT() ends */
+
     // 导出第3项: Rotated Lighting (旋转后的光源系数)
     std::cout << "\n  [5.3] Exporting Rotated Lighting (24 rotations)..." << std::endl;
     std::string rotatedLightingFile = baseFilename + "_lighting.txt";
@@ -1288,6 +1314,65 @@ void VulkanExample::PrecomputePRT()
     std::cout << "\nYou can now use PRTRenderer to render with these precomputed data." << std::endl;
     std::cout << "========================================\n" << std::endl;
 }
+
+// GPU PRT export entry (currently CPU fallback; will switch to GPU compute)
+void VulkanExample::ExportPRTDataGPU()
+{
+    if (isExportingPRT) { return; }
+    isExportingPRT = true;
+    prtExportStatus = "Generating samples";
+
+    // 1) Generate sample directions and radiance (use current UI light)
+    const int numSamples = glm::clamp(shSamples, 4, 64);
+    auto directions = SphericalHarmonics::GenerateFibonacciSamples(numSamples);
+    std::vector<glm::vec3> radiances(directions.size(), lightColor * lightIntensity);
+
+    // 2) Lighting SH (try GPU, fallback to CPU)
+    SHCoefficients lightingSH{};
+    bool usedGPU = false;
+    if (prtCompute) {
+        prtExportStatus = "Projecting lighting to SH (GPU)";
+        PRT::GPUSHCoefficients gpuOut{};
+        if (prtCompute->ComputeLightingProjection(directions, radiances, gpuOut)) {
+            // Map GPU coeffs to CPU struct for downstream use
+            for (int i = 0; i < 9; ++i) {
+                lightingSH.coeffs[i] = glm::vec3(gpuOut.coeffs[i].x, gpuOut.coeffs[i].y, gpuOut.coeffs[i].z);
+            }
+            usedGPU = true;
+        }
+    }
+    if (!usedGPU) {
+        prtExportStatus = "Projecting lighting to SH (CPU)";
+        lightingSH = SphericalHarmonics::ProjectLight(directions, radiances);
+    }
+
+    // 3) Light Transport (placeholder: a single canonical surface normal)
+    prtExportStatus = "Computing LT (placeholder)";
+    glm::vec3 ltNormal = glm::normalize(glm::vec3(0, 1, 0));
+    glm::vec3 ltAlbedo = glm::vec3(0.8f);
+    SHCoefficients ltSH = PRTPrecomputer::PrecomputeLightTransport(
+        glm::vec3(0.0f), ltNormal, ltAlbedo, directions);
+
+    // 4) Precompute rotations (24 samples over 360 degrees)
+    prtExportStatus = "Precomputing rotations";
+    auto rotations = PRTPrecomputer::PrecomputeRotations(lightingSH, 24, 360.0f);
+
+    // 5) Export files
+    prtExportStatus = "Exporting to txt";
+    std::string base = "prt_data";
+    // 5.1 export rotated lighting
+    DataExporter::ExportLighting(base + "_lighting.txt", rotations);
+    // 5.2 export single LT (temporary)
+    DataExporter::ExportLightTransport(base + "_lt.txt", ltSH);
+    // 5.3 export original lighting for reference
+    std::vector<PRTPrecomputer::RotatedCoefficients> single;
+    single.push_back({0.0f, lightingSH});
+    DataExporter::ExportLighting(base + "_lighting_original.txt", single);
+
+    prtExportStatus = "Done";
+    isExportingPRT = false;
+}
+
 
 void VulkanExample::UpdatePRTLighting()
 {
@@ -1316,5 +1401,5 @@ void VulkanExample::UpdatePRTLighting()
     // 着色器会使用: currentSHCoefficients (Lighting) 和 ltCoeffs (Light Transport)
     // 来计算最终的relighting结果
 }
-   
+
 VULKAN_EXAMPLE_MAIN()

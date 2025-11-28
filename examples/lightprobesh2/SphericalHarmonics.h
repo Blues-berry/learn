@@ -127,9 +127,11 @@ public:
     static bool ExportLighting(const std::string& filename,
                               const std::vector<PRTPrecomputer::RotatedCoefficients>& rotatedLighting);
 
-    // 导出Light Transport系数到txt文件
+    // 导出Light Transport系数到txt文件（单个或批量）
     static bool ExportLightTransport(const std::string& filename,
                                     const SHCoefficients& ltCoeffs);
+    static bool ExportLightTransportBatch(const std::string& filename,
+                                         const std::vector<SHCoefficients>& ltCoeffsBatch);
 
     // 导出完整的PRT数据 (Lighting + LT + Rotations)
     static bool ExportPRTData(const std::string& baseFilename,

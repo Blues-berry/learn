@@ -318,6 +318,26 @@ bool DataExporter::ExportLightTransport(const std::string& filename,
     return true;
 }
 
+// 批量导出每个顶点的LT系数
+bool DataExporter::ExportLightTransportBatch(const std::string& filename,
+                                            const std::vector<SHCoefficients>& ltBatch) {
+    std::ofstream file(filename);
+    if (!file.is_open()) return false;
+
+    file << "# PRT Light Transport Data (Per-Vertex)\n";
+    file << "# Generated: 2025-11-27\n";
+    file << "# Vertices: " << ltBatch.size() << "\n";
+    file << "# SH Order: 2 (9 coefficients)\n";
+    file << "# Format per line: coeff[0].xyz coeff[1].xyz ... coeff[8].xyz\n\n";
+
+    for (const auto& lt : ltBatch) {
+        file << SHCoefficientsToString(lt) << "\n";
+    }
+
+    file.close();
+    return true;
+}
+
 bool DataExporter::ExportPRTData(const std::string& baseFilename,
                                 const std::vector<PRTPrecomputer::RotatedCoefficients>& rotatedLighting,
                                 const SHCoefficients& ltCoeffs) {

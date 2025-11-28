@@ -45,7 +45,7 @@ struct GPURotationParam {
 
 class PRTComputeShader {
 public:
-    explicit PRTComputeShader(vks::VulkanDevice* device);
+    explicit PRTComputeShader(vks::VulkanDevice* device, VkQueue queue);
     ~PRTComputeShader();
 
     // 初始化compute pipeline
@@ -121,6 +121,7 @@ public:
 private:
     // Vulkan设备
     vks::VulkanDevice* vulkanDevice;
+    VkQueue computeQueue = VK_NULL_HANDLE;
 
     // Compute pipeline相关
     VkPipeline computePipeline = VK_NULL_HANDLE;
