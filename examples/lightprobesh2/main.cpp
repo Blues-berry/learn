@@ -234,6 +234,10 @@ public:
     std::unique_ptr<PRT::PRTComputeShader> prtCompute;
     bool isExportingPRT = false;
     std::string prtExportStatus;
+    // Spotlight parameters (degrees)
+    float spotInnerDeg = 15.0f;
+    float spotOuterDeg = 25.0f;
+    // Irradiance A_l is always applied (π, 2π/3, π/4)
 
     VkPipelineShaderStageCreateInfo LoadShader(const std::string& path, VkShaderStageFlagBits stage) override
     {
@@ -881,7 +885,7 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
                 globalDirty = true;
             }
 
-            if (overlay->sliderInt("SH Samples", &shSamples, 1, 32)) {
+            if (overlay->sliderInt("SH Samples", &shSamples, 1, 128)) {
                 if (usePRT) {
                     PrecomputePRT();
                 }
@@ -901,6 +905,16 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
 
         // === PRT GPU 导出 ===
         if (overlay->header("PRT GPU Export")) {
+            // Spotlight controls
+            bool changed = false;
+            changed |= overlay->sliderFloat("Spot Inner (deg)", &spotInnerDeg, 1.0f, 60.0f);
+            changed |= overlay->sliderFloat("Spot Outer (deg)", &spotOuterDeg, 1.0f, 90.0f);
+            if (spotOuterDeg < spotInnerDeg) spotOuterDeg = spotInnerDeg;
+            if (changed) {
+                spotInnerDeg = glm::clamp(spotInnerDeg, 1.0f, 89.0f);
+                spotOuterDeg = glm::clamp(spotOuterDeg, spotInnerDeg, 90.0f);
+            }
+            // Irradiance A_l is always applied by default (no toggle)
             if (overlay->button("Export PRT (GPU)")) {
                 ExportPRTDataGPU();
             }
@@ -1326,9 +1340,27 @@ void VulkanExample::ExportPRTDataGPU()
     // 1) Generate sample directions and radiance (use current UI light)
     const int numSamples = glm::clamp(shSamples, 4, 64);
     auto directions = SphericalHarmonics::GenerateFibonacciSamples(numSamples);
-    std::vector<glm::vec3> radiances(directions.size(), lightColor * lightIntensity);
+    // Spotlight radiance: only strong near a given direction (flashlight-like)
+    // Use current UI lightRotationAngle (radians) to rotate around Y-axis
+    glm::vec3 lightDir = glm::normalize(glm::vec3(-sinf(lightRotationAngle), 0.0f, -cosf(lightRotationAngle)));
+    // Use UI-driven inner/outer cone angles (degrees)
+    const float cosOuter = cosf(glm::radians(spotOuterDeg));
+    const float cosInner = cosf(glm::radians(spotInnerDeg));
 
-    // 2) Lighting SH (try GPU, fallback to CPU)
+    auto smoothstep = [](float edge0, float edge1, float x) {
+        float t = glm::clamp((x - edge0) / (edge1 - edge0), 0.0f, 1.0f);
+        return t * t * (3.0f - 2.0f * t);
+    };
+
+    std::vector<glm::vec3> radiances;
+    radiances.reserve(directions.size());
+    for (const auto& w : directions) {
+        float c = glm::dot(glm::normalize(w), lightDir);
+        float falloff = (c <= cosOuter) ? 0.0f : smoothstep(cosOuter, cosInner, c);
+        radiances.push_back(lightColor * lightIntensity * falloff);
+    }
+
+    // 2) Lighting SH (try GPU, fallback to CPU) + optional CPU vs GPU diff log
     SHCoefficients lightingSH{};
     bool usedGPU = false;
     if (prtCompute) {
@@ -1340,11 +1372,33 @@ void VulkanExample::ExportPRTDataGPU()
                 lightingSH.coeffs[i] = glm::vec3(gpuOut.coeffs[i].x, gpuOut.coeffs[i].y, gpuOut.coeffs[i].z);
             }
             usedGPU = true;
+            // Do CPU projection as reference to compare
+            SHCoefficients cpuSH = SphericalHarmonics::ProjectLight(directions, radiances);
+            std::cout << "[PRT Align] GPU vs CPU SH diffs (per i: |gpu-cpu| length)" << std::endl;
+            for (int i = 0; i < 9; ++i) {
+                glm::vec3 diff = lightingSH.coeffs[i] - cpuSH.coeffs[i];
+                float err = glm::length(diff);
+                std::cout << "  i=" << i << " err=" << err
+                          << " gpu=(" << lightingSH.coeffs[i].x << "," << lightingSH.coeffs[i].y << "," << lightingSH.coeffs[i].z << ")"
+                          << " cpu=(" << cpuSH.coeffs[i].x << "," << cpuSH.coeffs[i].y << "," << cpuSH.coeffs[i].z << ")"
+                          << std::endl;
+            }
         }
     }
     if (!usedGPU) {
         prtExportStatus = "Projecting lighting to SH (CPU)";
         lightingSH = SphericalHarmonics::ProjectLight(directions, radiances);
+    }
+
+    // 2.1 Optional: Apply irradiance multipliers A_l for l=0,1,2 (π, 2π/3, π/4)
+    if (useIrradianceAL) {
+        const float A0 = 3.14159265f;   // π
+        const float A1 = 2.09439510f;   // 2π/3
+        const float A2 = 0.78539816f;   // π/4
+        // indices: 0 -> l=0, 1..3 -> l=1, 4..8 -> l=2
+        lightingSH.coeffs[0] *= A0;
+        for (int i = 1; i <= 3; ++i) lightingSH.coeffs[i] *= A1;
+        for (int i = 4; i <= 8; ++i) lightingSH.coeffs[i] *= A2;
     }
 
     // 3) Light Transport (placeholder: a single canonical surface normal)

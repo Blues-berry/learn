@@ -15,17 +15,18 @@ struct GPUSHCoefficients {
 layout(set = 0, binding = 0) buffer SamplesBuffer { GPUSample samples[]; };
 layout(set = 0, binding = 2) buffer OutputCoefficients { GPUSHCoefficients outCoeffs; };
 
+// Match CPU EvaluateBasis (SphericalHarmonics::EvaluateBasis)
 float shBasis(int i, vec3 d) {
     float x = d.x, y = d.y, z = d.z;
-    if (i==0) return 0.282095f;
-    if (i==1) return -0.488603f * y;
-    if (i==2) return  0.488603f * z;
-    if (i==3) return -0.488603f * x;
-    if (i==4) return  1.092548f * x * y;
-    if (i==5) return -1.092548f * y * z;
-    if (i==6) return  0.315392f * (3.0f * z * z - 1.0f);
-    if (i==7) return -1.092548f * x * z;
-    if (i==8) return  0.546274f * (x * x - y * y);
+    if (i==0) return 0.282095f;                          // Y00
+    if (i==1) return  0.488603f * y;                     // Y1-1
+    if (i==2) return  0.488603f * z;                     // Y10
+    if (i==3) return  0.488603f * x;                     // Y11
+    if (i==4) return  1.092548f * x * y;                 // Y2-2
+    if (i==5) return  1.092548f * y * z;                 // Y2-1
+    if (i==6) return  0.315392f * (3.0f * z * z - 1.0f); // Y20
+    if (i==7) return  1.092548f * x * z;                 // Y21
+    if (i==8) return  0.546274f * (x * x - y * y);       // Y22
     return 0.0f;
 }
 
