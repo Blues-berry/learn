@@ -1390,23 +1390,91 @@ void VulkanExample::ExportPRTDataGPU()
         lightingSH = SphericalHarmonics::ProjectLight(directions, radiances);
     }
 
-    // 2.1 Optional: Apply irradiance multipliers A_l for l=0,1,2 (π, 2π/3, π/4)
-    if (useIrradianceAL) {
+    // 2.1 Apply irradiance multipliers A_l for l=0,1,2 (π, 2π/3, π/4)
+    {
         const float A0 = 3.14159265f;   // π
         const float A1 = 2.09439510f;   // 2π/3
         const float A2 = 0.78539816f;   // π/4
-        // indices: 0 -> l=0, 1..3 -> l=1, 4..8 -> l=2
         lightingSH.coeffs[0] *= A0;
         for (int i = 1; i <= 3; ++i) lightingSH.coeffs[i] *= A1;
         for (int i = 4; i <= 8; ++i) lightingSH.coeffs[i] *= A2;
     }
 
-    // 3) Light Transport (placeholder: a single canonical surface normal)
-    prtExportStatus = "Computing LT (placeholder)";
-    glm::vec3 ltNormal = glm::normalize(glm::vec3(0, 1, 0));
-    glm::vec3 ltAlbedo = glm::vec3(0.8f);
-    SHCoefficients ltSH = PRTPrecomputer::PrecomputeLightTransport(
-        glm::vec3(0.0f), ltNormal, ltAlbedo, directions);
+    // 3) Light Transport (GPU batch per-vertex)
+    prtExportStatus = "Computing LT (GPU batch)";
+    std::vector<glm::vec3> positions;
+    std::vector<glm::vec3> normals;
+    std::vector<glm::vec3> albedos;
+    do {
+        auto modelPtr = previewModel ? previewModel->getModel() : nullptr;
+        if (!modelPtr) {
+            std::cerr << "[ExportPRTDataGPU] No model loaded, skip LT batch." << std::endl;
+            break;
+        }
+        vkglTF::Model* mdl = modelPtr.get();
+        int vcount = mdl->vertices.count;
+        if (vcount <= 0) {
+            std::cerr << "[ExportPRTDataGPU] Model has no vertices, skip LT batch." << std::endl;
+            break;
+        }
+        // Create staging buffer and copy vertex buffer into host memory
+        VkDeviceSize vbSize = static_cast<VkDeviceSize>(vcount) * sizeof(vkglTF::Vertex);
+        vks::Buffer staging;
+        VK_CHECK_RESULT(vulkanDevice->createBuffer(
+            VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            &staging,
+            vbSize));
+        staging.map();
+        // Copy from device-local vertex buffer to staging
+        {
+            VkCommandBuffer cmd = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
+            VkBufferCopy region{};
+            region.srcOffset = 0;
+            region.dstOffset = 0;
+            region.size = vbSize;
+            vkCmdCopyBuffer(cmd, mdl->vertices.buffer, staging.buffer, 1, &region);
+            vulkanDevice->flushCommandBuffer(cmd, queue, true);
+        }
+        // Read back positions and normals
+        const vkglTF::Vertex* vtx = reinterpret_cast<const vkglTF::Vertex*>(staging.mapped);
+        positions.reserve(vcount);
+        normals.reserve(vcount);
+        albedos.reserve(vcount);
+        for (int i = 0; i < vcount; ++i) {
+            positions.emplace_back(vtx[i].pos);
+            normals.emplace_back(glm::normalize(vtx[i].normal));
+            albedos.emplace_back(glm::vec3(0.8f)); // default albedo; can read from material if needed
+        }
+        staging.destroy();
+    } while(false);
+
+    std::vector<PRT::GPUSHCoefficients> ltGpuBatch;
+    if (!positions.empty()) {
+        if (prtCompute && prtCompute->ComputeLightTransportBatch(positions, normals, albedos, directions, ltGpuBatch)) {
+            std::cout << "[ExportPRTDataGPU] LT batch computed for vertices: " << positions.size() << std::endl;
+        } else {
+            std::cerr << "[ExportPRTDataGPU] LT batch compute failed or prtCompute null. Fallback to single placeholder." << std::endl;
+        }
+    }
+
+    // 3.1 Export LT batch per-vertex (convert GPU->CPU SHCoefficients)
+    if (!ltGpuBatch.empty()) {
+        std::vector<SHCoefficients> ltCpuBatch;
+        ltCpuBatch.resize(ltGpuBatch.size());
+        for (size_t v = 0; v < ltGpuBatch.size(); ++v) {
+            for (int i = 0; i < 9; ++i) {
+                ltCpuBatch[v].coeffs[i] = glm::vec3(
+                    ltGpuBatch[v].coeffs[i].x,
+                    ltGpuBatch[v].coeffs[i].y,
+                    ltGpuBatch[v].coeffs[i].z
+                );
+            }
+        }
+        // Write to prt_output/prt_data_lt_batch.txt
+        bool okLTBatch = DataExporter::ExportLightTransportBatch("prt_output/prt_data_lt_batch.txt", ltCpuBatch);
+        std::cout << "[ExportPRTDataGPU] Export LT batch => " << (okLTBatch ? "OK" : "FAILED") << std::endl;
+    }
 
     // 4) Precompute rotations (24 samples over 360 degrees)
     prtExportStatus = "Precomputing rotations";
@@ -1429,10 +1497,7 @@ void VulkanExample::ExportPRTDataGPU()
               << (ok1 ? "OK" : "FAILED") << ": "
               << std::filesystem::absolute(base + "_lighting.txt").string() << std::endl;
 
-    bool ok2 = DataExporter::ExportLightTransport(base + "_lt.txt", ltSH);
-    std::cout << "[ExportPRTDataGPU] Export LT (single) => "
-              << (ok2 ? "OK" : "FAILED") << ": "
-              << std::filesystem::absolute(base + "_lt.txt").string() << std::endl;
+    // (Removed single LT export; use batch export below)
 
     std::vector<PRTPrecomputer::RotatedCoefficients> single;
     single.push_back({0.0f, lightingSH});
@@ -1441,7 +1506,7 @@ void VulkanExample::ExportPRTDataGPU()
               << (ok3 ? "OK" : "FAILED") << ": "
               << std::filesystem::absolute(base + "_lighting_original.txt").string() << std::endl;
 
-    prtExportStatus = (ok1 && ok2 && ok3) ? "Done" : "Done (with errors)";
+    prtExportStatus = (ok1 && ok3) ? "Done" : "Done (with errors)";
     isExportingPRT = false;
 }
 

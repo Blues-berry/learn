@@ -113,8 +113,9 @@ bool PRTComputeShader::CreateDescriptorSetLayout()
 {
     std::cout << "[PRTComputeShader] Creating descriptor set layout..." << std::endl;
 
-    // Minimal layout for Lighting Projection:
+    // Unified layout for lighting and LT:
     // binding 0: Samples SSBO
+    // binding 1: LT Input SSBO (optional)
     // binding 2: Output Coefficients SSBO
     std::vector<VkDescriptorSetLayoutBinding> bindings;
 
@@ -124,6 +125,13 @@ bool PRTComputeShader::CreateDescriptorSetLayout()
     b0.descriptorCount = 1;
     b0.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
     bindings.push_back(b0);
+
+    VkDescriptorSetLayoutBinding b1{};
+    b1.binding = 1;
+    b1.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    b1.descriptorCount = 1;
+    b1.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    bindings.push_back(b1);
 
     VkDescriptorSetLayoutBinding b2{};
     b2.binding = 2;
@@ -156,73 +164,83 @@ bool PRTComputeShader::CreateDescriptorPool()
 
 bool PRTComputeShader::LoadComputeShader()
 {
-    std::cout << "[PRTComputeShader] Loading compute shader..." << std::endl;
+    std::cout << "[PRTComputeShader] Loading compute shaders..." << std::endl;
 
-    auto tryLoad = [&](const std::string& path) -> bool {
-        std::ifstream file(path, std::ios::binary | std::ios::ate);
-        if (!file.is_open()) { return false; }
-        size_t fileSize = static_cast<size_t>(file.tellg());
-        std::vector<char> buffer(fileSize);
-        file.seekg(0);
-        file.read(buffer.data(), fileSize);
-        file.close();
+    auto loadInto = [&](const std::vector<std::string>& paths, VkShaderModule& dst) -> bool {
+        for (const auto& path : paths) {
+            std::ifstream file(path, std::ios::binary | std::ios::ate);
+            if (!file.is_open()) { continue; }
+            size_t fileSize = static_cast<size_t>(file.tellg());
+            std::vector<char> buffer(fileSize);
+            file.seekg(0);
+            file.read(buffer.data(), fileSize);
+            file.close();
 
-        VkShaderModuleCreateInfo createInfo{};
-        createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-        createInfo.codeSize = buffer.size();
-        createInfo.pCode = reinterpret_cast<const uint32_t*>(buffer.data());
-
-        VkResult res = vkCreateShaderModule(vulkanDevice->logicalDevice, &createInfo, nullptr, &computeShaderModule);
-        return (res == VK_SUCCESS);
+            VkShaderModuleCreateInfo createInfo{};
+            createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+            createInfo.codeSize = buffer.size();
+            createInfo.pCode = reinterpret_cast<const uint32_t*>(buffer.data());
+            if (vkCreateShaderModule(vulkanDevice->logicalDevice, &createInfo, nullptr, &dst) == VK_SUCCESS) {
+                std::cout << "[PRTComputeShader] Loaded: " << path << std::endl;
+                return true;
+            }
+        }
+        return false;
     };
 
-    // Try common relative paths from executable
-    const char* candidates[] = {
+    std::vector<std::string> candLighting = {
         "shaders/glsl/lightprobesh2/prt_lighting.comp.spv",
         "../shaders/glsl/lightprobesh2/prt_lighting.comp.spv",
         "../../shaders/glsl/lightprobesh2/prt_lighting.comp.spv",
-        "../../../shaders/glsl/lightprobesh2/prt_lighting.comp.spv",
-        // Fallback to GLSL if SPV missing (will fail), kept for clearer logs
-        "shaders/glsl/lightprobesh2/prt_lighting.comp"
+        "../../../shaders/glsl/lightprobesh2/prt_lighting.comp.spv"
+    };
+    std::vector<std::string> candLT = {
+        "shaders/glsl/lightprobesh2/prt_lt.comp.spv",
+        "../shaders/glsl/lightprobesh2/prt_lt.comp.spv",
+        "../../shaders/glsl/lightprobesh2/prt_lt.comp.spv",
+        "../../../shaders/glsl/lightprobesh2/prt_lt.comp.spv"
     };
 
-    for (auto* c : candidates) {
-        if (tryLoad(c)) {
-            std::cout << "[PRTComputeShader] Loaded compute shader: " << c << std::endl;
-            return true;
-        }
+    bool ok1 = loadInto(candLighting, computeShaderModule);
+    if (!ok1) {
+        std::cerr << "[PRTComputeShader] ERROR: Failed to load prt_lighting.comp.spv (compile with glslc)." << std::endl;
+        return false;
     }
-
-    std::cerr << "[PRTComputeShader] ERROR: Failed to load prt_lighting.comp.spv.\n"
-                 "Please compile shaders/glsl/lightprobesh2/prt_lighting.comp to SPIR-V, e.g.:\n"
-                 "  glslc -O shaders/glsl/lightprobesh2/prt_lighting.comp -o shaders/glsl/lightprobesh2/prt_lighting.comp.spv\n";
-    return false;
+    bool ok2 = loadInto(candLT, computeShaderModuleLT);
+    if (!ok2) {
+        std::cerr << "[PRTComputeShader] ERROR: Failed to load prt_lt.comp.spv (compile with glslc)." << std::endl;
+        return false;
+    }
+    return true;
 }
 
 bool PRTComputeShader::CreateComputePipeline()
 {
-    std::cout << "[PRTComputeShader] Creating compute pipeline..." << std::endl;
+    std::cout << "[PRTComputeShader] Creating compute pipelines..." << std::endl;
 
-    // Pipeline layout
+    // Pipeline layout (shared)
     VkPipelineLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     layoutInfo.setLayoutCount = 1;
     layoutInfo.pSetLayouts = &descriptorSetLayout;
     VK_CHECK_RESULT(vkCreatePipelineLayout(vulkanDevice->logicalDevice, &layoutInfo, nullptr, &pipelineLayout));
 
-    // Compute pipeline
-    VkPipelineShaderStageCreateInfo stageInfo{};
-    stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    stageInfo.module = computeShaderModule;
-    stageInfo.pName = "main";
+    auto makePipeline = [&](VkShaderModule module, VkPipeline& outPipe) {
+        VkPipelineShaderStageCreateInfo stageInfo{};
+        stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+        stageInfo.module = module;
+        stageInfo.pName = "main";
 
-    VkComputePipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-    pipelineInfo.stage = stageInfo;
-    pipelineInfo.layout = pipelineLayout;
+        VkComputePipelineCreateInfo pipelineInfo{};
+        pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+        pipelineInfo.stage = stageInfo;
+        pipelineInfo.layout = pipelineLayout;
+        VK_CHECK_RESULT(vkCreateComputePipelines(vulkanDevice->logicalDevice, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &outPipe));
+    };
 
-    VK_CHECK_RESULT(vkCreateComputePipelines(vulkanDevice->logicalDevice, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &computePipeline));
+    makePipeline(computeShaderModule, computePipeline);
+    makePipeline(computeShaderModuleLT, computePipelineLT);
     return true;
 }
 
@@ -286,9 +304,24 @@ bool PRTComputeShader::ExecuteComputeShader(
     return true;
 }
 
+bool PRTComputeShader::ExecuteComputeShaderWith(
+    VkPipeline pipeline,
+    uint32_t groupCountX,
+    uint32_t groupCountY,
+    uint32_t groupCountZ)
+{
+    VkCommandBuffer cmd = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
+    vkCmdDispatch(cmd, groupCountX, groupCountY, groupCountZ);
+    vulkanDevice->flushCommandBuffer(cmd, computeQueue, true);
+    return true;
+}
+
+
 bool PRTComputeShader::UpdateDescriptorSet(
     const vks::Buffer& samplesBuf,
-    const vks::Buffer& /*inputBuffer*/,
+    const vks::Buffer& inputBuffer,
     const vks::Buffer& outputBuf)
 {
     std::vector<VkWriteDescriptorSet> writes;
@@ -303,6 +336,20 @@ bool PRTComputeShader::UpdateDescriptorSet(
     VkDescriptorBufferInfo info0 = samplesBuf.descriptor;
     w0.pBufferInfo = &info0;
     writes.push_back(w0);
+
+    // Optional LT input at binding 1
+    if (inputBuffer.buffer != VK_NULL_HANDLE) {
+        VkWriteDescriptorSet w1{};
+        w1.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        w1.dstSet = descriptorSet;
+        w1.dstBinding = 1; // LT input
+        w1.dstArrayElement = 0;
+        w1.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        w1.descriptorCount = 1;
+        VkDescriptorBufferInfo info1 = inputBuffer.descriptor;
+        w1.pBufferInfo = &info1;
+        writes.push_back(w1);
+    }
 
     VkWriteDescriptorSet w2{};
     w2.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -394,9 +441,18 @@ bool PRTComputeShader::ComputeLightTransportSingle(
     const std::vector<glm::vec3>& directions,
     GPUSHCoefficients& outputCoeffs)
 {
-    // TODO: 实现单个顶点的Light Transport计算
-    std::cout << "[PRTComputeShader] Computing light transport for single vertex..." << std::endl;
-    return true;
+    std::vector<glm::vec3> positions = { position };
+    std::vector<glm::vec3> normals   = { normal };
+    std::vector<glm::vec3> albedos   = { albedo };
+    std::vector<GPUSHCoefficients> batch;
+    if (!ComputeLightTransportBatch(positions, normals, albedos, directions, batch)) {
+        return false;
+    }
+    if (!batch.empty()) {
+        outputCoeffs = batch[0];
+        return true;
+    }
+    return false;
 }
 
 bool PRTComputeShader::ComputeLightTransportBatch(
@@ -406,8 +462,84 @@ bool PRTComputeShader::ComputeLightTransportBatch(
     const std::vector<glm::vec3>& directions,
     std::vector<GPUSHCoefficients>& outputCoeffsBatch)
 {
-    // TODO: 实现批量Light Transport计算
-    std::cout << "[PRTComputeShader] Computing light transport for " << positions.size() << " vertices..." << std::endl;
+    size_t count = positions.size();
+    if (count == 0 || normals.size() != count || albedos.size() != count || directions.empty()) {
+        std::cerr << "[PRTComputeShader] ComputeLightTransportBatch invalid input" << std::endl;
+        return false;
+    }
+
+    // Prepare samples buffer (directions)
+    const size_t Ns = directions.size();
+    const VkDeviceSize strideS = sizeof(GPUSample);
+    const VkDeviceSize sizeS = static_cast<VkDeviceSize>(Ns) * strideS;
+    if (samplesBuffer.buffer == VK_NULL_HANDLE || samplesBuffer.size < sizeS) {
+        if (samplesBuffer.buffer != VK_NULL_HANDLE) samplesBuffer.destroy();
+        VK_CHECK_RESULT(vulkanDevice->createBuffer(
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            &samplesBuffer,
+            sizeS));
+        samplesBuffer.map();
+    }
+    std::vector<GPUSample> sampleTemp(Ns);
+    for (size_t i = 0; i < Ns; ++i) {
+        sampleTemp[i].direction = glm::vec4(glm::normalize(directions[i]), 0.0f);
+        sampleTemp[i].radiance  = glm::vec4(0.0f); // not used in LT
+    }
+    memcpy(samplesBuffer.mapped, sampleTemp.data(), sizeS);
+    samplesBuffer.flush(sizeS);
+    samplesBuffer.setupDescriptor(sizeS);
+
+    // Prepare LT input buffer
+    const VkDeviceSize strideLT = sizeof(GPULTInput);
+    const VkDeviceSize sizeLT = static_cast<VkDeviceSize>(count) * strideLT;
+    if (ltInputBuffer.buffer == VK_NULL_HANDLE || ltInputBuffer.size < sizeLT) {
+        if (ltInputBuffer.buffer != VK_NULL_HANDLE) ltInputBuffer.destroy();
+        VK_CHECK_RESULT(vulkanDevice->createBuffer(
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            &ltInputBuffer,
+            sizeLT));
+        ltInputBuffer.map();
+    }
+    struct LTStaging { glm::vec4 p,n,a; };
+    std::vector<LTStaging> ltTemp(count);
+    for (size_t i = 0; i < count; ++i) {
+        ltTemp[i].p = glm::vec4(positions[i], 0.0f);
+        ltTemp[i].n = glm::vec4(glm::normalize(normals[i]), 0.0f);
+        ltTemp[i].a = glm::vec4(albedos[i], 0.0f);
+    }
+    memcpy(ltInputBuffer.mapped, ltTemp.data(), sizeLT);
+    ltInputBuffer.flush(sizeLT);
+    ltInputBuffer.setupDescriptor(sizeLT);
+
+    // Prepare output buffer as an array for count vertices
+    const VkDeviceSize coeffSize = sizeof(GPUSHCoefficients);
+    const VkDeviceSize outSize = coeffSize * static_cast<VkDeviceSize>(count);
+    if (outputCoefficientsBuffer.buffer == VK_NULL_HANDLE || outputCoefficientsBuffer.size < outSize) {
+        if (outputCoefficientsBuffer.buffer != VK_NULL_HANDLE) outputCoefficientsBuffer.destroy();
+        VK_CHECK_RESULT(vulkanDevice->createBuffer(
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            &outputCoefficientsBuffer,
+            outSize));
+        outputCoefficientsBuffer.map();
+    }
+    outputCoefficientsBuffer.setupDescriptor(outSize);
+
+    // Bind descriptors: samples (0), ltInputs (1), outputs (2)
+    UpdateDescriptorSet(samplesBuffer, ltInputBuffer, outputCoefficientsBuffer);
+
+    // Dispatch: one invocation per vertex
+    if (!ExecuteComputeShaderWith(computePipelineLT, static_cast<uint32_t>(count), 1, 1)) {
+        std::cerr << "[PRTComputeShader] ExecuteComputeShaderWith (LT) failed" << std::endl;
+        return false;
+    }
+
+    // Readback
+    outputCoefficientsBuffer.invalidate(outSize);
+    outputCoeffsBatch.resize(count);
+    memcpy(outputCoeffsBatch.data(), outputCoefficientsBuffer.mapped, outSize);
     return true;
 }
 

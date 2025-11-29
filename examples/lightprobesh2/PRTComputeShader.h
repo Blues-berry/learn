@@ -124,20 +124,22 @@ private:
     VkQueue computeQueue = VK_NULL_HANDLE;
 
     // Compute pipeline相关
-    VkPipeline computePipeline = VK_NULL_HANDLE;
+    VkPipeline computePipeline = VK_NULL_HANDLE;      // lighting projection
+    VkPipeline computePipelineLT = VK_NULL_HANDLE;    // light transport batch
     VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
     VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
     VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
     VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
 
     // Shader module
-    VkShaderModule computeShaderModule = VK_NULL_HANDLE;
+    VkShaderModule computeShaderModule = VK_NULL_HANDLE;     // prt_lighting
+    VkShaderModule computeShaderModuleLT = VK_NULL_HANDLE;   // prt_lt
 
     // 工作缓冲区
     vks::Buffer samplesBuffer;           // 采样方向和辐射度
     vks::Buffer inputCoefficientsBuffer; // 输入球谐系数
-    vks::Buffer outputCoefficientsBuffer;// 输出球谐系数
-    vks::Buffer ltInputBuffer;           // Light Transport输入数据
+    vks::Buffer outputCoefficientsBuffer;// 输出球谐系数（可为单个或数组）
+    vks::Buffer ltInputBuffer;           // Light Transport输入数据（数组）
     vks::Buffer rotationParamBuffer;     // 旋转参数
 
     // 私有方法
@@ -147,15 +149,23 @@ private:
     bool CreateDescriptorSet();
     bool LoadComputeShader();
     bool CreateBuffers();
-    
-    // 执行compute shader
+
+    // 执行compute shader（Lighting 默认管线）
     bool ExecuteComputeShader(
         uint32_t groupCountX,
         uint32_t groupCountY = 1,
         uint32_t groupCountZ = 1
     );
 
-    // 更新descriptor set中的buffer绑定
+    // 执行compute shader（指定pipeline）
+    bool ExecuteComputeShaderWith(
+        VkPipeline pipeline,
+        uint32_t groupCountX,
+        uint32_t groupCountY = 1,
+        uint32_t groupCountZ = 1
+    );
+
+    // 更新descriptor set中的buffer绑定（lighting）
     bool UpdateDescriptorSet(
         const vks::Buffer& samplesBuffer,
         const vks::Buffer& inputBuffer,
