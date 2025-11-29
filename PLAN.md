@@ -61,3 +61,8 @@ Dispatch(computePipelineLT, groupCountX=顶点数)
 
 在着色阶段接入：将 Irradiance（A_l 已应用的 Lighting）与每顶点 LT 系数点乘，做真正的 PRT relighting 渲染
 如果你确认现在的导出正确，我可以继续把着色器（prt_relighting.frag）和渲染管线改为读取 prt_data_lt_batch.txt 数据并应用到 Cornell 模型每个顶点，完成端到端 relighting 效果。
+
+
+
+在着色阶段接入：将 Irradiance（A_l 已应用的 Lighting）与每顶点 LT 系数点乘，做真正的 PRT relighting 渲染
+如果你确认现在的导出正确，我可以继续把着色器（prt_relighting.frag）和渲染管线改为读取 prt_data_lt_batch.txt 数据并应用到 Cornell 模型每个顶点，完成端到端 relighting 效果。

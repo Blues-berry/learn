@@ -2,6 +2,7 @@
 #include <string.h>
 #include <fstream>
 #include <filesystem>
+#include <sstream>
 #include <vector>
 #include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
@@ -176,6 +177,11 @@ public:
         if (!prtCompute->Initialize()) {
             std::cerr << "[VulkanExample] Warning: PRTComputeShader Initialize failed. Will fallback to CPU for now." << std::endl;
         }
+
+        // Prepare PRT relighting resources
+        preparePRTRelighting();
+        preparePRTRelightingPipeline();
+
         prepared = true; // 标记初始化完成。
     }
 
@@ -231,6 +237,9 @@ public:
 
     // GPU PRT 预计算与导出
     void ExportPRTDataGPU();
+    bool LoadPRTData(const std::string& filename);
+    void preparePRTRelighting();
+    void preparePRTRelightingPipeline();
     std::unique_ptr<PRT::PRTComputeShader> prtCompute;
     bool isExportingPRT = false;
     std::string prtExportStatus;
@@ -239,11 +248,17 @@ public:
     float spotOuterDeg = 25.0f;
     // Irradiance A_l is always applied (π, 2π/3, π/4)
 
-    VkPipelineShaderStageCreateInfo LoadShader(const std::string& path, VkShaderStageFlagBits stage) override
-    {
-        // 实现 IExampleInterfasce 接口的 LoadShader 方法，加载着色器。
-        return loadShader(getShadersPath() + path, stage); // 调用基类方法加载指定路径的着色器。
-    }
+    // PRT Relighting
+    bool usePRTRelighting = false;
+    VkPipeline pipelinePRT = VK_NULL_HANDLE;
+    VkPipelineLayout pipelineLayoutPRT = VK_NULL_HANDLE;
+    VkDescriptorSet descriptorSetPRT = VK_NULL_HANDLE;
+    VkDescriptorSetLayout descriptorSetLayoutPRT = VK_NULL_HANDLE;
+    vks::Buffer ltCoefficientsBuffer; // Device-local SSBO for per-vertex LT coefficients
+    vks::Buffer lightingSHBuffer;     // UBO for rotated lighting SH
+    std::vector<SHCoefficients> precomputedLTCoefficients; // CPU-side copy of LT data
+
+    VkPipelineShaderStageCreateInfo LoadShader(const std::string& path, VkShaderStageFlagBits stage) override;
 
 private:
     VkPhysicalDeviceMultiviewFeaturesKHR physicalDeviceMultiviewFeatures{};
@@ -341,6 +356,12 @@ private:
     SHCoefficients currentSHCoefficients; // 当前的球谐系数
     std::string prtDataFile = "prt_data.txt"; // PRT数据文件路径
 };
+
+VkPipelineShaderStageCreateInfo VulkanExample::LoadShader(const std::string& path, VkShaderStageFlagBits stage)
+{
+    // 实现 IExampleInterfasce 接口的 LoadShader 方法，加载着色器。
+    return loadShader(getShadersPath() + path, stage); // 调用基类方法加载指定路径的着色器。
+}
 
 // =============================================================================
 // 资源加载相关函数
@@ -678,7 +699,19 @@ void VulkanExample::drawFrame(VkCommandBuffer cmd)
             previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN, mainPassData.lightPosition);
         }
 
-        if (gltfModel) { gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); } // 添加空指针检查
+        if (gltfModel) {
+            if (usePRTRelighting && pipelinePRT != VK_NULL_HANDLE) {
+                // Bind PRT pipeline and descriptor sets
+                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelinePRT);
+                std::array<VkDescriptorSet, 2> prtDescriptorSets = { mainPass->descriptorSet, descriptorSetPRT };
+                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayoutPRT, 0, 2, prtDescriptorSets.data(), 0, nullptr);
+                // Call the low-level draw function that doesn't bind any pipeline
+                gltfModel->getModel()->draw(cmd);
+            } else {
+                // Default PBR rendering
+                gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
+            }
+        }
         for (auto& m : gltfClones) { m->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
 
         // 渲染探针为球体
@@ -904,6 +937,10 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
         }
 
         // === PRT GPU 导出 ===
+        if (overlay->header("PRT Relighting")) {
+            overlay->checkBox("Enable PRT Relighting", &usePRTRelighting);
+        }
+
         if (overlay->header("PRT GPU Export")) {
             // Spotlight controls
             bool changed = false;
@@ -1499,6 +1536,7 @@ void VulkanExample::ExportPRTDataGPU()
 
     // (Removed single LT export; use batch export below)
 
+
     std::vector<PRTPrecomputer::RotatedCoefficients> single;
     single.push_back({0.0f, lightingSH});
     bool ok3 = DataExporter::ExportLighting(base + "_lighting_original.txt", single);
@@ -1509,6 +1547,146 @@ void VulkanExample::ExportPRTDataGPU()
     prtExportStatus = (ok1 && ok3) ? "Done" : "Done (with errors)";
     isExportingPRT = false;
 }
+
+bool VulkanExample::LoadPRTData(const std::string& filename)
+{
+    std::ifstream file(filename);
+    if (!file.is_open()) {
+        std::cerr << "Failed to open PRT data file: " << filename << std::endl;
+        return false;
+    }
+
+    precomputedLTCoefficients.clear();
+    std::string line;
+    while (std::getline(file, line)) {
+        if (line.empty() || line[0] == '#') {
+            continue;
+        }
+
+        std::stringstream ss(line);
+        SHCoefficients sh;
+        for (int i = 0; i < 9; ++i) {
+            ss >> sh.coeffs[i].x >> sh.coeffs[i].y >> sh.coeffs[i].z;
+        }
+
+        if (ss.fail()) {
+            std::cerr << "Failed to parse line in PRT data file: " << line << std::endl;
+        } else {
+            precomputedLTCoefficients.push_back(sh);
+        }
+    }
+
+    std::cout << "Loaded " << precomputedLTCoefficients.size() << " per-vertex LT coefficients from " << filename << std::endl;
+    return !precomputedLTCoefficients.empty();
+}
+
+void VulkanExample::preparePRTRelighting()
+{
+    // 1. Load precomputed LT data from file
+    if (!LoadPRTData("prt_output/prt_data_lt_batch.txt")) {
+        std::cout << "PRT Relighting disabled: LT data not found or invalid." << std::endl;
+        return;
+    }
+
+    // 2. Create device-local SSBO for LT coefficients
+    VkDeviceSize ltBufferSize = precomputedLTCoefficients.size() * sizeof(SHCoefficients);
+    if (ltBufferSize == 0) return;
+
+    vks::Buffer stagingBuffer;
+    vulkanDevice->createBuffer(
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        &stagingBuffer,
+        ltBufferSize,
+        precomputedLTCoefficients.data());
+
+    vulkanDevice->createBuffer(
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        &ltCoefficientsBuffer,
+        ltBufferSize);
+
+    VkCommandBuffer copyCmd = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
+    VkBufferCopy copyRegion = {};
+    copyRegion.size = ltBufferSize;
+    vkCmdCopyBuffer(copyCmd, stagingBuffer.buffer, ltCoefficientsBuffer.buffer, 1, &copyRegion);
+    vulkanDevice->flushCommandBuffer(copyCmd, queue, true);
+
+    stagingBuffer.destroy();
+
+    // 3. Create UBO for lighting SH coefficients
+    vulkanDevice->createBuffer(
+        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        &lightingSHBuffer,
+        sizeof(SHCoefficients));
+    lightingSHBuffer.map();
+
+    std::cout << "PRT Relighting prepared successfully." << std::endl;
+}
+
+void VulkanExample::preparePRTRelightingPipeline()
+{
+    if (ltCoefficientsBuffer.buffer == VK_NULL_HANDLE) {
+        // preparation must have failed
+        return;
+    }
+
+    // 1. Descriptor Set Layout
+    std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {
+        vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 0),
+        vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 1),
+    };
+    VkDescriptorSetLayoutCreateInfo descriptorLayout = vks::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings);
+    VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &descriptorSetLayoutPRT));
+
+    // 2. Pipeline Layout
+    std::array<VkDescriptorSetLayout, 2> setlayouts = { descriptorSetLayoutPRT, descriptorSetLayoutPRT };
+    VkPipelineLayoutCreateInfo pPipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(setlayouts.data(), 2);
+    VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pPipelineLayoutCreateInfo, nullptr, &pipelineLayoutPRT));
+
+    // 3. Graphics Pipeline
+    VkPipelineInputAssemblyStateCreateInfo inputAssemblyState = vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
+    VkPipelineRasterizationStateCreateInfo rasterizationState = vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE, 0);
+    VkPipelineColorBlendAttachmentState blendAttachmentState = vks::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE);
+    VkPipelineColorBlendStateCreateInfo colorBlendState = vks::initializers::pipelineColorBlendStateCreateInfo(1, &blendAttachmentState);
+    VkPipelineDepthStencilStateCreateInfo depthStencilState = vks::initializers::pipelineDepthStencilStateCreateInfo(VK_TRUE, VK_TRUE, VK_COMPARE_OP_LESS_OR_EQUAL);
+    VkPipelineViewportStateCreateInfo viewportState = vks::initializers::pipelineViewportStateCreateInfo(1, 1, 0);
+    VkPipelineMultisampleStateCreateInfo multisampleState = vks::initializers::pipelineMultisampleStateCreateInfo(VK_SAMPLE_COUNT_1_BIT, 0);
+    std::vector<VkDynamicState> dynamicStateEnables = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+    VkPipelineDynamicStateCreateInfo dynamicState = vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables);
+    std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages;
+
+    shaderStages[0] = loadShader(getShadersPath() + "lightprobesh2/prt_relight.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
+    shaderStages[1] = loadShader(getShadersPath() + "lightprobesh2/prt_relight.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
+
+    VkGraphicsPipelineCreateInfo pipelineCreateInfo = vks::initializers::pipelineCreateInfo(pipelineLayoutPRT, renderPass, 0);
+    pipelineCreateInfo.pVertexInputState = vkglTF::Vertex::getPipelineVertexInputState({vkglTF::VertexComponent::Position, vkglTF::VertexComponent::Normal, vkglTF::VertexComponent::UV});
+    pipelineCreateInfo.pInputAssemblyState = &inputAssemblyState;
+    pipelineCreateInfo.pRasterizationState = &rasterizationState;
+    pipelineCreateInfo.pColorBlendState = &colorBlendState;
+    pipelineCreateInfo.pMultisampleState = &multisampleState;
+    pipelineCreateInfo.pViewportState = &viewportState;
+    pipelineCreateInfo.pDepthStencilState = &depthStencilState;
+    pipelineCreateInfo.pDynamicState = &dynamicState;
+    pipelineCreateInfo.stageCount = static_cast<uint32_t>(shaderStages.size());
+    pipelineCreateInfo.pStages = shaderStages.data();
+    VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCreateInfo, nullptr, &pipelinePRT));
+
+    // 4. Descriptor Set
+    VkDescriptorSetAllocateInfo allocInfo = vks::initializers::descriptorSetAllocateInfo(descriptorPool, &descriptorSetLayoutPRT, 1);
+    VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSetPRT));
+
+    VkDescriptorBufferInfo ltBufferInfo = { ltCoefficientsBuffer.buffer, 0, VK_WHOLE_SIZE };
+    VkDescriptorBufferInfo lightingUboInfo = { lightingSHBuffer.buffer, 0, VK_WHOLE_SIZE };
+
+    std::vector<VkWriteDescriptorSet> writeDescriptorSets = {
+        vks::initializers::writeDescriptorSet(descriptorSetPRT, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 0, &ltBufferInfo),
+        vks::initializers::writeDescriptorSet(descriptorSetPRT, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, &lightingUboInfo),
+    };
+    vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, nullptr);
+}
+
 
 
 void VulkanExample::UpdatePRTLighting()
@@ -1537,6 +1715,11 @@ void VulkanExample::UpdatePRTLighting()
     // 这里只是更新了Lighting系数
     // 着色器会使用: currentSHCoefficients (Lighting) 和 ltCoeffs (Light Transport)
     // 来计算最终的relighting结果
+
+    // Update the lighting UBO for PRT relighting if it's ready
+    if (lightingSHBuffer.mapped) {
+        memcpy(lightingSHBuffer.mapped, &currentSHCoefficients, sizeof(SHCoefficients));
+    }
 }
 
 VULKAN_EXAMPLE_MAIN()

@@ -55,7 +55,7 @@ public:
 	void UpdateModel(const std::shared_ptr<vkglTF::Model>& model);
 	void LoadModelWithTextures(const std::string& filename, uint32_t fileLoadingFlags);  // ✅ 新增：加载带纹理的模型
 	void Destroy();
-	void Draw(VkCommandBuffer cmd, VkDescriptorSet globalSet, ETechnique tech);
+	void Draw(VkCommandBuffer cmd, VkDescriptorSet globalSet, ETechnique tech, VkPipeline pipelineOverride = VK_NULL_HANDLE);
 	void PreparePSO(VkRenderPass renderPass, VkDescriptorSetLayout passLayout, ETechnique technique);
 
 	void ShowUI(vks::UIOverlay* overlay);
