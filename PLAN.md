@@ -66,3 +66,25 @@ Dispatch(computePipelineLT, groupCountX=顶点数)
 
 在着色阶段接入：将 Irradiance（A_l 已应用的 Lighting）与每顶点 LT 系数点乘，做真正的 PRT relighting 渲染
 如果你确认现在的导出正确，我可以继续把着色器（prt_relighting.frag）和渲染管线改为读取 prt_data_lt_batch.txt 数据并应用到 Cornell 模型每个顶点，完成端到端 relighting 效果。
+
+启用 PRT Relighting 后，拖动 "Light" -> "Rotation" 滑块，cornell场景消失
+
+
+11.29 19.51
+待验证:
+启用 PRT Relighting 后，拖动 "Light" -> "Rotation" 滑块，场景中的光照是否会实时、平滑地变化？
+光照效果是否符合物理预期？（例如，当聚光灯转向模型的红色墙壁时，整个场景是否会泛出柔和的红光？）
+下一步建议的工作
+在验证完当前的功能后，我们可以进行以下优化和扩展：
+
+完善顶点数据提取:
+问题: 当前我们从 GPU 拷贝顶点数据用于 LT 计算，这要求原始顶点缓冲区有 VK_BUFFER_USAGE_TRANSFER_SRC_BIT 标志。如果模型加载器没有设置这个标志，会导致验证层错误或拷贝失败。
+方案: 更稳健的做法是，在 GltfModel 加载模型时，就在 CPU 端保留一份顶点数据的拷贝（位置和法线），这样就不再需要从 GPU 回读。
+优化 PRT 数据管理:
+问题: 目前，每次启动程序都需要手动点击 "Export PRT (GPU)" 来生成数据，然后才能加载并用于渲染。
+方案: 在 preparePRTRelighting 函数中增加逻辑：如果 prt_data_lt_batch.txt 文件不存在，则自动调用一次 ExportPRTDataGPU() 来生成它。这样用户第一次运行时会自动预计算，之后就可以直接加载，体验更流畅。
+增强渲染效果:
+问题: 当前的 PRT Relighting 只计算了漫反射（diffuse）部分，没有考虑镜面反射（specular）。
+方案:
+简单方案: 可以在 prt_relight.frag 中混合一些基于 IBL 的镜面反射，但这与 PRT 的动态光照不完全匹配。
+高级方案 (SH Environment Map): 将旋转后的光照 SH 系数传递给片元着色器，用于实时重建一个低频的环境贴图，然后从中采样用于镜面反射。这需要更复杂的着色器和数学知识。

@@ -8,17 +8,24 @@ layout (location = 2) in vec2 inUV;
 
 layout (location = 0) out vec3 outColor;
 
+// Incoming vertex attributes for PRT
+// We pass the 9 SH coefficients as 9 separate vec4 attributes
+layout(location = 5) in vec4 in_lt_c0;
+layout(location = 6) in vec4 in_lt_c1;
+layout(location = 7) in vec4 in_lt_c2;
+layout(location = 8) in vec4 in_lt_c3;
+layout(location = 9) in vec4 in_lt_c4;
+layout(location = 10) in vec4 in_lt_c5;
+layout(location = 11) in vec4 in_lt_c6;
+layout(location = 12) in vec4 in_lt_c7;
+layout(location = 13) in vec4 in_lt_c8;
+
 struct SHCoefficients {
     vec4 coeffs[9]; // .xyz stores coefficient
 };
 
-// Per-vertex LT coefficients (read-only)
-layout(set = 1, binding = 0) buffer LTCoefficients {
-    SHCoefficients lt[];
-} ltBuffer;
-
 // Rotated lighting SH (Irradiance)
-layout(set = 1, binding = 1) uniform LightingUBO {
+layout(set = 1, binding = 0) uniform LightingUBO {
     SHCoefficients lighting;
 } ubo;
 
@@ -28,15 +35,27 @@ layout(set = 0, binding = 0) uniform UBO {
 	mat4 view;
 } uboMatrices;
 
-void main() 
+void main()
 {
     // Standard vertex transformation
     gl_Position = uboMatrices.projection * uboMatrices.view * uboMatrices.model * vec4(inPosition, 1.0);
 
+    // Reconstruct the LT coefficients from vertex attributes
+    vec3 lt_coeffs[9];
+    lt_coeffs[0] = in_lt_c0.xyz;
+    lt_coeffs[1] = in_lt_c1.xyz;
+    lt_coeffs[2] = in_lt_c2.xyz;
+    lt_coeffs[3] = in_lt_c3.xyz;
+    lt_coeffs[4] = in_lt_c4.xyz;
+    lt_coeffs[5] = in_lt_c5.xyz;
+    lt_coeffs[6] = in_lt_c6.xyz;
+    lt_coeffs[7] = in_lt_c7.xyz;
+    lt_coeffs[8] = in_lt_c8.xyz;
+
     // PRT Relighting: dot product of Lighting SH and per-vertex LT SH
     vec3 finalColor = vec3(0.0);
     for (int i = 0; i < 9; i++) {
-        finalColor += ubo.lighting.coeffs[i].xyz * ltBuffer.lt[gl_VertexIndex].coeffs[i].xyz;
+        finalColor += ubo.lighting.coeffs[i].xyz * lt_coeffs[i];
     }
 
     // Clamp to avoid negative values from SH approximation
