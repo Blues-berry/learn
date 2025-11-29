@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <fstream>
+#include <filesystem>
 #include <vector>
 #include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
@@ -1359,17 +1360,34 @@ void VulkanExample::ExportPRTDataGPU()
 
     // 5) Export files
     prtExportStatus = "Exporting to txt";
-    std::string base = "prt_data";
-    // 5.1 export rotated lighting
-    DataExporter::ExportLighting(base + "_lighting.txt", rotations);
-    // 5.2 export single LT (temporary)
-    DataExporter::ExportLightTransport(base + "_lt.txt", ltSH);
-    // 5.3 export original lighting for reference
+    // Ensure output directory exists and print absolute path for debugging
+    try {
+        std::filesystem::create_directories("prt_output");
+        std::cout << "[ExportPRTDataGPU] current_path=" << std::filesystem::current_path().string() << std::endl;
+        std::cout << "[ExportPRTDataGPU] output dir = " << std::filesystem::absolute("prt_output").string() << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "[ExportPRTDataGPU] Failed to create output dir: " << e.what() << std::endl;
+    }
+    std::string base = std::string("prt_output/") + "prt_data";
+
+    bool ok1 = DataExporter::ExportLighting(base + "_lighting.txt", rotations);
+    std::cout << "[ExportPRTDataGPU] Export lighting rotations => "
+              << (ok1 ? "OK" : "FAILED") << ": "
+              << std::filesystem::absolute(base + "_lighting.txt").string() << std::endl;
+
+    bool ok2 = DataExporter::ExportLightTransport(base + "_lt.txt", ltSH);
+    std::cout << "[ExportPRTDataGPU] Export LT (single) => "
+              << (ok2 ? "OK" : "FAILED") << ": "
+              << std::filesystem::absolute(base + "_lt.txt").string() << std::endl;
+
     std::vector<PRTPrecomputer::RotatedCoefficients> single;
     single.push_back({0.0f, lightingSH});
-    DataExporter::ExportLighting(base + "_lighting_original.txt", single);
+    bool ok3 = DataExporter::ExportLighting(base + "_lighting_original.txt", single);
+    std::cout << "[ExportPRTDataGPU] Export lighting original => "
+              << (ok3 ? "OK" : "FAILED") << ": "
+              << std::filesystem::absolute(base + "_lighting_original.txt").string() << std::endl;
 
-    prtExportStatus = "Done";
+    prtExportStatus = (ok1 && ok2 && ok3) ? "Done" : "Done (with errors)";
     isExportingPRT = false;
 }
 
