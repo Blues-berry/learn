@@ -31,14 +31,19 @@ layout(set = 1, binding = 0) uniform LightingUBO {
 
 layout(set = 0, binding = 0) uniform UBO {
 	mat4 projection;
-	mat4 model;
 	mat4 view;
 } uboMatrices;
 
+// Push constants for per-object data
+layout(push_constant) uniform PushConstantBlock {
+    mat4 model;
+    vec4 baseColor;
+} pushConstants;
+
 void main()
 {
-    // Standard vertex transformation
-    gl_Position = uboMatrices.projection * uboMatrices.view * uboMatrices.model * vec4(inPosition, 1.0);
+    // Standard vertex transformation using the model matrix from the push constant
+    gl_Position = uboMatrices.projection * uboMatrices.view * pushConstants.model * vec4(inPosition, 1.0);
 
     // Reconstruct the LT coefficients from vertex attributes
     vec3 lt_coeffs[9];
@@ -53,12 +58,15 @@ void main()
     lt_coeffs[8] = in_lt_c8.xyz;
 
     // PRT Relighting: dot product of Lighting SH and per-vertex LT SH
-    vec3 finalColor = vec3(0.0);
+    vec3 prtColor = vec3(0.0);
     for (int i = 0; i < 9; i++) {
-        finalColor += ubo.lighting.coeffs[i].xyz * lt_coeffs[i];
+        prtColor += ubo.lighting.coeffs[i].xyz * lt_coeffs[i];
     }
 
-    // Clamp to avoid negative values from SH approximation
+    // Modulate the PRT lighting result by the material's base color (albedo)
+    vec3 finalColor = pushConstants.baseColor.rgb * prtColor;
+
+    // Clamp to avoid negative values and pass to fragment shader
     outColor = max(vec3(0.0), finalColor);
 }
 

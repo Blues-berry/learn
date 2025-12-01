@@ -652,6 +652,14 @@ void VulkanExample::prepareData()
     mainPassData.cameraPos = glm::vec4(camera.position, 1.0f); // 设置相机位置（齐次坐标）。
     mainPassData.light[0] = glm::vec4(10.0f, 10.0f, 10.0f, 1.0f); // 设置光源位置
 
+    // ===== DEBUG: Track light rotation changes =====
+    static float lastLoggedAngle = -999.0f;
+    if (fabsf(lightRotationAngle - lastLoggedAngle) > 0.1f) {
+        std::cout << "[DEBUG] Light rotation changed to: " << lightRotationAngle
+                  << " rad (" << (lightRotationAngle * 180.0f / PI) << " deg)" << std::endl;
+        lastLoggedAngle = lightRotationAngle;
+    }
+
     // 更新光源参数
     mainPassData.useLightSource = lightEnabled ? 1 : 0;
     mainPassData.lightIntensity = lightIntensity;
@@ -704,21 +712,17 @@ void VulkanExample::drawFrame(VkCommandBuffer cmd)
 
         if (gltfModel) {
             if (usePRTRelighting && pipelinePRT != VK_NULL_HANDLE) {
-                static int frameCounter = 0;
-                if (frameCounter % 120 == 0) { // Log every 120 frames
-                    std::cout << "[DEBUG PRT] Binding PRT Pipeline. Pipeline Handle: " << pipelinePRT
-                              << ", Layout: " << pipelineLayoutPRT
-                              << ", Global Set: " << mainPass->descriptorSet
-                              << ", PRT Set: " << descriptorSetPRT << std::endl;
-                }
-                frameCounter++;
+                // ===== FIX: Use the GltfModel::Draw function with the PRT pipeline override =====
+                // This ensures that the correct UBOs, descriptor sets, and vertex buffers are bound.
+                // The PRT shader expects matrices from the main UBO, not push constants.
 
-                // Bind PRT pipeline and descriptor sets
-                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelinePRT);
+                // Bind the global descriptor set (set 0) and the PRT specific descriptor set (set 1)
                 std::array<VkDescriptorSet, 2> prtDescriptorSets = { mainPass->descriptorSet, descriptorSetPRT };
                 vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayoutPRT, 0, 2, prtDescriptorSets.data(), 0, nullptr);
-                // Call the low-level draw function that doesn't bind any pipeline
-                gltfModel->getModel()->draw(cmd);
+
+                // The GltfModel->Draw function handles binding the correct pipeline, vertex buffers, and push constants (if any).
+                // We pass pipelinePRT to override the default PBR pipeline.
+                gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN, pipelinePRT);
             } else {
                 // Default PBR rendering
                 gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
@@ -1656,6 +1660,15 @@ void VulkanExample::preparePRTRelighting()
 
 void VulkanExample::preparePRTRelightingPipeline()
 {
+    // ===== FIX: Load precomputed rotated lighting data using the correct function =====
+    std::cout << "\n[DEBUG PRT] Loading precomputed rotated lighting data..." << std::endl;
+    prtData = DataExporter::ImportLighting("prt_output/prt_data_lighting.txt");
+    if (prtData.empty()) {
+        std::cout << "[ERROR PRT] Failed to load rotated lighting data. PRT Relighting will be disabled." << std::endl;
+        usePRTRelighting = false;
+    } else {
+        std::cout << "[DEBUG PRT] Loaded " << prtData.size() << " sets of rotated lighting coefficients." << std::endl;
+    }
 
     // 1. Descriptor Set Layout
     // Layout for UBO with lighting SH and SSBO with per-vertex LT coefficients
@@ -1671,7 +1684,18 @@ void VulkanExample::preparePRTRelightingPipeline()
     // 2. Pipeline Layout
     // The pipeline layout now consists of the main pass's layout and our simplified PRT layout
     std::array<VkDescriptorSetLayout, 2> setLayouts = { mainPass->descriptorSetLayout, descriptorSetLayoutPRT };
+
+    // ===== FIX: Define the push constant range for the PRT pipeline =====
+    // This allows us to send model matrix and material data to the shaders
+    VkPushConstantRange pushConstantRange = vks::initializers::pushConstantRange(
+        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+        sizeof(glm::mat4) + sizeof(glm::vec4), // size of model matrix + base color
+        0);
+
     VkPipelineLayoutCreateInfo pPipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(setLayouts.data(), 2);
+    pPipelineLayoutCreateInfo.pushConstantRangeCount = 1;
+    pPipelineLayoutCreateInfo.pPushConstantRanges = &pushConstantRange;
+
     VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pPipelineLayoutCreateInfo, nullptr, &pipelineLayoutPRT));
 
     // 3. Graphics Pipeline
@@ -1712,11 +1736,37 @@ void VulkanExample::preparePRTRelightingPipeline()
     VkDescriptorSetAllocateInfo allocInfo = vks::initializers::descriptorSetAllocateInfo(descriptorPool, &descriptorSetLayoutPRT, 1);
     VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSetPRT));
 
+    // ===== FIX: Explicitly set descriptor range to avoid using VK_WHOLE_SIZE for UBO =====
+    VkDescriptorBufferInfo lightingSHBufferInfo = {};
+    lightingSHBufferInfo.buffer = lightingSHBuffer.buffer;
+    lightingSHBufferInfo.offset = 0;
+    lightingSHBufferInfo.range = sizeof(SHCoefficients); // Explicitly set the size
+
+    VkDescriptorBufferInfo ltCoefficientsBufferInfo = {};
+    ltCoefficientsBufferInfo.buffer = ltCoefficientsBuffer.buffer;
+    ltCoefficientsBufferInfo.offset = 0;
+    ltCoefficientsBufferInfo.range = ltCoefficientsBuffer.size; // Use the actual buffer size
+
     std::array<VkWriteDescriptorSet, 2> writeDescriptorSets;
-    writeDescriptorSets[0] = vks::initializers::writeDescriptorSet(descriptorSetPRT, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &lightingSHBuffer.descriptor);
-    writeDescriptorSets[1] = vks::initializers::writeDescriptorSet(descriptorSetPRT, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, &ltCoefficientsBuffer.descriptor);
+    writeDescriptorSets[0] = vks::initializers::writeDescriptorSet(descriptorSetPRT, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &lightingSHBufferInfo);
+    writeDescriptorSets[1] = vks::initializers::writeDescriptorSet(descriptorSetPRT, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, &ltCoefficientsBufferInfo);
     vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, nullptr);
+
+    // ===== DEBUG: Validate descriptor set setup =====
     std::cout << "[DEBUG PRT] Updated Descriptor Set with UBO and SSBO." << std::endl;
+    std::cout << "[DEBUG PRT] Descriptor Set Details:" << std::endl;
+    std::cout << "  - descriptorSetPRT: " << descriptorSetPRT << std::endl;
+    std::cout << "  - descriptorSetLayoutPRT: " << descriptorSetLayoutPRT << std::endl;
+    std::cout << "  - pipelineLayoutPRT: " << pipelineLayoutPRT << std::endl;
+    std::cout << "  - pipelinePRT: " << pipelinePRT << std::endl;
+    std::cout << "  - lightingSHBuffer.buffer: " << lightingSHBuffer.buffer << std::endl;
+    std::cout << "  - lightingSHBuffer.descriptor.buffer: " << lightingSHBuffer.descriptor.buffer << std::endl;
+    std::cout << "  - lightingSHBuffer.descriptor.offset: " << lightingSHBuffer.descriptor.offset << std::endl;
+    std::cout << "  - lightingSHBuffer.descriptor.range: " << lightingSHBuffer.descriptor.range << std::endl;
+    std::cout << "  - ltCoefficientsBuffer.buffer: " << ltCoefficientsBuffer.buffer << std::endl;
+    std::cout << "  - ltCoefficientsBuffer.descriptor.buffer: " << ltCoefficientsBuffer.descriptor.buffer << std::endl;
+    std::cout << "  - ltCoefficientsBuffer.descriptor.offset: " << ltCoefficientsBuffer.descriptor.offset << std::endl;
+    std::cout << "  - ltCoefficientsBuffer.descriptor.range: " << ltCoefficientsBuffer.descriptor.range << std::endl;
 }
 
 
@@ -1725,24 +1775,70 @@ void VulkanExample::UpdatePRTLighting()
 {
     // This function is called every frame to update the lighting SH coefficients
     if (usePRTRelighting && !prtData.empty() && lightingSHBuffer.mapped) {
-        // Convert rotation angle to degrees
+        // Convert rotation angle to degrees (0-360 range)
         float angleDegrees = lightRotationAngle * 180.0f / PI;
+
+        // Normalize angle to 0-360 range for safety
+        while (angleDegrees < 0.0f) angleDegrees += 360.0f;
+        while (angleDegrees >= 360.0f) angleDegrees -= 360.0f;
+
+        // ===== DEBUG: Log only when angle changes =====
+        static float lastAngle = -999.0f;
+        bool angleChanged = (fabsf(angleDegrees - lastAngle) > 0.01f);
+
+        if (angleChanged) {
+            std::cout << "[DEBUG PRT] Updating lighting for angle: " << angleDegrees << " degrees" << std::endl;
 
         // Query the interpolated SH coefficients for the current light rotation
         currentSHCoefficients = Relighter::QueryCoefficients(angleDegrees, prtData);
+
+        // ===== DEBUG: Validate output coefficients =====
+        bool hasNaN = false;
+        bool hasInf = false;
+        for (int i = 0; i < 9; i++) {
+            if (std::isnan(currentSHCoefficients.coeffs[i].x) ||
+                std::isnan(currentSHCoefficients.coeffs[i].y) ||
+                std::isnan(currentSHCoefficients.coeffs[i].z)) {
+                hasNaN = true;
+            }
+            if (std::isinf(currentSHCoefficients.coeffs[i].x) ||
+                std::isinf(currentSHCoefficients.coeffs[i].y) ||
+                std::isinf(currentSHCoefficients.coeffs[i].z)) {
+                hasInf = true;
+            }
+        }
+
+        if (hasNaN || hasInf) {
+            std::cout << "[ERROR PRT] Invalid coefficients detected!" << std::endl;
+            std::cout << "  - Has NaN: " << (hasNaN ? "YES" : "NO") << std::endl;
+            std::cout << "  - Has Inf: " << (hasInf ? "YES" : "NO") << std::endl;
+            std::cout << "  - Angle: " << angleDegrees << " degrees" << std::endl;
+            return; // Skip update if coefficients are invalid
+        }
 
         // Update the UBO
         memcpy(lightingSHBuffer.mapped, &currentSHCoefficients, sizeof(SHCoefficients));
 
         // Log UBO update periodically to avoid spamming the console
-        static int frameCounter = 0;
-        if (frameCounter % 120 == 0) { // Log every 120 frames
+        if (frameCounter % 120 == 0 || angleChanged) {
             std::cout << "[DEBUG PRT] Updated Lighting UBO (Angle: " << angleDegrees
-                      << "). L0M0 coeff: (" << currentSHCoefficients.coeffs[0].x
+                      << " deg). L0M0 coeff: (" << currentSHCoefficients.coeffs[0].x
                       << ", " << currentSHCoefficients.coeffs[0].y
                       << ", " << currentSHCoefficients.coeffs[0].z << ")" << std::endl;
         }
+
+        lastAngle = angleDegrees;
         frameCounter++;
+    } else {
+        // ===== DEBUG: Log why PRT relighting is disabled =====
+        static int errorFrameCounter = 0;
+        if (errorFrameCounter % 300 == 0) {
+            std::cout << "[DEBUG PRT] PRT Relighting NOT active:" << std::endl;
+            std::cout << "  - usePRTRelighting: " << (usePRTRelighting ? "YES" : "NO") << std::endl;
+            std::cout << "  - prtData.empty(): " << (prtData.empty() ? "YES" : "NO") << std::endl;
+            std::cout << "  - lightingSHBuffer.mapped: " << (lightingSHBuffer.mapped ? "YES" : "NO") << std::endl;
+        }
+        errorFrameCounter++;
     }
 }
 
