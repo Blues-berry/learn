@@ -1519,7 +1519,15 @@ void VulkanExample::ExportPRTDataGPU()
     std::vector<glm::vec3> normals;
     std::vector<glm::vec3> albedos;
     do {
-        auto modelPtr = previewModel ? previewModel->getModel() : nullptr;
+        // Prefer the active gltfModel used for Cornell; fallback to previewModel
+        std::shared_ptr<vkglTF::Model> modelPtr;
+        if (gltfModel && gltfModel->getModel()) {
+            modelPtr = gltfModel->getModel();
+            std::cout << "[ExportPRTDataGPU] Using active gltfModel for LT export" << std::endl;
+        } else if (previewModel && previewModel->getModel()) {
+            modelPtr = previewModel->getModel();
+            std::cout << "[ExportPRTDataGPU] Using previewModel for LT export (fallback)" << std::endl;
+        }
         if (!modelPtr) {
             std::cerr << "[ExportPRTDataGPU] No model loaded, skip LT batch." << std::endl;
             break;
