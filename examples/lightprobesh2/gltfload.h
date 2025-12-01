@@ -58,6 +58,9 @@ public:
 	void Draw(VkCommandBuffer cmd, VkDescriptorSet globalSet, ETechnique tech, VkPipeline pipelineOverride = VK_NULL_HANDLE);
 	void PreparePSO(VkRenderPass renderPass, VkDescriptorSetLayout passLayout, ETechnique technique);
 
+	// PRT: expose model local transform so PRT path can compose correct world matrix
+	const glm::mat4& GetLocalTransform() const { return localData.transform; }
+
 	void ShowUI(vks::UIOverlay* overlay);
 	void SetTransform(const glm::mat4& transform);
     std::shared_ptr<vkglTF::Model> getModel() const { return model; }

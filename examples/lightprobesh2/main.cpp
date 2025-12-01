@@ -249,7 +249,8 @@ public:
     // Irradiance A_l is always applied (π, 2π/3, π/4)
 
     // PRT Relighting
-    bool usePRTRelighting = false;
+    bool usePRTRelighting = false;    // UI toggle
+    bool prtReady = false;            // resources ready & valid (LT matches model, buffers created)
     VkPipeline pipelinePRT = VK_NULL_HANDLE;
     VkPipelineLayout pipelineLayoutPRT = VK_NULL_HANDLE;
     VkDescriptorSet descriptorSetPRT = VK_NULL_HANDLE;
@@ -653,9 +654,9 @@ void VulkanExample::prepareData()
     mainPassData.cameraPos = glm::vec4(camera.position, 1.0f); // 设置相机位置（齐次坐标）。
     mainPassData.light[0] = glm::vec4(10.0f, 10.0f, 10.0f, 1.0f); // 设置光源位置
 
-    // ===== DEBUG: Track light rotation changes =====
+    // ===== DEBUG: Track light rotation changes (throttled) =====
     static float lastLoggedAngle = -999.0f;
-    if (fabsf(lightRotationAngle - lastLoggedAngle) > 0.1f) {
+    if (fabsf(lightRotationAngle - lastLoggedAngle) > 0.3f) { // ~17 degrees step
         std::cout << "[DEBUG] Light rotation changed to: " << lightRotationAngle
                   << " rad (" << (lightRotationAngle * 180.0f / PI) << " deg)" << std::endl;
         lastLoggedAngle = lightRotationAngle;
@@ -712,22 +713,80 @@ void VulkanExample::drawFrame(VkCommandBuffer cmd)
         }
 
         if (gltfModel) {
-            if (usePRTRelighting && pipelinePRT != VK_NULL_HANDLE) {
-                // ===== FIX: Use the GltfModel::Draw function with the PRT pipeline override =====
-                // This ensures that the correct UBOs, descriptor sets, and vertex buffers are bound.
-                // The PRT shader expects matrices from the main UBO, not push constants.
+            if (usePRTRelighting && prtReady && pipelinePRT != VK_NULL_HANDLE) {
+                // ===== Manual PRT Relighting Rendering (throttled logging) =====
+                static int frameCount = 0;
+                static bool printedInit = false;
+                static int lastPrimitiveCount = -1;
+                static int lastNodeCount = -1;
+                static int lastMeshCount = -1;
+                constexpr int kSummaryInterval = 600; // print summary every 600 frames
 
-                // Bind the global descriptor set (set 0) and the PRT specific descriptor set (set 1)
+                auto model = gltfModel->getModel();
+                if (!printedInit && model) {
+                    std::cout << "\n[DEBUG PRT] Init: usePRTRelighting=1" << std::endl;
+                    std::cout << "[DEBUG PRT]   pipelinePRT=" << pipelinePRT
+                              << ", pipelineLayoutPRT=" << pipelineLayoutPRT << std::endl;
+                    std::cout << "[DEBUG PRT]   descriptorSetPRT=" << descriptorSetPRT
+                              << ", mainPass->descriptorSet=" << mainPass->descriptorSet << std::endl;
+                    std::cout << "[DEBUG PRT]   Model: nodes=" << model->nodes.size()
+                              << ", vertices=" << model->vertices.count
+                              << ", indices=" << model->indices.count << std::endl;
+                    printedInit = true;
+                }
+
+                // Bind pipeline and sets (no spam)
+                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelinePRT);
                 std::array<VkDescriptorSet, 2> prtDescriptorSets = { mainPass->descriptorSet, descriptorSetPRT };
                 vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayoutPRT, 0, 2, prtDescriptorSets.data(), 0, nullptr);
 
-                // The GltfModel->Draw function handles binding the correct pipeline, vertex buffers, and push constants (if any).
-                // We pass pipelinePRT to override the default PBR pipeline.
-                gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN, pipelinePRT);
+                // Bind vertex buffers
+                gltfModel->getModel()->bindBuffers(cmd);
+
+                // Push constants & draw
+                struct PushConstantBlock { glm::mat4 modelOffset; glm::vec4 baseColor; } pc;
+                int primitiveCount = 0, nodeCount = 0, meshCount = 0;
+                std::function<void(vkglTF::Node*)> drawNode = [&](vkglTF::Node* node) {
+                    if (!node) return; nodeCount++;
+                    glm::mat4 nodeMatrix = node->getMatrix();
+                    if (node->mesh) {
+                        meshCount++;
+                        for (auto* primitive : node->mesh->primitives) {
+                            // Compose model matrix: GltfModel local transform * node matrix
+                            pc.modelOffset = gltfModel->GetLocalTransform() * nodeMatrix;
+                            pc.baseColor = primitive->material.baseColorFactor;
+                            vkCmdPushConstants(cmd, pipelineLayoutPRT,
+                                VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                                0, sizeof(PushConstantBlock), &pc);
+                            vkCmdDrawIndexed(cmd, primitive->indexCount, 1, primitive->firstIndex, 0, 0);
+                            primitiveCount++;
+                        }
+                    }
+                    for (auto* child : node->children) { drawNode(child); }
+                };
+                for (auto* node : model->nodes) { drawNode(node); }
+
+                // Throttled summary
+                if (primitiveCount == 0) {
+                    std::cout << "[ERROR PRT] NO PRIMITIVES WERE DRAWN!" << std::endl;
+                } else if (primitiveCount != lastPrimitiveCount ||
+                           nodeCount != lastNodeCount ||
+                           meshCount != lastMeshCount ||
+                           (frameCount % kSummaryInterval) == 0) {
+                    std::cout << "[DEBUG PRT] Draw summary: primitives=" << primitiveCount
+                              << ", nodes=" << nodeCount << ", meshes=" << meshCount
+                              << " (frame " << frameCount << ")" << std::endl;
+                    lastPrimitiveCount = primitiveCount;
+                    lastNodeCount = nodeCount;
+                    lastMeshCount = meshCount;
+                }
+                frameCount++;
             } else {
-                // Default PBR rendering
+                // Default PBR rendering (no spam)
                 gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
             }
+        } else {
+            std::cout << "[ERROR] gltfModel is null!" << std::endl;
         }
         for (auto& m : gltfClones) { m->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
 
@@ -1616,8 +1675,37 @@ void VulkanExample::preparePRTRelighting()
                   << precomputedLTCoefficients[0].coeffs[0].z << ")" << std::endl;
     }
 
-    // 2. Create device-local SSBO for LT coefficients
-    VkDeviceSize ltBufferSize = precomputedLTCoefficients.size() * sizeof(SHCoefficients);
+    // Sanity check: LT count must match model vertex count
+    if (gltfModel && gltfModel->getModel()) {
+        int vcount = gltfModel->getModel()->vertices.count;
+        if ((int)precomputedLTCoefficients.size() != vcount) {
+            std::cout << "[ERROR PRT] LT count (" << precomputedLTCoefficients.size()
+                      << ") != model vertices.count (" << vcount << ")" << std::endl;
+            std::cout << "[ERROR PRT] Disabling PRT Relighting. Please export PRT LT for the CURRENT model (UI -> Export PRT (GPU)) and retry." << std::endl;
+            prtReady = false;
+            usePRTRelighting = false;
+            return; // abort PRT preparation to avoid invalid rendering
+        } else {
+            std::cout << "[DEBUG PRT] LT count matches vertex count: " << vcount << std::endl;
+        }
+    }
+    // 2. Create device-local SSBO for LT coefficients (GPU-friendly layout: 9 x vec4 per vertex)
+    // Convert CPU-side vec3[9] to GPU-side vec4[9] to satisfy std430 alignment (16-byte stride)
+    std::vector<PRT::GPUSHCoefficients> gpuLT;
+    gpuLT.resize(precomputedLTCoefficients.size());
+    for (size_t v = 0; v < precomputedLTCoefficients.size(); ++v) {
+        for (int i = 0; i < 9; ++i) {
+            gpuLT[v].coeffs[i] = glm::vec4(precomputedLTCoefficients[v].coeffs[i], 0.0f);
+        }
+    }
+
+    // DEBUG: Log first vertex LT coeff after conversion
+    if (!gpuLT.empty()) {
+        auto c = gpuLT[0].coeffs[0];
+        std::cout << "[DEBUG PRT] GPU LT[0].L00 = (" << c.x << ", " << c.y << ", " << c.z << ", w=" << c.w << ")" << std::endl;
+    }
+
+    VkDeviceSize ltBufferSize = gpuLT.size() * sizeof(PRT::GPUSHCoefficients);
     if (ltBufferSize == 0) {
         std::cout << "[DEBUG PRT] ERROR: LT Buffer size is 0. Aborting." << std::endl;
         usePRTRelighting = false;
@@ -1630,7 +1718,7 @@ void VulkanExample::preparePRTRelighting()
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
         &stagingBuffer,
         ltBufferSize,
-        precomputedLTCoefficients.data());
+        gpuLT.data());
 
     vulkanDevice->createBuffer(
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
@@ -1647,26 +1735,32 @@ void VulkanExample::preparePRTRelighting()
     stagingBuffer.destroy();
     std::cout << "[DEBUG PRT] Created LT Coefficients SSBO: Handle=" << ltCoefficientsBuffer.buffer << ", Size=" << ltBufferSize << " bytes" << std::endl;
 
-    // 3. Create UBO for lighting SH coefficients
+    // 3. Create UBO for lighting SH coefficients (GPU-friendly: vec4[9] std140)
     vulkanDevice->createBuffer(
         VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
         &lightingSHBuffer,
-        sizeof(SHCoefficients));
+        sizeof(PRT::GPUSHCoefficients));
     lightingSHBuffer.map();
-    std::cout << "[DEBUG PRT] Created Lighting SH UBO: Handle=" << lightingSHBuffer.buffer << ", Size=" << sizeof(SHCoefficients) << " bytes" << std::endl;
+    std::cout << "[DEBUG PRT] Created Lighting SH UBO: Handle=" << lightingSHBuffer.buffer << ", Size=" << sizeof(PRT::GPUSHCoefficients) << " bytes" << std::endl;
 
     std::cout << "[DEBUG PRT] PRT Relighting resources prepared successfully." << std::endl;
 }
 
 void VulkanExample::preparePRTRelightingPipeline()
 {
-    // ===== FIX: Load precomputed rotated lighting data using the correct function =====
+    if (!prtReady) {
+        std::cout << "[DEBUG PRT] Skipping PRT pipeline creation: resources not ready." << std::endl;
+        return;
+    }
+    // Load precomputed rotated lighting data
     std::cout << "\n[DEBUG PRT] Loading precomputed rotated lighting data..." << std::endl;
     prtData = DataExporter::ImportLighting("prt_output/prt_data_lighting.txt");
     if (prtData.empty()) {
         std::cout << "[ERROR PRT] Failed to load rotated lighting data. PRT Relighting will be disabled." << std::endl;
         usePRTRelighting = false;
+        prtReady = false;
+        return;
     } else {
         std::cout << "[DEBUG PRT] Loaded " << prtData.size() << " sets of rotated lighting coefficients." << std::endl;
     }
@@ -1741,7 +1835,7 @@ void VulkanExample::preparePRTRelightingPipeline()
     VkDescriptorBufferInfo lightingSHBufferInfo = {};
     lightingSHBufferInfo.buffer = lightingSHBuffer.buffer;
     lightingSHBufferInfo.offset = 0;
-    lightingSHBufferInfo.range = sizeof(SHCoefficients); // Explicitly set the size
+    lightingSHBufferInfo.range = sizeof(PRT::GPUSHCoefficients); // vec4[9] std140 size
 
     VkDescriptorBufferInfo ltCoefficientsBufferInfo = {};
     ltCoefficientsBufferInfo.buffer = ltCoefficientsBuffer.buffer;
@@ -1773,7 +1867,7 @@ void VulkanExample::preparePRTRelightingPipeline()
 void VulkanExample::UpdatePRTLighting()
 {
     // This function is called every frame to update the lighting SH coefficients
-    if (usePRTRelighting && !prtData.empty() && lightingSHBuffer.mapped)
+    if (usePRTRelighting && prtReady && !prtData.empty() && lightingSHBuffer.mapped)
     {
         // Convert rotation angle to degrees (0-360 range)
         float angleDegrees = lightRotationAngle * 180.0f / PI;
@@ -1783,10 +1877,10 @@ void VulkanExample::UpdatePRTLighting()
         while (angleDegrees >= 360.0f) angleDegrees -= 360.0f;
 
         static float lastAngle = -999.0f;
-        bool angleChanged = (fabsf(angleDegrees - lastAngle) > 0.01f);
+        bool angleChanged = (fabsf(angleDegrees - lastAngle) > 1.0f); // log only if >1 degree change
         static int frameCounter = 0;
 
-        if (angleChanged)
+        if (angleChanged && (frameCounter % 10 == 0)) // throttle prints even on change
         {
             std::cout << "[DEBUG PRT] Updating lighting for angle: " << angleDegrees << " degrees" << std::endl;
         }
@@ -1808,11 +1902,15 @@ void VulkanExample::UpdatePRTLighting()
             return; // Skip update
         }
 
-        // Update the UBO
-        memcpy(lightingSHBuffer.mapped, &currentSHCoefficients, sizeof(SHCoefficients));
+        // Update the UBO (pack vec3 -> vec4 per coeff for std140)
+        PRT::GPUSHCoefficients gpuLighting{};
+        for (int i = 0; i < 9; ++i) {
+            gpuLighting.coeffs[i] = glm::vec4(currentSHCoefficients.coeffs[i], 0.0f);
+        }
+        memcpy(lightingSHBuffer.mapped, &gpuLighting, sizeof(PRT::GPUSHCoefficients));
 
-        // Log UBO update periodically or on change
-        if (frameCounter % 240 == 0 || angleChanged) {
+        // Log UBO update periodically or on change (throttled)
+        if ((frameCounter % 600 == 0) || angleChanged) {
             std::cout << "[DEBUG PRT] Updated UBO for angle " << angleDegrees << " deg. L0M0: ("
                       << currentSHCoefficients.coeffs[0].x << ", " << currentSHCoefficients.coeffs[0].y << ", " << currentSHCoefficients.coeffs[0].z << ")" << std::endl;
         }

@@ -88,3 +88,7 @@ Dispatch(computePipelineLT, groupCountX=顶点数)
 方案:
 简单方案: 可以在 prt_relight.frag 中混合一些基于 IBL 的镜面反射，但这与 PRT 的动态光照不完全匹配。
 高级方案 (SH Environment Map): 将旋转后的光照 SH 系数传递给片元着色器，用于实时重建一个低频的环境贴图，然后从中采样用于镜面反射。这需要更复杂的着色器和数学知识。
+
+
+
+减少调试信息输出频率，没有变化的内容不做输出
