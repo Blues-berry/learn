@@ -400,6 +400,7 @@ void VulkanExample::LoadAssets()
     skyboxModel->loadFromFile(getAssetPath() + "models/cube.gltf", vulkanDevice, queue, glTFLoadingFlags); // 加载立方体模型作为天空盒。
 }
 
+
 void VulkanExample::PrepareScene()
 {
     // 准备场景，初始化天空盒和预览模型。
@@ -1769,12 +1770,11 @@ void VulkanExample::preparePRTRelightingPipeline()
     std::cout << "  - ltCoefficientsBuffer.descriptor.range: " << ltCoefficientsBuffer.descriptor.range << std::endl;
 }
 
-
-
 void VulkanExample::UpdatePRTLighting()
 {
     // This function is called every frame to update the lighting SH coefficients
-    if (usePRTRelighting && !prtData.empty() && lightingSHBuffer.mapped) {
+    if (usePRTRelighting && !prtData.empty() && lightingSHBuffer.mapped)
+    {
         // Convert rotation angle to degrees (0-360 range)
         float angleDegrees = lightRotationAngle * 180.0f / PI;
 
@@ -1782,64 +1782,57 @@ void VulkanExample::UpdatePRTLighting()
         while (angleDegrees < 0.0f) angleDegrees += 360.0f;
         while (angleDegrees >= 360.0f) angleDegrees -= 360.0f;
 
-        // ===== DEBUG: Log only when angle changes =====
         static float lastAngle = -999.0f;
         bool angleChanged = (fabsf(angleDegrees - lastAngle) > 0.01f);
+        static int frameCounter = 0;
 
-        if (angleChanged) {
+        if (angleChanged)
+        {
             std::cout << "[DEBUG PRT] Updating lighting for angle: " << angleDegrees << " degrees" << std::endl;
+        }
 
         // Query the interpolated SH coefficients for the current light rotation
         currentSHCoefficients = Relighter::QueryCoefficients(angleDegrees, prtData);
 
-        // ===== DEBUG: Validate output coefficients =====
+        // Validate output coefficients
         bool hasNaN = false;
-        bool hasInf = false;
         for (int i = 0; i < 9; i++) {
-            if (std::isnan(currentSHCoefficients.coeffs[i].x) ||
-                std::isnan(currentSHCoefficients.coeffs[i].y) ||
-                std::isnan(currentSHCoefficients.coeffs[i].z)) {
+            if (std::isnan(currentSHCoefficients.coeffs[i].x) || std::isnan(currentSHCoefficients.coeffs[i].y) || std::isnan(currentSHCoefficients.coeffs[i].z)) {
                 hasNaN = true;
-            }
-            if (std::isinf(currentSHCoefficients.coeffs[i].x) ||
-                std::isinf(currentSHCoefficients.coeffs[i].y) ||
-                std::isinf(currentSHCoefficients.coeffs[i].z)) {
-                hasInf = true;
+                break;
             }
         }
 
-        if (hasNaN || hasInf) {
-            std::cout << "[ERROR PRT] Invalid coefficients detected!" << std::endl;
-            std::cout << "  - Has NaN: " << (hasNaN ? "YES" : "NO") << std::endl;
-            std::cout << "  - Has Inf: " << (hasInf ? "YES" : "NO") << std::endl;
-            std::cout << "  - Angle: " << angleDegrees << " degrees" << std::endl;
-            return; // Skip update if coefficients are invalid
+        if (hasNaN) {
+            std::cout << "[ERROR PRT] Invalid coefficients (NaN) detected at angle " << angleDegrees << " degrees" << std::endl;
+            return; // Skip update
         }
 
         // Update the UBO
         memcpy(lightingSHBuffer.mapped, &currentSHCoefficients, sizeof(SHCoefficients));
 
-        // Log UBO update periodically to avoid spamming the console
-        if (frameCounter % 120 == 0 || angleChanged) {
-            std::cout << "[DEBUG PRT] Updated Lighting UBO (Angle: " << angleDegrees
-                      << " deg). L0M0 coeff: (" << currentSHCoefficients.coeffs[0].x
-                      << ", " << currentSHCoefficients.coeffs[0].y
-                      << ", " << currentSHCoefficients.coeffs[0].z << ")" << std::endl;
+        // Log UBO update periodically or on change
+        if (frameCounter % 240 == 0 || angleChanged) {
+            std::cout << "[DEBUG PRT] Updated UBO for angle " << angleDegrees << " deg. L0M0: ("
+                      << currentSHCoefficients.coeffs[0].x << ", " << currentSHCoefficients.coeffs[0].y << ", " << currentSHCoefficients.coeffs[0].z << ")" << std::endl;
         }
 
         lastAngle = angleDegrees;
         frameCounter++;
-    } else {
-        // ===== DEBUG: Log why PRT relighting is disabled =====
+    }
+    else
+    {
+        // Log why PRT relighting is disabled (throttled)
         static int errorFrameCounter = 0;
         if (errorFrameCounter % 300 == 0) {
-            std::cout << "[DEBUG PRT] PRT Relighting NOT active:" << std::endl;
-            std::cout << "  - usePRTRelighting: " << (usePRTRelighting ? "YES" : "NO") << std::endl;
-            std::cout << "  - prtData.empty(): " << (prtData.empty() ? "YES" : "NO") << std::endl;
-            std::cout << "  - lightingSHBuffer.mapped: " << (lightingSHBuffer.mapped ? "YES" : "NO") << std::endl;
+            if (!usePRTRelighting) return; // Don't log if intentionally disabled
+            std::cout << "[DEBUG PRT] PRT Relighting NOT active: "
+                      << "prtData.empty()=" << (prtData.empty() ? "YES" : "NO")
+                      << ", lightingSHBuffer.mapped=" << (lightingSHBuffer.mapped ? "YES" : "NO") << std::endl;
         }
         errorFrameCounter++;
     }
 }
+
 
 VULKAN_EXAMPLE_MAIN()
