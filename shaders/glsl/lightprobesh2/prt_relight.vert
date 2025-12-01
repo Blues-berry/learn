@@ -50,8 +50,34 @@ void main()
     gl_Position = global.projection * global.view * pushConstants.model * vec4(inPosition, 1.0);
 
     // Get the LT coefficients for this vertex from SSBO
-    // Use gl_VertexIndex to index into the buffer
-    SHCoefficients lt_coeffs = ltBuffer.ltCoefficients[gl_VertexIndex];
+    // The index buffer contains absolute indices (adjusted by vertexStart during model loading)
+    // gl_VertexIndex gives us the index value from the index buffer (which is already global)
+    uint vid = uint(gl_VertexIndex);
+
+    // Bounds check: if vid is out of range, output magenta to make the problem visible
+    SHCoefficients lt_coeffs;
+    if (vid >= ltBuffer.ltCoefficients.length()) {
+        // Out of bounds - output magenta to make the problem visible
+        outColor = vec3(1.0, 0.0, 1.0);
+        return;
+    } else {
+        lt_coeffs = ltBuffer.ltCoefficients[vid];
+    }
+
+    // Check if LT coefficients are all zero (indicates missing or invalid data)
+    bool allZero = true;
+    for (int i = 0; i < 9; i++) {
+        if (length(lt_coeffs.coeffs[i].xyz) > 0.001) {
+            allZero = false;
+            break;
+        }
+    }
+
+    if (allZero) {
+        // All LT coefficients are zero - output cyan to indicate this
+        outColor = vec3(0.0, 1.0, 1.0);
+        return;
+    }
 
     // PRT Relighting: dot product of Lighting SH and per-vertex LT SH
     vec3 prtColor = vec3(0.0);

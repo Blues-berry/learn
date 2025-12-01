@@ -746,6 +746,34 @@ void VulkanExample::drawFrame(VkCommandBuffer cmd)
                 // Push constants & draw
                 struct PushConstantBlock { glm::mat4 modelOffset; glm::vec4 baseColor; } pc;
                 int primitiveCount = 0, nodeCount = 0, meshCount = 0;
+
+                // Debug: Check if any primitive has black material
+                static bool printedMaterialWarning = false;
+                if (!printedMaterialWarning) {
+                    auto model = gltfModel->getModel();
+                    if (model) {
+                        for (auto* node : model->nodes) {
+                            std::function<void(vkglTF::Node*)> checkMaterial = [&](vkglTF::Node* n) {
+                                if (n && n->mesh) {
+                                    for (auto* prim : n->mesh->primitives) {
+                                        if (prim->material.baseColorFactor.x < 0.01f &&
+                                            prim->material.baseColorFactor.y < 0.01f &&
+                                            prim->material.baseColorFactor.z < 0.01f) {
+                                            std::cout << "[DEBUG PRT] WARNING: Found black material! baseColor=("
+                                                      << prim->material.baseColorFactor.x << ", "
+                                                      << prim->material.baseColorFactor.y << ", "
+                                                      << prim->material.baseColorFactor.z << ")" << std::endl;
+                                        }
+                                    }
+                                }
+                                for (auto* child : n->children) { checkMaterial(child); }
+                            };
+                            checkMaterial(node);
+                        }
+                    }
+                    printedMaterialWarning = true;
+                }
+
                 std::function<void(vkglTF::Node*)> drawNode = [&](vkglTF::Node* node) {
                     if (!node) return; nodeCount++;
                     glm::mat4 nodeMatrix = node->getMatrix();
@@ -758,6 +786,7 @@ void VulkanExample::drawFrame(VkCommandBuffer cmd)
                             vkCmdPushConstants(cmd, pipelineLayoutPRT,
                                 VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                                 0, sizeof(PushConstantBlock), &pc);
+                            // Indices in VulkanglTFModel are absolute (offset by vertexStart at load), so baseVertex must be 0
                             vkCmdDrawIndexed(cmd, primitive->indexCount, 1, primitive->firstIndex, 0, 0);
                             primitiveCount++;
                         }
@@ -1598,11 +1627,33 @@ void VulkanExample::ExportPRTDataGPU()
         positions.reserve(vcount);
         normals.reserve(vcount);
         albedos.reserve(vcount);
+
+        int invalidNormalCount = 0;
         for (int i = 0; i < vcount; ++i) {
             positions.emplace_back(vtx[i].pos);
-            normals.emplace_back(glm::normalize(vtx[i].normal));
-            albedos.emplace_back(glm::vec3(0.8f)); // default albedo; can read from material if needed
+            glm::vec3 normal = glm::normalize(vtx[i].normal);
+
+            // Check for invalid normals
+            float normLen = glm::length(normal);
+            if (normLen < 0.1f || glm::isnan(normal.x) || glm::isnan(normal.y) || glm::isnan(normal.z)) {
+                if (invalidNormalCount < 5) {  // Print first 5 invalid normals
+                    std::cout << "[DEBUG PRT] WARNING: Vertex " << i << " has invalid normal! "
+                              << "Original: (" << vtx[i].normal.x << ", " << vtx[i].normal.y << ", " << vtx[i].normal.z << "), "
+                              << "Normalized: (" << normal.x << ", " << normal.y << ", " << normal.z << ")" << std::endl;
+                }
+                invalidNormalCount++;
+                // Use default up vector for invalid normals
+                normal = glm::vec3(0.0f, 1.0f, 0.0f);
+            }
+
+            normals.emplace_back(normal);
+            albedos.emplace_back(glm::vec3(1.0f)); // PRT LT should be albedo-free; material albedo applied at shading
         }
+
+        if (invalidNormalCount > 0) {
+            std::cout << "[DEBUG PRT] WARNING: Found " << invalidNormalCount << " vertices with invalid normals!" << std::endl;
+        }
+
         staging.destroy();
     } while(false);
 
@@ -1717,6 +1768,28 @@ void VulkanExample::preparePRTRelighting()
                   << precomputedLTCoefficients[0].coeffs[0].x << ", "
                   << precomputedLTCoefficients[0].coeffs[0].y << ", "
                   << precomputedLTCoefficients[0].coeffs[0].z << ")" << std::endl;
+
+        // Check for zero coefficients
+        int zeroCount = 0;
+        for (size_t i = 0; i < precomputedLTCoefficients.size(); ++i) {
+            bool isZero = true;
+            for (int j = 0; j < 9; ++j) {
+                float len = glm::length(precomputedLTCoefficients[i].coeffs[j]);
+                if (len > 0.001f) {
+                    isZero = false;
+                    break;
+                }
+            }
+            if (isZero) {
+                zeroCount++;
+                if (zeroCount <= 5) {  // Print first 5 zero vertices
+                    std::cout << "[DEBUG PRT] WARNING: Vertex " << i << " has all-zero LT coefficients!" << std::endl;
+                }
+            }
+        }
+        if (zeroCount > 0) {
+            std::cout << "[DEBUG PRT] WARNING: " << zeroCount << " vertices have all-zero LT coefficients!" << std::endl;
+        }
     }
 
     // Sanity check: LT count must match model vertex count
