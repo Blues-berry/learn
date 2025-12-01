@@ -8,6 +8,8 @@ layout (location = 1) in vec3 inNormal;
 layout (location = 2) in vec2 inUV;
 
 layout (location = 0) out vec3 outColor;
+layout (location = 1) out float outExposure;
+layout (location = 2) out float outGamma;
 
 struct SHCoefficients {
     vec4 coeffs[9]; // .xyz stores coefficient
@@ -90,5 +92,9 @@ void main()
 
     // Clamp to avoid negative values and pass to fragment shader
     outColor = max(vec3(0.0), finalColor);
+
+    // Pass exposure and gamma to the fragment shader
+    outExposure = global.exposure;
+    outGamma = global.gamma;
 }
 

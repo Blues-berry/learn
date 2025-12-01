@@ -159,30 +159,14 @@ void main()
 	// 使用material.elbedo作为基础颜色
 	vec3 albedo = ALBEDO;
 
-	// 简单的光照计算：使用法线和视角方向
 	vec3 N_normalized = normalize(N);
-	float NdotV = max(dot(N_normalized, V), 0.0);
 
-	// 基础漫反射光照
-	vec3 diffuse = albedo * 0.5;  // 基础环境光
-
-	// 使用动态光源位置和颜色
+	// 使用动态光源进行简单的漫反射着色
 	vec3 lightDir = normalize(global.lightPosition - inWorldPos);
 	float NdotL = max(dot(N_normalized, lightDir), 0.0);
 
-	// 应用光源颜色和强度
-	vec3 lightContribution = global.lightColor * global.lightIntensity * NdotL;
-	diffuse += albedo * lightContribution * 0.5;  // 方向光贡献
-
-	// 简单的镜面反射
-	vec3 H = normalize(V + lightDir);
-	float NdotH = max(dot(N_normalized, H), 0.0);
-	float specular = pow(NdotH, 32.0) * 0.5 * length(lightContribution);  // 镜面高光
-
-	vec3 color = diffuse + vec3(specular);
-
-	// 确保颜色不会太暗
-	color = max(color, vec3(0.1));  // 最小亮度
+	// PBR 光照贡献，应用衰减
+	vec3 color = albedo * global.lightColor * global.lightIntensity * NdotL * 0.1; // 降低基础强度以避免过曝
 
 	// Tone mapping
 	color = Uncharted2Tonemap(color * global.exposure);

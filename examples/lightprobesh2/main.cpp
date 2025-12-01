@@ -244,8 +244,10 @@ public:
     bool isExportingPRT = false;
     std::string prtExportStatus;
     // Spotlight parameters (degrees)
-    float spotInnerDeg = 15.0f;
-    float spotOuterDeg = 25.0f;
+    // OPTIMIZED: Wider cone angles to match PBR's broad illumination
+    // Inner 50° + Outer 80° provides uniform lighting similar to PBR
+    float spotInnerDeg = 50.0f;   // Increased from 15° for broader coverage
+    float spotOuterDeg = 80.0f;   // Increased from 25° for smooth falloff
     // Irradiance A_l is always applied (π, 2π/3, π/4)
 
     // PRT Relighting
@@ -1530,12 +1532,19 @@ void VulkanExample::ExportPRTDataGPU()
         return t * t * (3.0f - 2.0f * t);
     };
 
+    // OPTIMIZED: Apply a fixed intensity scale to better match PBR's diffuse contribution
+    // The PBR shader uses a 0.5 multiplier for direct lighting diffuse term.
+    const float intensityScale = 0.5f;
+
+    std::cout << "[ExportPRTDataGPU] Spotlight config: inner=" << spotInnerDeg
+              << "°, outer=" << spotOuterDeg << "°, intensity_scale=" << intensityScale << std::endl;
+
     std::vector<glm::vec3> radiances;
     radiances.reserve(directions.size());
     for (const auto& w : directions) {
         float c = glm::dot(glm::normalize(w), lightDir);
         float falloff = (c <= cosOuter) ? 0.0f : smoothstep(cosOuter, cosInner, c);
-        radiances.push_back(lightColor * lightIntensity * falloff);
+        radiances.push_back(lightColor * lightIntensity * falloff * intensityScale);
     }
 
     // 2) Lighting SH (try GPU, fallback to CPU) + optional CPU vs GPU diff log
