@@ -784,6 +784,25 @@ void VulkanExample::drawFrame(VkCommandBuffer cmd)
             } else {
                 // Default PBR rendering (no spam)
                 gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
+
+                // Debug gate: if user enabled PRT but we didn't enter the PRT branch, explain why (throttled)
+                static int gateCounter = 0;
+                if (usePRTRelighting && ((gateCounter % 300) == 0)) {
+                    auto model = gltfModel ? gltfModel->getModel() : nullptr;
+                    int vcount = (model ? model->vertices.count : -1);
+                    std::cout << "[DEBUG PRT][Gate] Not entering PRT branch because:"
+                              << " prtReady=" << (prtReady?"true":"false")
+                              << ", pipelinePRT=" << pipelinePRT
+                              << ", descriptorSetPRT=" << descriptorSetPRT
+                              << ", prtData.empty()=" << (prtData.empty()?"YES":"NO")
+                              << ", lightingSHBuffer.mapped=" << (lightingSHBuffer.mapped?"YES":"NO")
+                              << ", ltSSBO=" << ltCoefficientsBuffer.buffer
+                              << ", lightingUBO=" << lightingSHBuffer.buffer
+                              << ", modelVtx=" << vcount
+                              << ", LTCount=" << precomputedLTCoefficients.size()
+                              << std::endl;
+                }
+                gateCounter++;
             }
         } else {
             std::cout << "[ERROR] gltfModel is null!" << std::endl;
@@ -1014,7 +1033,24 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
 
         // === PRT GPU 导出 ===
         if (overlay->header("PRT Relighting")) {
-            overlay->checkBox("Enable PRT Relighting", &usePRTRelighting);
+            bool toggled = overlay->checkBox("Enable PRT Relighting", &usePRTRelighting);
+            if (toggled) {
+                if (usePRTRelighting) {
+                    // Auto reload PRT resources & pipeline when enabling
+                    std::cout << "[DEBUG PRT][UI] Enable toggled -> rebuilding PRT resources & pipeline..." << std::endl;
+                    preparePRTRelighting();
+                    preparePRTRelightingPipeline();
+                    // If resources still not ready, force disable to avoid bad rendering
+                    if (!prtReady || pipelinePRT == VK_NULL_HANDLE) {
+                        std::cout << "[DEBUG PRT][UI] PRT not ready after rebuild, disabling." << std::endl;
+                        usePRTRelighting = false;
+                    }
+                } else {
+                    // Disabled by user; keep resources but render with standard PBR
+                    std::cout << "[DEBUG PRT][UI] Disable toggled -> using standard PBR." << std::endl;
+                }
+                globalDirty = true;
+            }
         }
 
         if (overlay->header("PRT GPU Export")) {
@@ -1752,11 +1788,14 @@ void VulkanExample::preparePRTRelighting()
     lightingSHBuffer.map();
     std::cout << "[DEBUG PRT] Created Lighting SH UBO: Handle=" << lightingSHBuffer.buffer << ", Size=" << sizeof(PRT::GPUSHCoefficients) << " bytes" << std::endl;
 
+    // Mark resources ready
+    prtReady = true;
     std::cout << "[DEBUG PRT] PRT Relighting resources prepared successfully." << std::endl;
 }
 
 void VulkanExample::preparePRTRelightingPipeline()
 {
+    std::cout << "[DEBUG PRT] preparePRTRelightingPipeline: prtReady=" << (prtReady?"true":"false") << std::endl;
     if (!prtReady) {
         std::cout << "[DEBUG PRT] Skipping PRT pipeline creation: resources not ready." << std::endl;
         return;
