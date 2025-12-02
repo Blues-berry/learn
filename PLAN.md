@@ -137,3 +137,7 @@ LT 第 0 项是否非零；
 直接把 main.cpp 中的 LT 可见性函数替换为 Lambert 余弦项；
 给出 per-vertex LT 加载和使用的最小改动示例（读取批量 LT，在渲染时索引访问）；
 帮你在 PRTRenderer 加一个“实时光关、PRT开”的逻辑开关，避免全黑。
+
+PBR的着色效果是黄色，PRT似乎看不到有什么着色效果。去掉PRT计算时有关spot的设置，改成和PBR一样的光源设置，结果和enable light后的PBR一样，并删除有关spot的UI看看效果如何。
+
+考虑将PRT和

@@ -95,45 +95,36 @@ vec3 ReconstructLighting(vec3 normal) {
     return max(lighting, vec3(0.0));
 }
 
-// Tone mapping
-vec3 ToneMap(vec3 color) {
-    // Reinhard tone mapping
-    color = color / (color + vec3(1.0));
-    // Gamma correction
-    color = pow(color, vec3(1.0 / global.gamma));
-    return color;
+// Uncharted2 Tone mapping (matching PBR shader)
+vec3 Uncharted2Tonemap(vec3 x) {
+    float A = 0.15, B = 0.50, C = 0.10, D = 0.20, E = 0.02, F = 0.30;
+    return ((x*(A*x+C*B)+D*E)/(x*(A*x+B)+D*F))-E/F;
 }
 
 void main() {
     // 规范化法线
     vec3 N = normalize(inNormal);
-    
+
     // 获取材质颜色
     vec3 albedo = material.albedo.rgb;
     if (inColor != vec3(0.0)) {
         albedo = inColor;
     }
-    
+
     // 从球谐系数重建光照
+    // Note: SH coefficients already include light color and intensity from CPU
     vec3 lighting = ReconstructLighting(N);
-    
-    // 应用材质颜色
+
+    // 应用材质颜色和光照
     vec3 finalColor = albedo * lighting;
-    
-    // 如果启用了光源，添加直接光照
-    if (global.useLightSource == 1) {
-        vec3 L = normalize(global.lightPosition - inWorldPos);
-        float NdotL = max(dot(N, L), 0.0);
-        vec3 directLight = global.lightColor * global.lightIntensity * NdotL;
-        finalColor += albedo * directLight * 0.5;
-    }
-    
-    // 应用exposure
-    finalColor *= global.exposure;
-    
-    // Tone mapping
-    finalColor = ToneMap(finalColor);
-    
+
+    // 应用exposure和tone mapping (matching PBR)
+    finalColor = Uncharted2Tonemap(finalColor * global.exposure);
+    finalColor = finalColor * (1.0f / Uncharted2Tonemap(vec3(11.2f)));
+
+    // Gamma correction
+    finalColor = pow(finalColor, vec3(1.0f / global.gamma));
+
     outColor = vec4(finalColor, 1.0);
 }
 

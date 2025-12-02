@@ -244,11 +244,9 @@ public:
     std::unique_ptr<PRT::PRTComputeShader> prtCompute;
     bool isExportingPRT = false;
     std::string prtExportStatus;
-    // Spotlight parameters (degrees)
-    // OPTIMIZED: Wider cone angles to match PBR's broad illumination
-    // Inner 50° + Outer 80° provides uniform lighting similar to PBR
-    float spotInnerDeg = 4.0f;   // Increased from 15° for broader coverage
-    float spotOuterDeg = 28.0f;   // Increased from 25° for smooth falloff
+    // ===== UNIFIED PBR-PRT STRATEGY =====
+    // Removed spotlight parameters (spotInnerDeg, spotOuterDeg)
+    // Now using Lambert cosine term matching PBR's direct diffuse lighting
     // Irradiance A_l is always applied (π, 2π/3, π/4)
 
     // PRT Relighting
@@ -1093,16 +1091,11 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
         }
 
         if (overlay->header("PRT GPU Export")) {
-            // Spotlight controls
-            bool changed = false;
-            changed |= overlay->sliderFloat("Spot Inner (deg)", &spotInnerDeg, 1.0f, 60.0f);
-            changed |= overlay->sliderFloat("Spot Outer (deg)", &spotOuterDeg, 1.0f, 90.0f);
-            if (spotOuterDeg < spotInnerDeg) spotOuterDeg = spotInnerDeg;
-            if (changed) {
-                spotInnerDeg = glm::clamp(spotInnerDeg, 1.0f, 89.0f);
-                spotOuterDeg = glm::clamp(spotOuterDeg, spotInnerDeg, 90.0f);
-            }
-            // Irradiance A_l is always applied by default (no toggle)
+            // ===== UNIFIED PBR-PRT STRATEGY =====
+            // Removed spotlight controls (spotInnerDeg, spotOuterDeg)
+            // Now using Lambert cosine term matching PBR's direct diffuse lighting
+            overlay->text("Mode: PBR-unified (Lambert cosine)");
+
             if (overlay->button("Export PRT (GPU)")) {
                 ExportPRTDataGPU();
             }
@@ -1525,42 +1518,30 @@ void VulkanExample::ExportPRTDataGPU()
     isExportingPRT = true;
     prtExportStatus = "Generating samples";
 
-    // 1) Generate sample directions and radiance (use current UI light)
+    // 1) Generate sample directions and radiance (use Lambert cosine term, matching PBR)
     const int numSamples = glm::clamp(shSamples, 4, 64);
     auto directions = SphericalHarmonics::GenerateFibonacciSamples(numSamples);
-    // Spotlight radiance: only strong near a given direction (flashlight-like)
-    // This MUST be based on a canonical light source, not the interactive one, so that the
-    // precomputed data is consistent regardless of when the user clicks "Export".
-    // The precomputed rotations will handle rotating this canonical light source.
-    glm::vec3 lightDir = glm::vec3(0.0f, 0.0f, -1.0f); // Canonical spotlight pointing down -Z
-    // Use UI-driven inner/outer cone angles (degrees)
-    const float cosOuter = cosf(glm::radians(spotOuterDeg));
-    const float cosInner = cosf(glm::radians(spotInnerDeg));
 
-    auto smoothstep = [](float edge0, float edge1, float x) {
-        float t = glm::clamp((x - edge0) / (edge1 - edge0), 0.0f, 1.0f);
-        return t * t * (3.0f - 2.0f * t);
-    };
+    // ===== UNIFIED PBR-PRT STRATEGY =====
+    // Use Lambert cosine term instead of spotlight cone to match PBR's direct diffuse lighting.
+    // This ensures:
+    // 1. Precomputed data is consistent with PBR's Lambert model
+    // 2. Runtime can apply lightColor and lightIntensity directly
+    // 3. Efficiency: precomputed lookup vs per-pixel calculation
 
-    // OPTIMIZED: Apply a fixed intensity scale to better match PBR's diffuse contribution
-    // The PBR shader uses a 0.5 multiplier for direct lighting diffuse term.
-    // We will NOT apply this scaling here. The precomputed data should represent the
-    // full, unscaled radiance. Any BRDF-related scaling should happen in the final shader.
-    // const float intensityScale = 0.5f;
+    glm::vec3 lightDir = glm::vec3(0.0f, 0.0f, -1.0f); // Canonical direction (canonical light pointing down -Z)
 
-        std::cout << "[ExportPRTDataGPU] Spotlight config: inner=" << spotInnerDeg
-              << "°, outer=" << spotOuterDeg << std::endl;
+    std::cout << "[ExportPRTDataGPU] Using Lambert cosine term (PBR-unified mode)" << std::endl;
 
     std::vector<glm::vec3> radiances;
     radiances.reserve(directions.size());
     for (const auto& w : directions) {
-                // The vector w is the direction *to* the sample point on the sphere.
-        // For a spotlight, we need the direction *from* the light source, so we use -w.
-        float c = glm::dot(glm::normalize(-w), lightDir);
-        float falloff = (c <= cosOuter) ? 0.0f : smoothstep(cosOuter, cosInner, c);
-                // Use a canonical intensity of 1.0 for pre-computation, ignoring the UI state.
-                // Use a canonical light color (white) for pre-computation, ignoring the UI state.
-        radiances.push_back(glm::vec3(1.0f) * falloff);
+        // w is the direction *to* the sample point on the sphere.
+        // For incident light, we need the direction *from* the light source, so we use -w.
+        // Apply Lambert cosine term: max(0, dot(-w, lightDir))
+        float cosTerm = glm::max(0.0f, glm::dot(-w, lightDir));
+        // Use white light (1.0) for precomputation; color/intensity applied at runtime
+        radiances.push_back(glm::vec3(cosTerm));
     }
 
     // 2) Lighting SH (try GPU, fallback to CPU) + optional CPU vs GPU diff log
@@ -1601,6 +1582,9 @@ void VulkanExample::ExportPRTDataGPU()
         lightingSH.coeffs[0] *= A0;
         for (int i = 1; i <= 3; ++i) lightingSH.coeffs[i] *= A1;
         for (int i = 4; i <= 8; ++i) lightingSH.coeffs[i] *= A2;
+        // Debug print to verify non-zero lighting
+        std::cout << "[ExportPRTDataGPU] Lighting L00 after irradiance: ("
+                  << lightingSH.coeffs[0].x << ", " << lightingSH.coeffs[0].y << ", " << lightingSH.coeffs[0].z << ")" << std::endl;
     }
 
     // 3) Light Transport (GPU batch per-vertex)
@@ -1777,8 +1761,13 @@ void VulkanExample::preparePRTRelighting()
 {
     std::cout << "\n[DEBUG PRT] --- Preparing PRT Relighting Resources --- " << std::endl;
 
-    // 1. Load precomputed LT data from file
-    if (!LoadPRTData("prt_output/prt_data_lt_batch.txt")) {
+    // 1. Load precomputed LT data from file (try batch name first, then non-batch)
+    bool ltLoaded = LoadPRTData("prt_output/prt_data_lt_batch.txt");
+    if (!ltLoaded) {
+        std::cout << "[DEBUG PRT] LT batch file not found, trying prt_output/prt_data_lt.txt ..." << std::endl;
+        ltLoaded = LoadPRTData("prt_output/prt_data_lt.txt");
+    }
+    if (!ltLoaded) {
         std::cout << "[DEBUG PRT] ERROR: PRT Relighting disabled: LT data not found or invalid." << std::endl;
         usePRTRelighting = false;
         return;
@@ -2044,6 +2033,15 @@ void VulkanExample::UpdatePRTLighting()
             return; // Skip update
         }
 
+        // ===== UNIFIED PBR-PRT STRATEGY =====
+        // Apply PBR's light color and intensity to PRT SH coefficients
+        // This ensures PRT uses the same lighting as PBR, just with precomputed efficiency
+        // Note: Apply the same 0.1 attenuation factor as PBR shader to match brightness
+        float intensityScale = (lightIntensity / 100.0f) * 0.1f; // Normalize and apply attenuation
+        for (int i = 0; i < 9; ++i) {
+            currentSHCoefficients.coeffs[i] *= lightColor * intensityScale;
+        }
+
         // Update the UBO (pack vec3 -> vec4 per coeff for std140)
         PRT::GPUSHCoefficients gpuLighting{};
         for (int i = 0; i < 9; ++i) {
@@ -2053,7 +2051,7 @@ void VulkanExample::UpdatePRTLighting()
 
         // Log UBO update periodically or on change (throttled)
         if ((frameCounter % 600 == 0) || angleChanged) {
-            std::cout << "[DEBUG PRT] Updated UBO for angle " << angleDegrees << " deg. L0M0: ("
+            std::cout << "[DEBUG PRT] Updated UBO for angle " << angleDegrees << " deg. L0M0 (after color/intensity): ("
                       << currentSHCoefficients.coeffs[0].x << ", " << currentSHCoefficients.coeffs[0].y << ", " << currentSHCoefficients.coeffs[0].z << ")" << std::endl;
         }
 
