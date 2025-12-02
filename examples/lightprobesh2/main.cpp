@@ -677,19 +677,17 @@ void VulkanExample::prepareData()
 
     // 计算光源位置（绕Y轴旋转）
     if (lightEnabled) {
-        float radius = 15.0f; // 减小旋转半径
-        mainPassData.lightPosition = glm::vec3(
-            0.0f, // 固定X位置
-            5.5f, // 固定Y位置
-            -9.0f  // 固定Z位置
+        float radius = 15.0f; // 旋转半径
+        // 基础位置
+        glm::vec3 base = glm::vec3(0.0f, 5.5f, -9.0f);
+        // 无论是否自动旋转，都使用当前 lightRotationAngle 来放置光源
+        // AutoRotate 仅用于每帧自动累加角度
+        glm::vec3 offset = glm::vec3(
+            radius * sin(lightRotationAngle) * 0.3f,
+            0.0f,
+            radius * cos(lightRotationAngle) * 0.3f
         );
-
-        // 如果启用自动旋转，添加旋转偏移
-        if (autoRotateLight) {
-            mainPassData.lightPosition.x += radius * sin(lightRotationAngle) * 0.3f; // 降低旋转幅度
-            mainPassData.lightPosition.z += radius * cos(lightRotationAngle) * 0.3f; // 降低旋转幅度
-            mainPassData.lightPosition.y += radius * cos(lightRotationAngle) * 0.3f; // 降低旋转幅度
-        }
+        mainPassData.lightPosition = base + offset;
     } else {
         mainPassData.lightPosition = glm::vec3(0.0f, 5.5f, -9.0f);
     }
@@ -1419,18 +1417,22 @@ void VulkanExample::PrecomputePRT()
     // ============================================================
     std::cout << "\n[Step 2] Precomputing Lighting (Light Source)..." << std::endl;
 
-    // 生成采样光照 (使用当前光源颜色)
-    // 在实际应用中，这应该从环境贴图或光源采样
+    // 生成采样光照 (使用单位光源：白色，强度1.0)
+    // 运行时会在 UpdatePRTLighting() 中应用实际的光源颜色和强度
+    // 这样可以避免重复应用颜色，并支持实时改变光源颜色
     std::vector<glm::vec3> radiances;
     for (int i = 0; i < shSamples; i++) {
-        radiances.push_back(lightColor * lightIntensity);
+        // Use unit light source (white, intensity 1.0)
+        // Color and intensity will be applied at runtime
+        radiances.push_back(glm::vec3(1.0f, 1.0f, 1.0f));
     }
 
     // 预计算光照的球谐系数
     SHCoefficients lightingCoeffs = PRTPrecomputer::PrecomputeLighting(directions, radiances);
-    std::cout << "  - Lighting SH coefficients computed" << std::endl;
-    std::cout << "  - Light Color: (" << lightColor.x << ", " << lightColor.y << ", " << lightColor.z << ")" << std::endl;
-    std::cout << "  - Light Intensity: " << lightIntensity << std::endl;
+    std::cout << "  - Lighting SH coefficients computed (using unit light source)" << std::endl;
+    std::cout << "  - Current Light Color: (" << lightColor.x << ", " << lightColor.y << ", " << lightColor.z << ")" << std::endl;
+    std::cout << "  - Current Light Intensity: " << lightIntensity << std::endl;
+    std::cout << "  - Note: Color and intensity will be applied at runtime in UpdatePRTLighting()" << std::endl;
 
     // ============================================================
     // 第3步: 预计算Light Transport (物体表面对光照的响应)
@@ -2033,14 +2035,34 @@ void VulkanExample::UpdatePRTLighting()
             return; // Skip update
         }
 
-        // ===== UNIFIED PBR-PRT STRATEGY =====
-        // Apply PBR's light color and intensity to PRT SH coefficients
-        // This ensures PRT uses the same lighting as PBR, just with precomputed efficiency
+        // ===== SH CONVOLUTION: Lighting ⊗ LightTransport =====
+        // Perform SH convolution to combine lighting and light transport
+        // This is the core of PRT: final_light = Σ L_i * LT_i
+        // where L_i is lighting SH and LT_i is light transport SH
+
+        SHCoefficients convolvedCoeffs;
+
+        // For now, use the first vertex's LT coefficients (assuming uniform surface)
+        // In a full implementation, this would be per-vertex
+        if (!precomputedLTCoefficients.empty()) {
+            for (int i = 0; i < 9; ++i) {
+                // Convolve: multiply corresponding SH coefficients
+                convolvedCoeffs.coeffs[i] = currentSHCoefficients.coeffs[i] * precomputedLTCoefficients[0].coeffs[i];
+            }
+        } else {
+            // Fallback: if no LT data, use lighting directly
+            convolvedCoeffs = currentSHCoefficients;
+        }
+
+        // Apply light color and intensity (same as PBR)
         // Note: Apply the same 0.1 attenuation factor as PBR shader to match brightness
         float intensityScale = (lightIntensity / 100.0f) * 0.1f; // Normalize and apply attenuation
         for (int i = 0; i < 9; ++i) {
-            currentSHCoefficients.coeffs[i] *= lightColor * intensityScale;
+            convolvedCoeffs.coeffs[i] *= lightColor * intensityScale;
         }
+
+        // Use convolved coefficients instead of raw lighting
+        currentSHCoefficients = convolvedCoeffs;
 
         // Update the UBO (pack vec3 -> vec4 per coeff for std140)
         PRT::GPUSHCoefficients gpuLighting{};

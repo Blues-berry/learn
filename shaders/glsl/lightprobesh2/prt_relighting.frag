@@ -105,18 +105,17 @@ void main() {
     // 规范化法线
     vec3 N = normalize(inNormal);
 
-    // 获取材质颜色
-    vec3 albedo = material.albedo.rgb;
-    if (inColor != vec3(0.0)) {
-        albedo = inColor;
-    }
-
     // 从球谐系数重建光照
-    // Note: SH coefficients already include light color and intensity from CPU
+    // Note: SH coefficients are the result of convolution: Lighting ⊗ LightTransport
+    // This means they already include:
+    // - Light source contribution (Lighting SH)
+    // - Surface response (LightTransport SH with cosine term and albedo)
+    // - Light color and intensity (applied on CPU)
     vec3 lighting = ReconstructLighting(N);
 
-    // 应用材质颜色和光照
-    vec3 finalColor = albedo * lighting;
+    // 最终颜色就是重建的光照
+    // 不再应用 albedo，因为它已经在 Light Transport 中了
+    vec3 finalColor = lighting;
 
     // 应用exposure和tone mapping (matching PBR)
     finalColor = Uncharted2Tonemap(finalColor * global.exposure);
