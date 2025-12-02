@@ -35,7 +35,9 @@ layout (set = 1, binding = 0) uniform Material {
 } material;
 
 // PRT球谐系数 (9个vec4)
-layout (set = 2, binding = 0) uniform SHCoefficients {
+// This UBO contains the SH coefficients of the current light source, rotated and interpolated on the CPU.
+// It must match the layout created in preparePRTRelightingPipeline (binding = 1)
+layout (set = 1, binding = 1) uniform LightingSH {
     vec4 l00;
     vec4 l1m1;
     vec4 l10;
@@ -45,7 +47,7 @@ layout (set = 2, binding = 0) uniform SHCoefficients {
     vec4 l20;
     vec4 l2p1;
     vec4 l2p2;
-} shCoeffs;
+} lightingSH;
 
 // 计算球谐基函数
 vec3 EvaluateSHBasis(int index, vec3 normal) {
@@ -76,19 +78,19 @@ vec3 ReconstructLighting(vec3 normal) {
     vec3 lighting = vec3(0.0);
     
     // 0阶
-    lighting += shCoeffs.l00.rgb * EvaluateSHBasis(0, normal);
+        lighting += lightingSH.l00.rgb * EvaluateSHBasis(0, normal);
     
     // 1阶
-    lighting += shCoeffs.l1m1.rgb * EvaluateSHBasis(1, normal);
-    lighting += shCoeffs.l10.rgb * EvaluateSHBasis(2, normal);
-    lighting += shCoeffs.l1p1.rgb * EvaluateSHBasis(3, normal);
+    lighting += lightingSH.l1m1.rgb * EvaluateSHBasis(1, normal);
+    lighting += lightingSH.l10.rgb * EvaluateSHBasis(2, normal);
+    lighting += lightingSH.l1p1.rgb * EvaluateSHBasis(3, normal);
     
     // 2阶
-    lighting += shCoeffs.l2m2.rgb * EvaluateSHBasis(4, normal);
-    lighting += shCoeffs.l2m1.rgb * EvaluateSHBasis(5, normal);
-    lighting += shCoeffs.l20.rgb * EvaluateSHBasis(6, normal);
-    lighting += shCoeffs.l2p1.rgb * EvaluateSHBasis(7, normal);
-    lighting += shCoeffs.l2p2.rgb * EvaluateSHBasis(8, normal);
+    lighting += lightingSH.l2m2.rgb * EvaluateSHBasis(4, normal);
+    lighting += lightingSH.l2m1.rgb * EvaluateSHBasis(5, normal);
+    lighting += lightingSH.l20.rgb * EvaluateSHBasis(6, normal);
+    lighting += lightingSH.l2p1.rgb * EvaluateSHBasis(7, normal);
+    lighting += lightingSH.l2p2.rgb * EvaluateSHBasis(8, normal);
     
     return max(lighting, vec3(0.0));
 }

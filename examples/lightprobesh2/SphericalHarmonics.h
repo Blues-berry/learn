@@ -6,6 +6,10 @@
 #include <string>
 #include <fstream>
 #include <sstream>
+#include <cmath>
+
+// 常数定义 (inline to avoid multiple definition)
+inline constexpr float PI = 3.14159265359f;
 
 // 球谐函数系数结构 (2阶, 9个系数)
 struct SHCoefficients {
@@ -48,9 +52,30 @@ public:
     static float EvaluateBasis(int index, const glm::vec3& direction);
     
     // 投影光照到球谐函数
-    static SHCoefficients ProjectLight(const std::vector<glm::vec3>& directions, 
+    static SHCoefficients ProjectLight(const std::vector<glm::vec3>& directions,
                                        const std::vector<glm::vec3>& radiances);
-    
+
+    // 投影任意函数到球谐基 (用于Light Transport)
+    template<typename Func>
+    static SHCoefficients Project(Func func, const std::vector<glm::vec3>& directions) {
+        SHCoefficients result;
+        int numSamples = directions.size();
+
+        if (numSamples == 0) return result;
+
+        for (int i = 0; i < 9; i++) {
+            glm::vec3 coeff(0.0f);
+            for (int j = 0; j < numSamples; j++) {
+                float basis = EvaluateBasis(i, directions[j]);
+                float value = func(directions[j]);
+                coeff += glm::vec3(value) * basis;
+            }
+            result.coeffs[i] = coeff * (4.0f * PI / numSamples);
+        }
+
+        return result;
+    }
+
     // 从球谐系数重建光照
     static glm::vec3 ReconstructLight(const SHCoefficients& coeffs, const glm::vec3& direction);
     

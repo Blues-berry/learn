@@ -47,10 +47,73 @@ namespace vks
 		if (!vks::tools::fileExists(filename)) {
 			vks::tools::exitFatal("Could not load texture from " + filename + "\n\nMake sure the assets submodule has been checked out and is up-to-date.", -1);
 		}
-		result = ktxTexture_CreateFromNamedFile(filename.c_str(), KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, target);			
-#endif		
+		result = ktxTexture_CreateFromNamedFile(filename.c_str(), KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, target);
+#endif
 		return result;
 	}
+
+
+		Texture2D::Texture2D(vks::VulkanDevice* device, VkFormat format, VkImageUsageFlags imageUsageFlags, uint32_t width, uint32_t height, VkImageTiling tiling, VkImageLayout imageLayout)
+		{
+			this->device = device;
+			this->width = width;
+			this->height = height;
+			this->mipLevels = 1;
+			this->layerCount = 1;
+			this->imageLayout = imageLayout;
+				this->format = format;
+
+			VkImageCreateInfo imageCreateInfo = vks::initializers::imageCreateInfo();
+			imageCreateInfo.imageType = VK_IMAGE_TYPE_2D;
+			imageCreateInfo.format = format;
+			imageCreateInfo.extent = { width, height, 1 };
+			imageCreateInfo.mipLevels = 1;
+			imageCreateInfo.arrayLayers = 1;
+			imageCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+			imageCreateInfo.tiling = tiling;
+			imageCreateInfo.usage = imageUsageFlags;
+			imageCreateInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+			VK_CHECK_RESULT(vkCreateImage(device->logicalDevice, &imageCreateInfo, nullptr, &image));
+
+			VkMemoryRequirements memReqs;
+			vkGetImageMemoryRequirements(device->logicalDevice, image, &memReqs);
+
+			VkMemoryAllocateInfo memAllocInfo = vks::initializers::memoryAllocateInfo();
+			memAllocInfo.allocationSize = memReqs.size;
+			memAllocInfo.memoryTypeIndex = device->getMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+			VK_CHECK_RESULT(vkAllocateMemory(device->logicalDevice, &memAllocInfo, nullptr, &deviceMemory));
+			VK_CHECK_RESULT(vkBindImageMemory(device->logicalDevice, image, deviceMemory, 0));
+
+			// Create a default sampler
+			VkSamplerCreateInfo samplerCreateInfo = vks::initializers::samplerCreateInfo();
+			samplerCreateInfo.magFilter = VK_FILTER_LINEAR;
+			samplerCreateInfo.minFilter = VK_FILTER_LINEAR;
+			samplerCreateInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+			samplerCreateInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+			samplerCreateInfo.addressModeV = samplerCreateInfo.addressModeU;
+			samplerCreateInfo.addressModeW = samplerCreateInfo.addressModeU;
+			samplerCreateInfo.mipLodBias = 0.0f;
+			samplerCreateInfo.maxAnisotropy = 1.0f;
+			samplerCreateInfo.minLod = 0.0f;
+			samplerCreateInfo.maxLod = 1.0f;
+			samplerCreateInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+			VK_CHECK_RESULT(vkCreateSampler(device->logicalDevice, &samplerCreateInfo, nullptr, &sampler));
+
+			// Create image view
+			VkImageViewCreateInfo viewCreateInfo = vks::initializers::imageViewCreateInfo();
+			viewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+			viewCreateInfo.format = format;
+			viewCreateInfo.subresourceRange = {};
+			viewCreateInfo.subresourceRange.aspectMask = (imageUsageFlags & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
+			viewCreateInfo.subresourceRange.levelCount = 1;
+			viewCreateInfo.subresourceRange.layerCount = 1;
+			viewCreateInfo.image = image;
+			VK_CHECK_RESULT(vkCreateImageView(device->logicalDevice, &viewCreateInfo, nullptr, &view));
+
+			updateDescriptor();
+		}
 
 	/**
 	* Load a 2D texture including all mip levels
@@ -74,6 +137,7 @@ namespace vks
 		width = ktxTexture->baseWidth;
 		height = ktxTexture->baseHeight;
 		mipLevels = ktxTexture->numLevels;
+			this->format = format;
 
 		ktx_uint8_t *ktxTextureData = ktxTexture_GetData(ktxTexture);
 		ktx_size_t ktxTextureSize = ktxTexture_GetSize(ktxTexture);
@@ -216,8 +280,8 @@ namespace vks
 		}
 		else
 		{
-			// Prefer using optimal tiling, as linear tiling 
-			// may support only a small set of features 
+			// Prefer using optimal tiling, as linear tiling
+			// may support only a small set of features
 			// depending on implementation (e.g. no mip maps, only one layer, etc.)
 
 			// Check if this support is supported for linear tiling
@@ -241,7 +305,7 @@ namespace vks
 			// Load mip map level 0 to linear tiling image
 			VK_CHECK_RESULT(vkCreateImage(device->logicalDevice, &imageCreateInfo, nullptr, &mappableImage));
 
-			// Get memory requirements for this image 
+			// Get memory requirements for this image
 			// like size and alignment
 			vkGetImageMemoryRequirements(device->logicalDevice, mappableImage, &memReqs);
 			// Set memory allocation size to required memory size
@@ -265,7 +329,7 @@ namespace vks
 			VkSubresourceLayout subResLayout;
 			void *data;
 
-			// Get sub resources layout 
+			// Get sub resources layout
 			// Includes row pitch, size offsets, etc.
 			vkGetImageSubresourceLayout(device->logicalDevice, mappableImage, &subRes, &subResLayout);
 
@@ -352,6 +416,7 @@ namespace vks
 		width = texWidth;
 		height = texHeight;
 		mipLevels = 1;
+			this->format = format;
 
 		VkMemoryAllocateInfo memAllocInfo = vks::initializers::memoryAllocateInfo();
 		VkMemoryRequirements memReqs;
@@ -495,6 +560,69 @@ namespace vks
 		updateDescriptor();
 	}
 
+		Texture2DArray::Texture2DArray(vks::VulkanDevice* device, VkFormat format, VkImageUsageFlags imageUsageFlags, uint32_t width, uint32_t height, uint32_t layers, VkImageTiling tiling, VkImageLayout imageLayout)
+		{
+			this->device = device;
+			this->width = width;
+			this->height = height;
+			this->mipLevels = 1;
+			this->layerCount = layers;
+			this->imageLayout = imageLayout;
+				this->format = format;
+
+			VkImageCreateInfo imageCreateInfo = vks::initializers::imageCreateInfo();
+			imageCreateInfo.imageType = VK_IMAGE_TYPE_2D;
+			imageCreateInfo.format = format;
+			imageCreateInfo.extent = { width, height, 1 };
+			imageCreateInfo.mipLevels = 1;
+			imageCreateInfo.arrayLayers = layers;
+			imageCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+			imageCreateInfo.tiling = tiling;
+			imageCreateInfo.usage = imageUsageFlags;
+			imageCreateInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+			VK_CHECK_RESULT(vkCreateImage(device->logicalDevice, &imageCreateInfo, nullptr, &image));
+
+			VkMemoryRequirements memReqs;
+			vkGetImageMemoryRequirements(device->logicalDevice, image, &memReqs);
+
+			VkMemoryAllocateInfo memAllocInfo = vks::initializers::memoryAllocateInfo();
+			memAllocInfo.allocationSize = memReqs.size;
+			memAllocInfo.memoryTypeIndex = device->getMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+			VK_CHECK_RESULT(vkAllocateMemory(device->logicalDevice, &memAllocInfo, nullptr, &deviceMemory));
+			VK_CHECK_RESULT(vkBindImageMemory(device->logicalDevice, image, deviceMemory, 0));
+
+			// Create a default sampler
+			VkSamplerCreateInfo samplerCreateInfo = vks::initializers::samplerCreateInfo();
+			samplerCreateInfo.magFilter = VK_FILTER_NEAREST;
+			samplerCreateInfo.minFilter = VK_FILTER_NEAREST;
+			samplerCreateInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+			samplerCreateInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+			samplerCreateInfo.addressModeV = samplerCreateInfo.addressModeU;
+			samplerCreateInfo.addressModeW = samplerCreateInfo.addressModeU;
+			samplerCreateInfo.mipLodBias = 0.0f;
+			samplerCreateInfo.maxAnisotropy = 1.0f;
+			samplerCreateInfo.minLod = 0.0f;
+			samplerCreateInfo.maxLod = 1.0f;
+			samplerCreateInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+			VK_CHECK_RESULT(vkCreateSampler(device->logicalDevice, &samplerCreateInfo, nullptr, &sampler));
+
+			// Create image view
+			VkImageViewCreateInfo viewCreateInfo = vks::initializers::imageViewCreateInfo();
+			viewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+			viewCreateInfo.format = format;
+			viewCreateInfo.subresourceRange = {};
+			viewCreateInfo.subresourceRange.aspectMask = (imageUsageFlags & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
+			viewCreateInfo.subresourceRange.levelCount = 1;
+			viewCreateInfo.subresourceRange.layerCount = layers;
+			viewCreateInfo.image = image;
+			VK_CHECK_RESULT(vkCreateImageView(device->logicalDevice, &viewCreateInfo, nullptr, &view));
+
+			updateDescriptor();
+		}
+
+
 	/**
 	* Load a 2D texture array including all mip levels
 	*
@@ -517,6 +645,7 @@ namespace vks
 		height = ktxTexture->baseHeight;
 		layerCount = ktxTexture->numLayers;
 		mipLevels = ktxTexture->numLevels;
+			this->format = format;
 
 		ktx_uint8_t *ktxTextureData = ktxTexture_GetData(ktxTexture);
 		ktx_size_t ktxTextureSize = ktxTexture_GetSize(ktxTexture);
@@ -700,6 +829,7 @@ namespace vks
 		width = ktxTexture->baseWidth;
 		height = ktxTexture->baseHeight;
 		mipLevels = ktxTexture->numLevels;
+			this->format = format;
 
 		ktx_uint8_t *ktxTextureData = ktxTexture_GetData(ktxTexture);
 		ktx_size_t ktxTextureSize = ktxTexture_GetSize(ktxTexture);

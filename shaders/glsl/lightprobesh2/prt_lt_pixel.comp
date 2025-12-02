@@ -1,0 +1,111 @@
+#version 450
+
+// Per-pixel Light Transport (LT) compute shader
+// Reads from G-buffer and writes LT SH coefficients to storage images.
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+// G-Buffer inputs
+layout(set = 0, binding = 0) uniform sampler2D positionMap;
+layout(set = 0, binding = 1) uniform sampler2D normalMap;
+layout(set = 0, binding = 2) uniform sampler2D albedoMap;
+
+// Sample directions for SH projection
+struct GPUSample {
+    vec4 direction; // xyz dir, w unused
+};
+layout(set = 0, binding = 3) buffer SamplesBuffer { GPUSample samples[]; };
+
+// Output LT coefficients packed into three storage images
+// We have 9 vec3 coefficients. We pack them into 3 vec4s and 3 vec4s and 3 vec4s to fill the textures.
+// Tex1: (SH0.xyz, SH1.x), (SH1.yz, SH2.xy), (SH2.z, SH3.xyz)
+// Tex2: (SH4.xyz, SH5.x), (SH5.yz, SH6.xy), (SH6.z, SH7.xyz)
+// Tex3: (SH8.xyz, 0.0)
+// This is complex. Let's simplify.
+// Store 9 vec3s across 3 RGBA32F textures.
+// LT_MAP_0: [ (sh0.rgb, sh1.r), (sh1.gb, sh2.rg), (sh2.b, sh3.rgb) ]
+// A simpler packing:
+// lt0.rgba = vec4(sh0, sh1.r)
+// lt1.rgba = vec4(sh1.gb, sh2.rg)
+// lt2.rgba = vec4(sh2.b, sh3.rgb)
+// ... this is still too complex to unpack.
+
+// Let's use a simpler, more direct layout:
+// We need to store 9 vec3 coefficients.
+// Use 3x RGBA32F images.
+// ltCoeffs0: .rgb = SH0, .a = SH1.r
+// ltCoeffs1: .rgb = SH1.gb + SH2.r, .a = SH2.g
+// This is getting complicated. Let's use a storage buffer of vec4s, which is simpler.
+// But the goal is a texture. So let's use a storage image array.
+// layout(set = 0, binding = 4, rgba32f) uniform image2DArray ltCoeffs;
+// We would need 9 layers. Let's try that.
+
+layout(set = 0, binding = 4, rgba16f) uniform image2DArray ltCoeffs;
+
+// SH basis function (same as per-vertex version)
+float shBasis(int i, vec3 d) {
+    float x = d.x, y = d.y, z = d.z;
+    if (i==0) return 0.282095f;                          // Y00
+    if (i==1) return 0.488603f * y;                     // Y1-1
+    if (i==2) return 0.488603f * z;                     // Y10
+    if (i==3) return 0.488603f * x;                     // Y11
+    if (i==4) return 1.092548f * x * y;                 // Y2-2
+    if (i==5) return 1.092548f * y * z;                 // Y2-1
+    if (i==6) return 0.315392f * (3.0f * z * z - 1.0f); // Y20
+    if (i==7) return 1.092548f * x * z;                 // Y21
+    if (i==8) return 0.546274f * (x * x - y * y);       // Y22
+    return 0.0f;
+}
+
+void main() {
+    ivec2 pixelCoords = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 dims = imageSize(ltCoeffs).xy;
+
+    if (pixelCoords.x >= dims.x || pixelCoords.y >= dims.y) {
+        return;
+    }
+
+    // Sample G-Buffer
+    vec3 worldPos = texelFetch(positionMap, pixelCoords, 0).xyz;
+    vec3 normal = texelFetch(normalMap, pixelCoords, 0).xyz;
+    vec3 albedo = texelFetch(albedoMap, pixelCoords, 0).rgb;
+
+    // If the normal is zero, it's a background pixel, so skip it.
+    if (length(normal) < 0.001) {
+        // Write zero to the output to indicate no data
+        for (int i = 0; i < 9; i++) {
+            imageStore(ltCoeffs, ivec3(pixelCoords, i), vec4(0.0));
+        }
+        return;
+    }
+
+    vec3 n = normalize(normal);
+
+    // Monte Carlo integration for LT coefficients
+    int numSamples = int(samples.length());
+    if (numSamples <= 0) return;
+
+    float weight = 4.0 * 3.14159265 / float(numSamples);
+
+    vec3 shCoeffs[9];
+    for (int i = 0; i < 9; i++) {
+        shCoeffs[i] = vec3(0.0);
+    }
+
+    for (int s = 0; s < numSamples; ++s) {
+        vec3 sampleDir = normalize(samples[s].direction.xyz);
+        float cosineTerm = max(0.0, dot(n, sampleDir));
+        if (cosineTerm > 0.0) {
+            for (int i = 0; i < 9; i++) {
+                float basis = shBasis(i, sampleDir);
+                shCoeffs[i] += albedo * cosineTerm * basis * weight;
+            }
+        }
+    }
+
+    // Write coefficients to the storage image array
+    for (int i = 0; i < 9; i++) {
+        imageStore(ltCoeffs, ivec3(pixelCoords, i), vec4(shCoeffs[i], 1.0));
+    }
+}
+

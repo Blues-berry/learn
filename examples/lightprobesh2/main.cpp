@@ -18,6 +18,7 @@
 #include "CubemapInterpolation.h"
 #include "SphericalHarmonics.h"
 #include "PRTComputeShader.h"
+#include "GBufferPass.h"
 #include "tiny_gltf.h"
 #include "../base/VulkanTools.h"
 
@@ -246,8 +247,8 @@ public:
     // Spotlight parameters (degrees)
     // OPTIMIZED: Wider cone angles to match PBR's broad illumination
     // Inner 50° + Outer 80° provides uniform lighting similar to PBR
-    float spotInnerDeg = 50.0f;   // Increased from 15° for broader coverage
-    float spotOuterDeg = 80.0f;   // Increased from 25° for smooth falloff
+    float spotInnerDeg = 4.0f;   // Increased from 15° for broader coverage
+    float spotOuterDeg = 28.0f;   // Increased from 25° for smooth falloff
     // Irradiance A_l is always applied (π, 2π/3, π/4)
 
     // PRT Relighting
@@ -310,6 +311,7 @@ private:
     std::unique_ptr<GenBRDFLutPass> brdfPass;
     // BRDF 查找表生成通道。
     std::unique_ptr<GenSHComputePass> shGenPass;
+    std::unique_ptr<GBufferPass> gBufferPass;
     // 球谐（SH）计算通道。
     std::unique_ptr<GenIBLPass> genIBL;
 
@@ -487,6 +489,9 @@ void VulkanExample::LoadCubeMap(const std::string& name, const std::string& cube
 
 void VulkanExample::PreparePasses()
 {
+    gBufferPass = std::make_unique<GBufferPass>(vulkanDevice);
+    gBufferPass->SetUp(width, height);
+
     // 准备描述符池
     std::vector<VkDescriptorPoolSize> poolSizes = {
         vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1),
@@ -665,7 +670,10 @@ void VulkanExample::prepareData()
     }
 
     // 更新光源参数
-    mainPassData.useLightSource = lightEnabled ? 1 : 0;
+        // For PRT, the 'lighting' comes from the SH coefficients, so we always need lighting enabled.
+    // The 'lightEnabled' checkbox should only control the *direct* light source contribution,
+    // which is handled by setting lightIntensity to 0.
+    mainPassData.useLightSource = (lightEnabled || usePRTRelighting) ? 1 : 0;
     mainPassData.lightIntensity = lightIntensity;
     mainPassData.lightColor = lightColor;
 
@@ -1521,8 +1529,10 @@ void VulkanExample::ExportPRTDataGPU()
     const int numSamples = glm::clamp(shSamples, 4, 64);
     auto directions = SphericalHarmonics::GenerateFibonacciSamples(numSamples);
     // Spotlight radiance: only strong near a given direction (flashlight-like)
-    // Use current UI lightRotationAngle (radians) to rotate around Y-axis
-    glm::vec3 lightDir = glm::normalize(glm::vec3(-sinf(lightRotationAngle), 0.0f, -cosf(lightRotationAngle)));
+    // This MUST be based on a canonical light source, not the interactive one, so that the
+    // precomputed data is consistent regardless of when the user clicks "Export".
+    // The precomputed rotations will handle rotating this canonical light source.
+    glm::vec3 lightDir = glm::vec3(0.0f, 0.0f, -1.0f); // Canonical spotlight pointing down -Z
     // Use UI-driven inner/outer cone angles (degrees)
     const float cosOuter = cosf(glm::radians(spotOuterDeg));
     const float cosInner = cosf(glm::radians(spotInnerDeg));
@@ -1534,17 +1544,23 @@ void VulkanExample::ExportPRTDataGPU()
 
     // OPTIMIZED: Apply a fixed intensity scale to better match PBR's diffuse contribution
     // The PBR shader uses a 0.5 multiplier for direct lighting diffuse term.
-    const float intensityScale = 0.5f;
+    // We will NOT apply this scaling here. The precomputed data should represent the
+    // full, unscaled radiance. Any BRDF-related scaling should happen in the final shader.
+    // const float intensityScale = 0.5f;
 
-    std::cout << "[ExportPRTDataGPU] Spotlight config: inner=" << spotInnerDeg
-              << "°, outer=" << spotOuterDeg << "°, intensity_scale=" << intensityScale << std::endl;
+        std::cout << "[ExportPRTDataGPU] Spotlight config: inner=" << spotInnerDeg
+              << "°, outer=" << spotOuterDeg << std::endl;
 
     std::vector<glm::vec3> radiances;
     radiances.reserve(directions.size());
     for (const auto& w : directions) {
-        float c = glm::dot(glm::normalize(w), lightDir);
+                // The vector w is the direction *to* the sample point on the sphere.
+        // For a spotlight, we need the direction *from* the light source, so we use -w.
+        float c = glm::dot(glm::normalize(-w), lightDir);
         float falloff = (c <= cosOuter) ? 0.0f : smoothstep(cosOuter, cosInner, c);
-        radiances.push_back(lightColor * lightIntensity * falloff * intensityScale);
+                // Use a canonical intensity of 1.0 for pre-computation, ignoring the UI state.
+                // Use a canonical light color (white) for pre-computation, ignoring the UI state.
+        radiances.push_back(glm::vec3(1.0f) * falloff);
     }
 
     // 2) Lighting SH (try GPU, fallback to CPU) + optional CPU vs GPU diff log
@@ -1666,31 +1682,25 @@ void VulkanExample::ExportPRTDataGPU()
         staging.destroy();
     } while(false);
 
-    std::vector<PRT::GPUSHCoefficients> ltGpuBatch;
+    // 3.1 Precompute Light Transport (LT) for each vertex using CPU
+    // The GPU path (ComputeLightTransportBatch) is not fully implemented, so we fall back to the CPU precomputer.
+    std::vector<SHCoefficients> ltCpuBatch;
     if (!positions.empty()) {
-        if (prtCompute && prtCompute->ComputeLightTransportBatch(positions, normals, albedos, directions, ltGpuBatch)) {
-            std::cout << "[ExportPRTDataGPU] LT batch computed for vertices: " << positions.size() << std::endl;
-        } else {
-            std::cerr << "[ExportPRTDataGPU] LT batch compute failed or prtCompute null. Fallback to single placeholder." << std::endl;
+        std::cout << "[ExportPRTDataGPU] Precomputing LT for " << positions.size() << " vertices (CPU fallback)..." << std::endl;
+        ltCpuBatch.reserve(positions.size());
+        for (size_t i = 0; i < positions.size(); ++i) {
+            // PrecomputeLT expects albedo as a parameter, which influences the bounced light color.
+                        // We need to simulate the light transport for this vertex.
+            // This involves projecting the visibility function (1 for visible, 0 for occluded)
+            // onto the SH basis. For a simple convex object like the Cornell box interior,
+            // we can assume visibility is 1 for all directions in the upper hemisphere.
+            // Use Lambertian cosine term for LT projection (no albedo here)
+            auto lambertFunc = [&](const glm::vec3& dir) -> float {
+                return glm::max(0.0f, glm::dot(normals[i], dir));
+            };
+            ltCpuBatch.push_back(SphericalHarmonics::Project(lambertFunc, directions));
         }
-    }
-
-    // 3.1 Export LT batch per-vertex (convert GPU->CPU SHCoefficients)
-    if (!ltGpuBatch.empty()) {
-        std::vector<SHCoefficients> ltCpuBatch;
-        ltCpuBatch.resize(ltGpuBatch.size());
-        for (size_t v = 0; v < ltGpuBatch.size(); ++v) {
-            for (int i = 0; i < 9; ++i) {
-                ltCpuBatch[v].coeffs[i] = glm::vec3(
-                    ltGpuBatch[v].coeffs[i].x,
-                    ltGpuBatch[v].coeffs[i].y,
-                    ltGpuBatch[v].coeffs[i].z
-                );
-            }
-        }
-        // Write to prt_output/prt_data_lt_batch.txt
-        bool okLTBatch = DataExporter::ExportLightTransportBatch("prt_output/prt_data_lt_batch.txt", ltCpuBatch);
-        std::cout << "[ExportPRTDataGPU] Export LT batch => " << (okLTBatch ? "OK" : "FAILED") << std::endl;
+        std::cout << "[ExportPRTDataGPU] LT CPU computation complete." << std::endl;
     }
 
     // 4) Precompute rotations (24 samples over 360 degrees)
@@ -1714,7 +1724,10 @@ void VulkanExample::ExportPRTDataGPU()
               << (ok1 ? "OK" : "FAILED") << ": "
               << std::filesystem::absolute(base + "_lighting.txt").string() << std::endl;
 
-    // (Removed single LT export; use batch export below)
+        bool ok2 = DataExporter::ExportLightTransportBatch(base + "_lt.txt", ltCpuBatch);
+    std::cout << "[ExportPRTDataGPU] Export light transport => "
+              << (ok2 ? "OK" : "FAILED") << ": "
+              << std::filesystem::absolute(base + "_lt.txt").string() << std::endl;
 
 
     std::vector<PRTPrecomputer::RotatedCoefficients> single;

@@ -5,8 +5,7 @@
 #include <algorithm>
 #include <iostream>
 
-// 常数
-const float PI = 3.14159265359f;
+// 常数 (PI is defined in header as inline constexpr)
 const float PHI = 1.61803398875f;
 
 // 球谐基函数计算
@@ -498,7 +497,8 @@ void PRTRenderer::UpdateRotation(PRTData& prtData, float rotationAngleDegrees) {
 glm::vec3 PRTRenderer::ComputeShading(const PRTData& prtData,
                                      const glm::vec3& normal,
                                      const glm::vec3& albedo) {
-    return Relighter::ComputeRelighting(prtData.lighting, normal, albedo) * albedo;
+    // Note: ComputeRelighting already applies albedo, so we don't multiply again
+    return Relighter::ComputeRelighting(prtData.lighting, normal, albedo);
 }
 
 std::vector<glm::vec3> PRTRenderer::ComputeShadingBatch(

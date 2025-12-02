@@ -36,6 +36,7 @@ class Texture
 	VkImageLayout         imageLayout;
 	VkDeviceMemory        deviceMemory;
 	VkImageView           view;
+		VkFormat format;
 	uint32_t              width, height;
 	uint32_t              mipLevels;
 	uint32_t              layerCount;
@@ -50,6 +51,9 @@ class Texture
 class Texture2D : public Texture
 {
   public:
+		Texture2D() = default;
+		Texture2D(vks::VulkanDevice* device, VkFormat format, VkImageUsageFlags imageUsageFlags, uint32_t width, uint32_t height, VkImageTiling tiling = VK_IMAGE_TILING_OPTIMAL, VkImageLayout imageLayout = VK_IMAGE_LAYOUT_GENERAL);
+
 	void loadFromFile(
 	    std::string        filename,
 	    VkFormat           format,
@@ -72,8 +76,10 @@ class Texture2D : public Texture
 };
 
 class Texture2DArray : public Texture
-{
-  public:
+	{
+	public:
+		Texture2DArray() = default;
+		Texture2DArray(vks::VulkanDevice* device, VkFormat format, VkImageUsageFlags imageUsageFlags, uint32_t width, uint32_t height, uint32_t layers, VkImageTiling tiling = VK_IMAGE_TILING_OPTIMAL, VkImageLayout imageLayout = VK_IMAGE_LAYOUT_GENERAL);
 	void loadFromFile(
 	    std::string        filename,
 	    VkFormat           format,

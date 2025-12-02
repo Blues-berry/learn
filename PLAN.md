@@ -89,6 +89,51 @@ Dispatch(computePipelineLT, groupCountX=顶点数)
 简单方案: 可以在 prt_relight.frag 中混合一些基于 IBL 的镜面反射，但这与 PRT 的动态光照不完全匹配。
 高级方案 (SH Environment Map): 将旋转后的光照 SH 系数传递给片元着色器，用于实时重建一个低频的环境贴图，然后从中采样用于镜面反射。这需要更复杂的着色器和数学知识。
 
-
+spot 4, 32
 
 减少调试信息输出频率，没有变化的内容不做输出
+
+
+我明白了，我需要预计算出光源旋转对于着色的影响，并在PRT渲染中实时旋转光源，实时获取渲染效果
+
+
+我重新描述一下，你分析分析。首先应该预计算三项内容，LIGHT ,LIGHT TRANSPORT 和光源旋转情况下的light 系数。在导出的时候，参考的是光源的初始位置和潜在的旋转方式预计算light 旋转系数。但是，在导出后，旋转光源应该能够得到和PBR类似的渲染结果。也就是，cornel模型随着光源旋转，出现环境光效果。但是目前的情况很奇怪，我使用PRT之后，在不开启enable light的情况下，没有显示初始的cornel模型
+
+
+12.2 
+
+
+一致（cosine 加权），亮度会更合理。
+确认运行期的逻辑：不要把“enable light（实时光照开关）”当成“是否使用预计算数据”的全局开关。
+如果 UI 的 “enable light” 是指实时光源/PBR 通道开关，而 PRT 是独立的通道，那么当关闭实时光时，应仍然使用预计算的 LIGHT × LT 来进行环境照明（即 PRT 通道仍然有效）。
+如当前关闭了光而 PRTRenderer 又没有参与，就可能导致全黑。
+建议：当关闭实时光时，走 PRT 渲染分支；当打开实时光时，可以叠加或切换。
+导出/加载数据的注意点
+
+你现在导出了每顶点的 LT（ExportLightTransportBatch），而 PRTRenderer::Initialize 里只加载了单个 LT（ImportLightTransport 只读第一行）。这意味着运行时用了“一个全局 LT”，有偏差。
+快速打通方案（先验证流程正确性）：
+导出阶段：保留 batch 导出不变。
+运行时：仍用一个 LT（全局），先验证旋转是否生效、亮度是否合理。
+完整方案（后续）：
+加载 per-vertex LT（按顶点或按块读）；
+在顶点/像素着色时按索引取对应的 LT 系数进行 dot(LIGHT_SH, LT_SH)；
+这需要调整 PRTRenderer 的数据结构与绑定。
+你现在可以做什么
+
+用 Developer Command Prompt 编译（或运行 examples/lightprobesh2/compile.bat）。
+在 main.cpp 中把 LT 的可见性函数替换为带余弦项的版本：
+auto ltFunc = [&](const glm::vec3& dir) { return glm::max(0.0f, glm::dot(normals[i], dir)); };
+ltCpuBatch.push_back(SphericalHarmonics::Project(ltFunc, directions));
+运行后导出数据，确认：
+prt_output/prt_data_lighting.txt 有 24 行；
+prt_output/prt_data_lt.txt 行数等于顶点数（或至少不为 0）；
+确认在 UI 中“关闭实时光”时仍然走 PRT 分支（使用预计算的 LIGHT×LT）。
+如果仍然偏暗，打印/检查：
+LIGHT 第 0 项（l=0）是否合理（通常最大）；
+LT 第 0 项是否非零；
+旋转查询 Relighter::QueryCoefficients 是否返回随角度变化的 LIGHT。
+如果你希望，我可以：
+
+直接把 main.cpp 中的 LT 可见性函数替换为 Lambert 余弦项；
+给出 per-vertex LT 加载和使用的最小改动示例（读取批量 LT，在渲染时索引访问）；
+帮你在 PRTRenderer 加一个“实时光关、PRT开”的逻辑开关，避免全黑。
