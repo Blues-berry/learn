@@ -442,6 +442,12 @@ void VulkanExample::PreparePasses()
         vulkanDevice->flushCommandBuffer(cmdBuf, queue); // 提交并刷新命令缓冲区。
     }
     mainPass->UpdateBindings(); // 更新主渲染通道的描述符绑定。
+    
+    // 将SH和IBL资源传递给capturePass，确保捕获时使用正确的光照
+    capturePass->FeedSH(mainPass->environmemts.shCoeffs);
+    capturePass->FeedBRDF(mainPass->environmemts.brdfView);
+    capturePass->FeedIrradiance(mainPass->environmemts.irradianceCube);
+    capturePass->FeedPrefiltered(mainPass->environmemts.prefilteredCube);
 }
 
 void VulkanExample::ReginPrefilterPasses()

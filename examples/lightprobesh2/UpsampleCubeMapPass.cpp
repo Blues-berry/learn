@@ -172,28 +172,43 @@ void CaptureScenePass::PreparePerPassResource()
 {
     // 准备主渲染通道的资源。
     std::vector<VkDescriptorPoolSize> poolSizes = {
-        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 }, // 两个统一缓冲区描述符。
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 },
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 }, // SH coefficients
+        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 3 }, // BRDF LUT, Irradiance, Prefiltered
     };
-    VkDescriptorPoolCreateInfo descriptorPoolInfo = vks::initializers::descriptorPoolCreateInfo(poolSizes, 1); // 初始化描述符池。
-    VK_CHECK_RESULT(vkCreateDescriptorPool(device->logicalDevice, &descriptorPoolInfo, nullptr, &descriptorPool)); // 创建描述符池。
+    VkDescriptorPoolCreateInfo descriptorPoolInfo = vks::initializers::descriptorPoolCreateInfo(poolSizes, 5);
+    VK_CHECK_RESULT(vkCreateDescriptorPool(device->logicalDevice, &descriptorPoolInfo, nullptr, &descriptorPool));
 
+    // 绑定0: Global UBO
+    // 绑定1: SH coefficients
+    // 绑定2: BRDF LUT
+    // 绑定3: Irradiance cube
+    // 绑定4: Prefiltered cube
     std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {
         vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0),
+        vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT, 1),
+        vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 2),
+        vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 3),
+        vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 4),
     };
-    VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCI = vks::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings); // 初始化描述符集布局。
-    VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device->logicalDevice, &descriptorSetLayoutCI, nullptr, &descriptorSetLayout)); // 创建描述符集布局。
+    VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCI = vks::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings);
+    VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device->logicalDevice, &descriptorSetLayoutCI, nullptr, &descriptorSetLayout));
 
-    VkDescriptorSetAllocateInfo allocInfo = vks::initializers::descriptorSetAllocateInfo(descriptorPool, &descriptorSetLayout, 1); // 初始化描述符集分配。
-    VK_CHECK_RESULT(vkAllocateDescriptorSets(device->logicalDevice, &allocInfo, &descriptorSet)); // 分配描述符集。
+    VkDescriptorSetAllocateInfo allocInfo = vks::initializers::descriptorSetAllocateInfo(descriptorPool, &descriptorSetLayout, 1);
+    VK_CHECK_RESULT(vkAllocateDescriptorSets(device->logicalDevice, &allocInfo, &descriptorSet));
 
     device->createBuffer(
-        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, // 创建统一缓冲区。
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, // 主机可见且一致性内存。
-        &globalBuffer, // 存储全局 UBO。
-        sizeof(GlobalUbo)); // 缓冲区大小为 GlobalUbo 结构。
-    globalBuffer.map(); // 映射缓冲区以供主机访问。
+        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        &globalBuffer,
+        sizeof(GlobalUbo));
+    globalBuffer.map();
 
-    UpdateBindings();
+    // 初始化描述符为默认值
+    shCoeffsDescriptor = {};
+    brdfDescriptor = {};
+    irradianceDescriptor = {};
+    prefilteredDescriptor = {};
 
     // 创建默认采样器（线性过滤，clamp）
     VkSamplerCreateInfo samplerCI = vks::initializers::samplerCreateInfo();
@@ -206,6 +221,8 @@ void CaptureScenePass::PreparePerPassResource()
     samplerCI.minLod = 0.0f;
     samplerCI.maxLod = 0.0f;
     VK_CHECK_RESULT(vkCreateSampler(device->logicalDevice, &samplerCI, nullptr, &cubeSampler));
+    
+    UpdateBindings();
 }
 
 void CaptureScenePass::UpdateGlobal(const GlobalUbo& ubo)
@@ -243,10 +260,65 @@ void CaptureScenePass::Draw(VkCommandBuffer cmd, std::function<void(VkCommandBuf
 void CaptureScenePass::UpdateBindings()
 {
     // 更新描述符集绑定。
-    std::vector<VkWriteDescriptorSet> writeDescriptorSets = {
-        vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &globalBuffer.descriptor), // 绑定 0：全局 UBO。
-    };
-    vkUpdateDescriptorSets(device->logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, NULL); // 更新描述符集。
+    std::vector<VkWriteDescriptorSet> writeDescriptorSets;
+    
+    // 始终更新全局UBO
+    writeDescriptorSets.push_back(
+        vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &globalBuffer.descriptor)
+    );
+    
+    // 只有当描述符有效时才更新
+    if (shCoeffsDescriptor.buffer != VK_NULL_HANDLE) {
+        writeDescriptorSets.push_back(
+            vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, &shCoeffsDescriptor)
+        );
+    }
+    
+    if (brdfDescriptor.imageView != VK_NULL_HANDLE) {
+        writeDescriptorSets.push_back(
+            vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2, &brdfDescriptor)
+        );
+    }
+    
+    if (irradianceDescriptor.imageView != VK_NULL_HANDLE) {
+        writeDescriptorSets.push_back(
+            vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 3, &irradianceDescriptor)
+        );
+    }
+    
+    if (prefilteredDescriptor.imageView != VK_NULL_HANDLE) {
+        writeDescriptorSets.push_back(
+            vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4, &prefilteredDescriptor)
+        );
+    }
+    
+    if (!writeDescriptorSets.empty()) {
+        vkUpdateDescriptorSets(device->logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, NULL);
+    }
+}
+
+void CaptureScenePass::FeedSH(VkDescriptorBufferInfo& descriptor)
+{
+    shCoeffsDescriptor = descriptor;
+    UpdateBindings();
+}
+
+void CaptureScenePass::FeedBRDF(VkDescriptorImageInfo& descriptor)
+{
+    brdfDescriptor = descriptor;
+    UpdateBindings();
+}
+
+void CaptureScenePass::FeedIrradiance(VkDescriptorImageInfo& descriptor)
+{
+    irradianceDescriptor = descriptor;
+    UpdateBindings();
+}
+
+void CaptureScenePass::FeedPrefiltered(VkDescriptorImageInfo& descriptor)
+{
+    prefilteredDescriptor = descriptor;
+    UpdateBindings();
 }
 
 void CaptureScenePass::FeedCubeDescriptor(VkDescriptorImageInfo& descriptor)

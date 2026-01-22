@@ -25,6 +25,12 @@ public:
     };
 
     void UpdateGlobal(const GlobalUbo& ubo);
+    
+    // 新增：设置SH系数和IBL资源
+    void FeedSH(VkDescriptorBufferInfo& descriptor);
+    void FeedBRDF(VkDescriptorImageInfo& descriptor);
+    void FeedIrradiance(VkDescriptorImageInfo& descriptor);
+    void FeedPrefiltered(VkDescriptorImageInfo& descriptor);
 
     void Draw(VkCommandBuffer cmd, std::function<void(VkCommandBuffer)>&& encoder);
 
@@ -63,6 +69,12 @@ private:
     VkFramebuffer framebuffer;
     VkRenderPassBeginInfo beginInfo;
     vks::Buffer globalBuffer;
+    
+    // 新增：SH和IBL资源描述符
+    VkDescriptorBufferInfo shCoeffsDescriptor;
+    VkDescriptorImageInfo brdfDescriptor;
+    VkDescriptorImageInfo irradianceDescriptor;
+    VkDescriptorImageInfo prefilteredDescriptor;
 };
 
 class UpsampleCubeMapPass : public ComputePass {
