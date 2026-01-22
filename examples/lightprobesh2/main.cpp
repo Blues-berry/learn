@@ -245,7 +245,10 @@ private:
     // 渲染管线相关成员。
     bool globalDirty = true;
     // 全局数据脏标志，表示是否需要更新全局数据。
-    MainPass::GlobalUbo mainPassData = {};
+    MainPass::GlobalUbo mainPassData = {
+        .exposure = 1.0f,  // 设置默认曝光度
+        .gamma = 2.2f      // 设置默认伽马值
+    };
     // 主渲染通道的统一缓冲区对象（UBO）。
     std::unique_ptr<MainPass> mainPass;
     // 主渲染通道对象。
