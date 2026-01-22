@@ -247,7 +247,7 @@ private:
     bool globalDirty = true;
     // 全局数据脏标志，表示是否需要更新全局数据。
     MainPass::GlobalUbo mainPassData = {
-        .exposure = 1.0f,  // 设置默认曝光度
+        .exposure = 6.0f,  // 设置默认曝光度
         .gamma = 2.2f      // 设置默认伽马值
     };
     // 主渲染通道的统一缓冲区对象（UBO）。
@@ -571,8 +571,6 @@ void VulkanExample::prepareData()
     mainPassData.projection = camera.matrices.perspective;
     mainPassData.view = camera.matrices.view;
     mainPassData.cameraPos = glm::vec4(camera.position, 1.0f); // 设置相机位置（齐次坐标）。
-
-    mainPassData.exposure = 6.0f;
 
     const float angle = timer * glm::two_pi<float>();
     const float radius = 180.0f;

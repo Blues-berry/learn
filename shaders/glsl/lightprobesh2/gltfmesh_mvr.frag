@@ -124,10 +124,6 @@ void main()
 	vec3 ambient = baseColor.rgb * 0.03;
 	vec3 color = ambient + direct + spec;
 
-	color = Uncharted2Tonemap(color * global.exposure);
-	color = color * (1.0f / Uncharted2Tonemap(vec3(11.2f)));
-	color = pow(color, vec3(1.0f / global.gamma));
-
 	outColor = vec4(color, baseColor.a) * pc.tint;
 }
 
