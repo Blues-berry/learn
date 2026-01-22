@@ -584,6 +584,11 @@ void VulkanExample::prepareData()
     mainPassData.light[2] = glm::vec4(radius * std::cos(angle + glm::pi<float>()), height, radius * std::sin(angle + glm::pi<float>()), intensity);
     mainPassData.light[3] = glm::vec4(radius * std::cos(angle + glm::three_over_two_pi<float>()), height * 0.6f, radius * std::sin(angle + glm::three_over_two_pi<float>()), intensity);
 
+    mainPassData.lightColor[0] = glm::vec4(1.0f, 0.35f, 0.25f, 1.0f);
+    mainPassData.lightColor[1] = glm::vec4(0.25f, 1.0f, 0.35f, 1.0f);
+    mainPassData.lightColor[2] = glm::vec4(0.25f, 0.45f, 1.0f, 1.0f);
+    mainPassData.lightColor[3] = glm::vec4(1.0f, 1.0f, 0.25f, 1.0f);
+
     mainPass->UpdateGlobal(mainPassData); // 更新主渲染通道的全局 UBO 数据。
 
     skybox->Update(camera.matrices.view); // 更新天空盒的视图矩阵。

@@ -12,6 +12,7 @@ layout (set = 0, binding = 0) uniform Global
     mat4 projection;   // ✅ 修复：改为分开的 projection 和 view，与 skybox 一致
     mat4 view;
     vec4 lights[4];
+    vec4 lightColor[4];
     vec4 cameraPos;
     float exposure;
     float gamma;
@@ -171,7 +172,7 @@ void main()
 		float dist2 = max(dot(lightVec, lightVec), 1.0);
 		vec3 L = lightVec * inversesqrt(dist2);
 		float attenuation = global.lights[i].w / dist2;
-		Lo += attenuation * specularContribution(L, V, N, F0, metallic, roughness);
+		Lo += (attenuation * global.lightColor[i].rgb) * specularContribution(L, V, N, F0, metallic, roughness);
 	}
 
 	vec3 diffuse = vec3(0.0);

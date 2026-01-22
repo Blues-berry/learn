@@ -19,6 +19,7 @@ public:
         glm::mat4 viewproj[6];
         glm::vec4 cameraPos[6];
         glm::vec4 mainLight;
+        glm::vec4 mainLightColor;
         float exposure = 4.5f;
         float gamma = 2.2f;
     };
@@ -31,7 +32,7 @@ public:
     VkDescriptorSet descriptorSet;
     VkDescriptorSetLayout descriptorSetLayout;
 
-    // Ð›ï¿½7(ï¿½cubemapï¿½ï¿½&ï¿½,ï¿½o
+    // ?7(cubemap&,o
     void FeedCubeDescriptor(VkDescriptorImageInfo& descriptor);
     VkImage GetCubeImage() const { return cube ? cube->GetImage() : VK_NULL_HANDLE; }
     uint32_t GetWidth() const { return width; }
@@ -52,8 +53,8 @@ private:
 
     std::shared_ptr<ResourceView> colorView;
     std::shared_ptr<ResourceView> dsView;
-    std::shared_ptr<ResourceView> cubeSampleView; // CUBE è§†å›¾ç”¨äºŽé‡‡æ ·
-    VkSampler cubeSampler = VK_NULL_HANDLE;       // é‡‡æ ·å™¨
+    std::shared_ptr<ResourceView> cubeSampleView; // CUBE ??????
+    VkSampler cubeSampler = VK_NULL_HANDLE;       // ???
 
     std::vector<VkClearValue> clearValue;
 

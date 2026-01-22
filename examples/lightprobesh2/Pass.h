@@ -151,6 +151,7 @@ public:
         glm::mat4 projection;  // ✅ 修复：改为分开的 projection 和 view，与着色器匹配
         glm::mat4 view;
         glm::vec4 light[4];
+        glm::vec4 lightColor[4];
         glm::vec4 cameraPos;
         float exposure = 4.5f;
         float gamma = 2.2f;

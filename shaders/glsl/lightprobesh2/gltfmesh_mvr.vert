@@ -11,6 +11,7 @@ layout (set = 0, binding = 0) uniform Global
 	mat4 viewProject[6];
 	vec4 cameraPos[6];
 	vec4 mainLight;
+	vec4 mainLightColor;
 	float exposure;
 	float gamma;
 } global;

@@ -10,6 +10,7 @@ layout (set = 0, binding = 0) uniform Global
     mat4 projection;    // ✅ 修复：改为分开的 projection 和 view，与 skybox 一致
     mat4 view;
     vec4 lights[4];
+    vec4 lightColor[4];
     vec4 cameraPos;
     float exposure;
     float gamma;
