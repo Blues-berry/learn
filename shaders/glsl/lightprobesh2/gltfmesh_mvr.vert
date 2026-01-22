@@ -31,6 +31,7 @@ layout (location = 1) out vec3 outColor;
 layout (location = 2) out vec2 outUV;
 layout (location = 3) out vec3 outViewVec;
 layout (location = 4) out vec3 outLightVec;
+layout (location = 5) out vec3 outWorldPos;
 
 out gl_PerVertex 
 {
@@ -47,6 +48,7 @@ void main()
 	outNormal = worldNormal;
 	outColor = inColor.rgb;
 	outUV = vec2(inUV.x, 1.0 - inUV.y);
+	outWorldPos = worldPos.xyz;
 
 	outViewVec = global.cameraPos[gl_ViewIndex].xyz - worldPos.xyz;
 	outLightVec = global.mainLight.xyz - worldPos.xyz;

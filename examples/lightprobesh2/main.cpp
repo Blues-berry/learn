@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <cmath>
 #include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -557,7 +558,7 @@ void VulkanExample::CaptureAllProbes()
         UpdateSkyBox();
         std::cout << "[VulkanExample::CaptureAllProbes] All probes captured! Updated skybox to probe " << skyboxIndex << std::endl;
     }
-}
+} // <--- Added closing bracket here
 
 // =============================================================================
 // 渲染相关函数
@@ -570,7 +571,18 @@ void VulkanExample::prepareData()
     mainPassData.projection = camera.matrices.perspective;
     mainPassData.view = camera.matrices.view;
     mainPassData.cameraPos = glm::vec4(camera.position, 1.0f); // 设置相机位置（齐次坐标）。
-    mainPassData.light[0] = glm::vec4(10.0f, 10.0f, 10.0f, 1.0f); // 设置光源位置
+
+    mainPassData.exposure = 6.0f;
+
+    const float angle = timer * glm::two_pi<float>();
+    const float radius = 180.0f;
+    const float height = 120.0f;
+    const float intensity = 500000.0f;
+
+    mainPassData.light[0] = glm::vec4(radius * std::cos(angle + 0.0f), height, radius * std::sin(angle + 0.0f), intensity);
+    mainPassData.light[1] = glm::vec4(radius * std::cos(angle + glm::half_pi<float>()), height * 0.6f, radius * std::sin(angle + glm::half_pi<float>()), intensity);
+    mainPassData.light[2] = glm::vec4(radius * std::cos(angle + glm::pi<float>()), height, radius * std::sin(angle + glm::pi<float>()), intensity);
+    mainPassData.light[3] = glm::vec4(radius * std::cos(angle + glm::three_over_two_pi<float>()), height * 0.6f, radius * std::sin(angle + glm::three_over_two_pi<float>()), intensity);
 
     mainPass->UpdateGlobal(mainPassData); // 更新主渲染通道的全局 UBO 数据。
 
