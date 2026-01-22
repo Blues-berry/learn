@@ -20,8 +20,8 @@ public:
         glm::vec4 cameraPos[6];
         glm::vec4 mainLight;
         glm::vec4 mainLightColor;
-        float exposure = 4.5f;
-        float gamma = 2.2f;
+        float exposure = 6.0f;  // ç»Ÿä¸€ä¸º 6.0f
+        float gamma = 2.2f;     // ä¿æŒ 2.2f
     };
 
     void UpdateGlobal(const GlobalUbo& ubo);
@@ -32,7 +32,7 @@ public:
     VkDescriptorSet descriptorSet;
     VkDescriptorSetLayout descriptorSetLayout;
 
-    // ?7(cubemap&,o
+    // ?ï¿½7(ï¿½cubemapï¿½ï¿½&ï¿½,ï¿½o
     void FeedCubeDescriptor(VkDescriptorImageInfo& descriptor);
     VkImage GetCubeImage() const { return cube ? cube->GetImage() : VK_NULL_HANDLE; }
     uint32_t GetWidth() const { return width; }

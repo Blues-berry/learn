@@ -153,8 +153,8 @@ public:
         glm::vec4 light[4];
         glm::vec4 lightColor[4];
         glm::vec4 cameraPos;
-        float exposure = 4.5f;
-        float gamma = 2.2f;
+        float exposure = 6.0f;  // 统一为 6.0f
+        float gamma = 2.2f;     // 保持 2.2f
     };
 
     void UpdateGlobal(const GlobalUbo& ubo);

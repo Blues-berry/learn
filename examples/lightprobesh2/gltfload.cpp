@@ -376,6 +376,16 @@ void GltfModel::ShowUI(vks::UIOverlay* overlay)
 	}
 }
 
+void GltfModel::SetUseSHAndReflection(bool useSH, bool useReflection)
+{
+	materialData.useSH = useSH ? 1 : 0;
+	materialData.useReflection = useReflection ? 1 : 0;
+	// 立即写入GPU缓冲区
+	if (materialBuffer.mapped) {
+		memcpy(materialBuffer.mapped, &materialData, sizeof(MaterialBuffer));
+	}
+}
+
 // =============================================================================
 // 纹理加载方法（参考gltfloading.cpp）
 // =============================================================================

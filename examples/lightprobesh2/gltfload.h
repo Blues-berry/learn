@@ -66,6 +66,9 @@ public:
     // 纹理加载相关方法
     const std::vector<Image>& GetImages() const { return images; }
     const std::vector<Material>& GetMaterials() const { return materials; }
+    
+    // 允许从外部代码启用/禁用SH和反射
+    void SetUseSHAndReflection(bool useSH, bool useReflection);
 
 private:
 	void PreparePerBatchResource();

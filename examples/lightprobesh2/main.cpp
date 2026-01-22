@@ -546,12 +546,45 @@ void VulkanExample::CaptureAllProbes()
     }
     // 等待所有操作完成
     vkDeviceWaitIdle(vulkanDevice->logicalDevice);
+    
     // 保存多探针捕获结果用于对比（使用最后一个探针或插值结果）
     // 此处直接用最后一个可能有bug
     // (TO FIX)
     if (!lightProbes.empty()) {
         multiProbeCubemap = lightProbes.back()->GetCubemap();
+        
+        // 为最后一个探针生成SH和IBL，并启用球谐和反射
+        auto lastCapturedCubemap = lightProbes.back()->GetCubemap();
+        if (lastCapturedCubemap) {
+            // --- 生成 SH ---
+            shGenPass->SetCubeMap(lastCapturedCubemap);
+            shGenPass->Generate(queue);
+            
+            VkDescriptorBufferInfo shBufferInfo;
+            shGenPass->FeedSH(shBufferInfo);
+            mainPass->environmemts.shCoeffs = shBufferInfo;
+            
+            // --- 生成 IBL ---
+            genIBL->SetCubeMap(lastCapturedCubemap);
+            genIBL->Generate(queue);
+            genIBL->FeedIrradianceMap(mainPass->environmemts.irradianceCube);
+            genIBL->FeedPrefilteredMap(mainPass->environmemts.prefilteredCube);
+            
+            // 更新主通道绑定
+            mainPass->UpdateBindings();
+            
+            // 启用球谐和反射
+            if (previewModel) {
+                previewModel->SetUseSHAndReflection(true, true);
+            }
+            if (gltfModel) {
+                gltfModel->SetUseSHAndReflection(true, true);
+            }
+            
+            std::cout << "[VulkanExample::CaptureAllProbes] Generated SH/IBL for the last probe and enabled SH/reflection on models" << std::endl;
+        }
     }
+    
     // 更新天空盒为最后一个捕获的探针
     if (!cubeMaps.empty()) {
         skyboxIndex = static_cast<int>(cubeMaps.size() - 1);
@@ -777,7 +810,7 @@ void VulkanExample::CaptureCubemap(const glm::vec3& position)
         previewModel->SetUseSHAndReflection(true, true);
     }
     if (gltfModel) {
-        //gltfModel->SetUseSHAndReflection(true, true);
+        gltfModel->SetUseSHAndReflection(true, true);  // 启用 glTF 模型的 SH 和反射
     }
 
     lightProbes.push_back(std::move(probe));
