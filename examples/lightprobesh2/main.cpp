@@ -62,9 +62,9 @@ public:
         camera.setPerspective(60.0f, (float)width / (float)height, 0.1f, 256.0f); // 设置透视投影：60° 视角，宽高比基于窗口尺寸，近裁剪面 0.1，远裁剪面 256.0。
         camera.rotationSpeed = 0.25f; // 设置相机旋转速度为 0.25。
 
-        // 设置相机初始位置和朝向。
-        camera.setRotation({ -3.75f, 180.0f, 0.0f }); // 设置初始旋转（俯仰、偏航、滚转）。
-        camera.setPosition({ 0.55f, 0.85f, 12.0f }); // 设置初始位置 (x, y, z)。
+        // 设置相机初始位置和朝向，正对模型。
+        camera.setRotation({ 0.0f, 0.0f, 0.0f }); // 设置初始旋转（俯仰、偏航、滚转）。
+        camera.setPosition({ 0.0f, 0.0f, 3.0f }); // 设置初始位置 (x, y, z)，距离模型3个单位。
         // 启用多视图扩展（VK_KHR_multiview），用于同时渲染多个视角（如立方体贴图的 6 个面）。
         enabledDeviceExtensions.push_back(VK_KHR_MULTIVIEW_EXTENSION_NAME);
 
@@ -239,9 +239,8 @@ private:
     // 当前使用的预览模型索引。
 
     std::vector<std::string> gltfModelNames;
-    // 预览模型名称列表。
-    int32_t gltfmodelIndex = 0;
-    // 当前使用的预览模型索引。
+    // glTF模型名称列表。
+    int32_t gltfmodelIndex = 2;  // 当前显示的glTF模型索引 (0=FlightHelmet, 1=CesiumMan, 2=vulkanscenemodels, 3=sibenik)
 
     // 渲染管线相关成员。
     bool globalDirty = true;
@@ -266,7 +265,6 @@ private:
     
     // glTF模型对象
     std::unique_ptr<GltfModel> gltfModel;
-    std::vector<std::unique_ptr<GltfModel>> gltfClones;
     
     // 描述符池
     VkDescriptorPool descriptorPool{ VK_NULL_HANDLE };
@@ -338,26 +336,6 @@ void VulkanExample::PrepareScene()
         gltfModel->PreparePSO(renderPass, mainPass->descriptorSetLayout, ETechnique::MAIN);
         gltfModel->PreparePSO(capturePass->renderPass, capturePass->descriptorSetLayout, ETechnique::CAPTURE_SCENE);
         gltfModel->UpdateModel(gltfModels[gltfmodelIndex]);
-
-        gltfClones.clear();
-        const glm::vec3 cloneOffsets[4] = {
-            glm::vec3(-8.0f, 0.0f, 0.0f),
-            glm::vec3(8.0f, 0.0f, 0.0f),
-            glm::vec3(0.0f, 0.0f, -8.0f),
-            glm::vec3(0.0f, 0.0f, 8.0f)
-        };
-
-        for (int i = 0; i < 4 && i < static_cast<int>(gltfModels.size()); ++i) {
-            auto clone = std::make_unique<GltfModel>(vulkanDevice, this, queue);
-            clone->PreparePSO(renderPass, mainPass->descriptorSetLayout, ETechnique::MAIN);
-            clone->PreparePSO(capturePass->renderPass, capturePass->descriptorSetLayout, ETechnique::CAPTURE_SCENE);
-            clone->UpdateModel(gltfModels[(gltfmodelIndex + i) % gltfModels.size()]);
-
-            glm::mat4 transform = glm::translate(glm::mat4(1.0f), cloneOffsets[i]);
-            transform = glm::scale(transform, glm::vec3(0.35f));
-            clone->SetTransform(transform);
-            gltfClones.emplace_back(std::move(clone));
-        }
     }
 }
 
@@ -604,13 +582,12 @@ void VulkanExample::drawFrame(VkCommandBuffer cmd)
         return;
     }
 
-    // 绘制单帧。
+        // 绘制单帧。
     mainPass->Draw(cmd, frameBuffers[currentBuffer], width, height, [this](VkCommandBuffer cmd) {
         // 匿名函数：记录绘制命令。
         skybox->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); // 绘制天空盒。
         previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); // 绘制预览模型。
-        if (gltfModel) { gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); } // 添加空指针检查
-        for (auto& m : gltfClones) { m->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
+        if (gltfModel) { gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); } // 绘制glTF模型
 
         // 渲染探针为球体
         // TO FIX(探针可视化有问题)
@@ -657,7 +634,6 @@ void VulkanExample::drawSplitView(VkCommandBuffer cmd)
             skybox->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
             previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
             if (gltfModel) { gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
-            for (auto& m : gltfClones) { m->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
         }
         
         // === 中间：单探针捕获 ===
@@ -682,7 +658,6 @@ void VulkanExample::drawSplitView(VkCommandBuffer cmd)
             skybox->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
             previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
             if (gltfModel) { gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
-            for (auto& m : gltfClones) { m->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
         }
         
         // === 右侧：多探针捕获/插值 ===
@@ -707,7 +682,6 @@ void VulkanExample::drawSplitView(VkCommandBuffer cmd)
             skybox->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
             previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
             if (gltfModel) { gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
-            for (auto& m : gltfClones) { m->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
         }
     });
 }
