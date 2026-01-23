@@ -60,12 +60,16 @@ public:
         // 构造函数：初始化 Vulkan 示例，继承自 VulkanExampleBase。
         camera.type = Camera::CameraType::firstperson; // 设置相机为第一人称模式。
         camera.movementSpeed = 4.0f; // 设置相机移动速度为 4.0 单位/秒。
-        camera.setPerspective(60.0f, (float)width / (float)height, 0.1f, 256.0f); // 设置透视投影：60° 视角，宽高比基于窗口尺寸，近裁剪面 0.1，远裁剪面 256.0。
+        camera.setPerspective(60.0f, (float)width / (float)height, 1.0f, 512.0f); // 设置透视投影：60° 视角，宽高比基于窗口尺寸，近裁剪面 1.0（增加以改善深度精度），远裁剪面 512.0（支持大场景）。
         camera.rotationSpeed = 0.25f; // 设置相机旋转速度为 0.25。
 
         // 设置相机初始位置和朝向，正对模型。
         camera.setRotation({ 0.0f, 0.0f, 0.0f }); // 设置初始旋转（俯仰、偏航、滚转）。
-        camera.setPosition({ 0.0f, 0.0f, 3.0f }); // 设置初始位置 (x, y, z)，距离模型3个单位。
+        camera.setPosition({ 0.0f, 5.0f, 30.0f }); // 设置初始位置 (x, y, z)，距离模型30个单位，高度5个单位。
+        
+        // 启用深度钳制特性，防止超出远裁剪面的几何体被裁剪
+        enabledFeatures.depthClamp = VK_TRUE;
+        
         // 启用多视图扩展（VK_KHR_multiview），用于同时渲染多个视角（如立方体贴图的 6 个面）。
         enabledDeviceExtensions.push_back(VK_KHR_MULTIVIEW_EXTENSION_NAME);
 
@@ -117,6 +121,12 @@ public:
 
     void LoadAssets();
     // 声明加载资产函数，用于加载立方体贴图和 glTF 模型。
+
+    void LoadSibenikTextures();
+    // 声明加载Sibenik纹理函数
+    
+    void ApplySibenikMaterial();
+    // 应用Sibenik模型材质
 
     void LoadCubeMap(const std::string& name, const std::string& cubemapPath, VkFormat format);
     // 声明加载立方体贴图函数，指定名称、路径和格式。
@@ -243,6 +253,19 @@ private:
     // glTF模型名称列表。
     int32_t gltfmodelIndex = 2;  // 当前显示的glTF模型索引 (0=FlightHelmet, 1=CesiumMan, 2=vulkanscenemodels, 3=sibenik)
 
+    // Sibenik 模型专用纹理（因为模型本身没有纹理）
+    std::shared_ptr<vks::Texture2D> sibenikBaseColor;
+    std::shared_ptr<vks::Texture2D> sibenikNormal;
+    float sibenikMetallic = 0.0f;      // 石头金属度很低
+    float sibenikRoughness = 0.8f;     // 石头粗糙度较高
+    bool useSibenikTexture = true;     // 是否使用纹理
+    float sibenikScale = 0.3f;         // Sibenik模型缩放因子（原始模型太大）
+    
+    // Sibenik纹理列表（多种不同类型的纹理）
+    std::vector<std::shared_ptr<vks::Texture2D>> sibenikTextures;
+    std::vector<std::string> sibenikTextureNames;
+    int32_t sibenikTextureIndex = 0;   // 当前选中的纹理索引
+
     // 渲染管线相关成员。
     bool globalDirty = true;
     // 全局数据脏标志，表示是否需要更新全局数据。
@@ -307,19 +330,23 @@ void VulkanExample::LoadAssets()
     LoadPreviewModel("torusknot", "models/torusknot.gltf", glTFLoadingFlags); // 加载环面结模型。
     LoadPreviewModel("venus", "models/venus.gltf", glTFLoadingFlags); // 加载维纳斯模型。
     LoadPreviewModel("armor", "models/armor/armor.gltf", glTFLoadingFlags); // 加载维纳斯模型。
-    LoadPreviewModel("chinesedragon", "models/chinesedragon.gltf", glTFLoadingFlags); // 加载维纳斯模型。
-    LoadPreviewModel("sibenik", "models/sibenik.gltf", glTFLoadingFlags); // 加载维纳斯模型。
-    LoadPreviewModel("fireplace", "models/fireplace.gltf", glTFLoadingFlags); // 加载维纳斯模型。
+    LoadPreviewModel("chinesedragon", "models/chinesedragon.gltf", glTFLoadingFlags); // 加载中国龙模型。
+    LoadPreviewModel("fireplace", "models/fireplace.gltf", glTFLoadingFlags); // 加载壁炉模型。
     LoadPreviewModel("glowsphere", "models/glowsphere.gltf", glTFLoadingFlags); // 加载维纳斯模型。
     LoadPreviewModel("", "models/rock01.gltf", glTFLoadingFlags); // 加载模型。
 
    
-    LoadgltfModel("FlightHelmet", "models/FlightHelmet/glTF/FlightHelmet.gltf", glTFLoadingFlags); // 
-    LoadgltfModel("CesiumMan", "models/CesiumMan/glTF/CesiumMan.gltf", glTFLoadingFlags); // 
     LoadgltfModel("vulkanscenemodels", "models/vulkanscenemodels.gltf", glTFLoadingFlags); // 
+    LoadgltfModel("CesiumMan", "models/CesiumMan/glTF/CesiumMan.gltf", glTFLoadingFlags); // 
+    //LoadgltfModel("Buggy", "models/Buggy.gltf", glTFLoadingFlags); // 
+    //LoadgltfModel("Buggy", "models/Buggy.gltf", glTFLoadingFlags); // 
+    LoadgltfModel("FlightHelmet", "models/FlightHelmet/glTF/FlightHelmet.gltf", glTFLoadingFlags); // 
     LoadgltfModel("sibenik", "models/sibenik.gltf", glTFLoadingFlags); // 
     skyboxModel = std::make_shared<vkglTF::Model>(); // 创建天空盒模型对象。
     skyboxModel->loadFromFile(getAssetPath() + "models/cube.gltf", vulkanDevice, queue, glTFLoadingFlags); // 加载立方体模型作为天空盒。
+    
+    // 加载Sibenik专用纹理
+    LoadSibenikTextures();
 }
 
 void VulkanExample::PrepareScene()
@@ -340,6 +367,11 @@ void VulkanExample::PrepareScene()
         gltfModel->PreparePSO(renderPass, mainPass->descriptorSetLayout, ETechnique::MAIN);
         gltfModel->PreparePSO(capturePass->renderPass, capturePass->descriptorSetLayout, ETechnique::CAPTURE_SCENE);
         gltfModel->UpdateModel(gltfModels[gltfmodelIndex]);
+        
+        // 如果是sibenik模型，应用自定义材质和缩放
+        if (gltfModelNames[gltfmodelIndex] == "sibenik") {
+            ApplySibenikMaterial();
+        }
     }
 }
 
@@ -394,6 +426,130 @@ void VulkanExample::LoadCubeMap(const std::string& name, const std::string& cube
     cubemap->loadFromFile(getAssetPath() + cubemapPath, VK_FORMAT_R16G16B16A16_SFLOAT, vulkanDevice, queue); // 从文件加载立方体贴图。
     cubeMaps.emplace_back(cubemap); // 添加到立方体贴图列表。
     cubemapNames.emplace_back(name); // 添加贴图名称。
+}
+
+void VulkanExample::LoadSibenikTextures()
+{
+    // 为Sibenik教堂模型加载多种不同类型的纹理
+    std::cout << "[VulkanExample] Loading Sibenik textures..." << std::endl;
+    
+    // 定义纹理列表（多种材质类型）
+    struct TextureInfo {
+        std::string path;
+        std::string name;
+    };
+    
+    std::vector<TextureInfo> textureList = {
+        // 石材类
+        {"textures/stonefloor01_color_rgba.ktx", "Stone Floor 01"},
+        {"textures/stonefloor02_color_rgba.ktx", "Stone Floor 02"},
+        {"textures/stonefloor03_color_height_rgba.ktx", "Stone Floor 03"},
+        
+        // 岩石类
+        {"textures/rocks_color_rgba.ktx", "Rocks"},
+        
+        // 金属类
+        {"textures/metalplate01_rgba.ktx", "Metal Plate"},
+        {"models/cerberus/albedo.ktx", "Cerberus Metal"},
+        
+        // 木质/箱子类
+        {"textures/crate01_color_height_rgba.ktx", "Wood Crate 01"},
+        {"textures/crate02_color_height_rgba.ktx", "Wood Crate 02"},
+        
+        // 地面类
+        {"textures/ground_dry_rgba.ktx", "Dry Ground"},
+        {"textures/gratefloor_rgba.ktx", "Grate Floor"},
+        
+        // 特殊材质
+        {"textures/colored_glass_rgba.ktx", "Colored Glass"},
+        {"textures/vulkan_cloth_rgba.ktx", "Cloth"},
+        {"textures/lavaplanet_rgba.ktx", "Lava"},
+        {"textures/vulkan_11_rgba.ktx", "Vulkan Logo"},
+        
+        // Sponza建筑纹理（适合教堂）
+        {"models/sponza/16299174074766089871.ktx", "Sponza Wall"},
+        {"models/sponza/10381718147657362067.ktx", "Sponza Brick"},
+        {"models/sponza/10388182081421875623.ktx", "Sponza Arc"},
+        {"models/sponza/11474523244911310074.ktx", "Sponza Ceiling"},
+        {"models/sponza/11490520546946913238.ktx", "Sponza Floor"},
+        
+        // 其他
+        {"textures/skysphere_rgba.ktx", "Sky"},
+        {"textures/gridlines.ktx", "Grid"}
+    };
+    
+    sibenikTextures.clear();
+    sibenikTextureNames.clear();
+    
+    for (const auto& texInfo : textureList) {
+        try {
+            auto texture = std::shared_ptr<vks::Texture2D>(new vks::Texture2D(), [](vks::Texture2D* tex) {
+                if (tex) {
+                    tex->destroy();
+                    delete tex;
+                }
+            });
+            
+            texture->loadFromFile(
+                getAssetPath() + texInfo.path, 
+                VK_FORMAT_R8G8B8A8_UNORM, 
+                vulkanDevice, 
+                queue
+            );
+            
+            sibenikTextures.push_back(texture);
+            sibenikTextureNames.push_back(texInfo.name);
+            
+            std::cout << "  - Loaded: " << texInfo.name << std::endl;
+        }
+        catch (const std::exception& e) {
+            std::cerr << "  - Failed to load " << texInfo.name << ": " << e.what() << std::endl;
+        }
+    }
+    
+    // 默认使用第一个纹理
+    if (!sibenikTextures.empty()) {
+        sibenikBaseColor = sibenikTextures[0];
+    }
+    
+    std::cout << "[VulkanExample] Loaded " << sibenikTextures.size() << " Sibenik textures!" << std::endl;
+}
+
+void VulkanExample::ApplySibenikMaterial()
+{
+    if (!gltfModel || gltfModelNames[gltfmodelIndex] != "sibenik") {
+        return;
+    }
+    
+    std::cout << "[VulkanExample] Applying Sibenik material settings..." << std::endl;
+    
+    // 应用材质参数
+    gltfModel->SetMetallic(sibenikMetallic);
+    gltfModel->SetRoughness(sibenikRoughness);
+    
+    if (useSibenikTexture && !sibenikTextures.empty()) {
+        // 根据当前索引选择纹理
+        if (sibenikTextureIndex >= 0 && sibenikTextureIndex < sibenikTextures.size()) {
+            sibenikBaseColor = sibenikTextures[sibenikTextureIndex];
+            gltfModel->SetUseTexture(true);
+            gltfModel->SetBaseColorTexture(sibenikBaseColor.get());
+            std::cout << "  - Using texture: " << sibenikTextureNames[sibenikTextureIndex] << std::endl;
+        }
+    } else {
+        gltfModel->SetUseTexture(false);
+        // 使用灰色作为基础颜色
+        gltfModel->SetAlbedo(glm::vec4(0.7f, 0.7f, 0.7f, 1.0f));
+        std::cout << "  - Using gray color (no texture)" << std::endl;
+    }
+    
+    // 应用缩放（Sibenik模型原始尺寸约40x30x17单位，缩小到更合适的尺寸）
+    glm::mat4 scaleMatrix = glm::scale(glm::mat4(1.0f), glm::vec3(sibenikScale));
+    gltfModel->SetTransform(scaleMatrix);
+    std::cout << "  - Scale: " << sibenikScale << std::endl;
+    
+    gltfModel->UpdateMaterial();
+    std::cout << "  - Metallic: " << sibenikMetallic << std::endl;
+    std::cout << "  - Roughness: " << sibenikRoughness << std::endl;
 }
 
 // =============================================================================
@@ -909,6 +1065,54 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
         if (overlay->comboBox("GLTF Model", &gltfmodelIndex, gltfModelNames)) {
             gltfModel->UpdateModel(gltfModels[gltfmodelIndex]);
             std::cout << "[VulkanExample] Switched to GLTF model: " << gltfModelNames[gltfmodelIndex] << std::endl;
+            
+            // 如果是sibenik模型，应用自定义材质
+            if (gltfModelNames[gltfmodelIndex] == "sibenik") {
+                ApplySibenikMaterial();
+            }
+        }
+    }
+
+    // Sibenik 模型材质控制
+    if (!gltfModelNames.empty() && gltfmodelIndex >= 0 && gltfmodelIndex < gltfModelNames.size()) {
+        if (gltfModelNames[gltfmodelIndex] == "sibenik") {
+            if (overlay->header("Sibenik Material")) {
+                overlay->text("Model has no embedded textures");
+                overlay->text("Size: ~40x30x17 units");
+                overlay->text("Vertices: 225,849");
+                
+                // 使用纹理开关
+                if (overlay->checkBox("Use Texture", &useSibenikTexture)) {
+                    std::cout << "[VulkanExample] Use texture: " << (useSibenikTexture ? "YES" : "NO") << std::endl;
+                    ApplySibenikMaterial();
+                }
+                
+                // 纹理选择下拉框（仅当有纹理且加载成功时显示）
+                if (useSibenikTexture && !sibenikTextureNames.empty()) {
+                    if (overlay->comboBox("Texture", &sibenikTextureIndex, sibenikTextureNames)) {
+                        std::cout << "[VulkanExample] Selected texture: " << sibenikTextureNames[sibenikTextureIndex] << std::endl;
+                        ApplySibenikMaterial();
+                    }
+                }
+                
+                // 金属度调整
+                if (overlay->sliderFloat("Metallic", &sibenikMetallic, 0.0f, 1.0f)) {
+                    std::cout << "[VulkanExample] Sibenik metallic: " << sibenikMetallic << std::endl;
+                    ApplySibenikMaterial();
+                }
+                
+                // 粗糙度调整
+                if (overlay->sliderFloat("Roughness", &sibenikRoughness, 0.0f, 1.0f)) {
+                    std::cout << "[VulkanExample] Sibenik roughness: " << sibenikRoughness << std::endl;
+                    ApplySibenikMaterial();
+                }
+                
+                // 模型缩放调整
+                if (overlay->sliderFloat("Scale", &sibenikScale, 0.1f, 2.0f)) {
+                    std::cout << "[VulkanExample] Sibenik scale: " << sibenikScale << std::endl;
+                    ApplySibenikMaterial();
+                }
+            }
         }
     }
 

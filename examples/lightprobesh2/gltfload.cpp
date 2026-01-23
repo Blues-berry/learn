@@ -270,16 +270,18 @@ void GltfModel::PreparePSO(VkRenderPass renderPass, VkDescriptorSetLayout passLa
 	// 配置输入组装状态，使用三角形列表拓扑。
 	VkPipelineInputAssemblyStateCreateInfo inputAssemblyState =
 		vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
-	// 配置光栅化状态，填充模式，无背面剔除，逆时针为正面。
+	// 配置光栅化状态，填充模式，无背面剔除，逆时针为正面，启用深度钳制以防止裁剪
 	VkPipelineRasterizationStateCreateInfo rasterizationState =
 		vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE);
+	// 启用深度钳制，防止超出远裁剪面的几何体被裁剪
+	rasterizationState.depthClampEnable = VK_TRUE;
 	// 配置颜色混合状态，禁用混合	
 	VkPipelineColorBlendAttachmentState blendAttachmentState =
 		vks::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE);
 	// 配置颜色混合状态，指定一个附件。
 	VkPipelineColorBlendStateCreateInfo colorBlendState =
 		vks::initializers::pipelineColorBlendStateCreateInfo(1, &blendAttachmentState);
-	// 配置深度和模板状态，初始禁用深度测试和写入。
+	// 配置深度和模板状态，启用深度测试
 	VkPipelineDepthStencilStateCreateInfo depthStencilState =
 		vks::initializers::pipelineDepthStencilStateCreateInfo(VK_TRUE, VK_TRUE, VK_COMPARE_OP_LESS_OR_EQUAL);
 	// 配置视口状态，指定一个视口和裁剪矩形。

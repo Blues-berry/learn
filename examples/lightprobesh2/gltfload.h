@@ -69,6 +69,19 @@ public:
     
     // 允许从外部代码启用/禁用SH和反射
     void SetUseSHAndReflection(bool useSH, bool useReflection);
+    
+    // 设置材质参数
+    void SetMetallic(float metallic) { materialData.metallic = metallic; materialDirty = true; }
+    void SetRoughness(float roughness) { materialData.roughness = roughness; materialDirty = true; }
+    void SetAlbedo(const glm::vec4& albedo) { materialData.elbedo = albedo; materialDirty = true; }
+    void SetUseTexture(bool use) { materialData.useTexture = use ? 1 : 0; materialDirty = true; }
+    void SetBaseColorTexture(vks::Texture2D* texture) { 
+        if (texture && images.size() > 0) {
+            images[0].texture = *texture;
+            materialDirty = true;
+        }
+    }
+    void UpdateMaterial() { materialDirty = true; UpdateSet(); }
 
 private:
 	void PreparePerBatchResource();
