@@ -260,11 +260,15 @@ private:
     float sibenikRoughness = 0.8f;     // 石头粗糙度较高
     bool useSibenikTexture = true;     // 是否使用纹理
     float sibenikScale = 0.3f;         // Sibenik模型缩放因子（原始模型太大）
+    glm::vec3 sibenikPosition = glm::vec3(0.0f, 30.0f, 0.0f);  // Sibenik模型位置（Y轴控制上下）
     
     // Sibenik纹理列表（多种不同类型的纹理）
     std::vector<std::shared_ptr<vks::Texture2D>> sibenikTextures;
     std::vector<std::string> sibenikTextureNames;
     int32_t sibenikTextureIndex = 0;   // 当前选中的纹理索引
+    
+    // Sibenik多材质纹理映射（为模型的不同部分分配不同纹理）
+    std::vector<int32_t> sibenikMaterialTextureMap;  // 材质索引 -> 纹理索引映射
 
     // 渲染管线相关成员。
     bool globalDirty = true;
@@ -274,6 +278,10 @@ private:
         .gamma = 2.2f      // 设置默认伽马值
     };
     // 主渲染通道的统一缓冲区对象（UBO）。
+    
+    // 光照开关（4个动态光源）
+    bool lightSwitches[4] = {true, true, true, true};  // 默认全部开启
+    float lightIntensity[4] = {500000.0f, 500000.0f, 500000.0f, 500000.0f};  // 各光源强度
     std::unique_ptr<MainPass> mainPass;
     // 主渲染通道对象。
     std::unique_ptr<GenBRDFLutPass> brdfPass;
@@ -527,13 +535,50 @@ void VulkanExample::ApplySibenikMaterial()
     gltfModel->SetMetallic(sibenikMetallic);
     gltfModel->SetRoughness(sibenikRoughness);
     
-    if (useSibenikTexture && !sibenikTextures.empty()) {
-        // 根据当前索引选择纹理
-        if (sibenikTextureIndex >= 0 && sibenikTextureIndex < sibenikTextures.size()) {
-            sibenikBaseColor = sibenikTextures[sibenikTextureIndex];
-            gltfModel->SetUseTexture(true);
-            gltfModel->SetBaseColorTexture(sibenikBaseColor.get());
-            std::cout << "  - Using texture: " << sibenikTextureNames[sibenikTextureIndex] << std::endl;
+    // 获取模型材质数量
+    auto model = gltfModel->getModel();
+    if (!model) {
+        std::cerr << "  ❌ Model is null!" << std::endl;
+        return;
+    }
+    
+    size_t materialCount = model->materials.size();
+    std::cout << "  - Model has " << materialCount << " materials" << std::endl;
+    
+    // 检查Sibenik模型是否只有一个材质（根据之前的分析）
+    if (materialCount == 1) {
+        std::cout << "  ⚠️  Sibenik model has only 1 material!" << std::endl;
+        std::cout << "  → All parts will use the same texture" << std::endl;
+        std::cout << "  → To use different textures for different parts," << std::endl;
+        std::cout << "    the model needs to be split into multiple materials" << std::endl;
+    }
+    
+    if (useSibenikTexture && !sibenikTextures.empty() && materialCount > 0) {
+        // 初始化材质-纹理映射（如果尚未初始化）
+        if (sibenikMaterialTextureMap.size() != materialCount) {
+            sibenikMaterialTextureMap.resize(materialCount);
+            // 为每个材质分配不同的纹理（循环使用纹理列表）
+            for (size_t i = 0; i < materialCount; i++) {
+                sibenikMaterialTextureMap[i] = i % sibenikTextures.size();
+            }
+            std::cout << "  - Initialized texture mapping for " << materialCount << " materials" << std::endl;
+        }
+        
+        // 当前限制：由于vkglTF::Model的draw实现，我们只能为整个模型设置一个纹理
+        // 这里我们使用第一个材质的纹理设置
+        sibenikBaseColor = sibenikTextures[sibenikTextureIndex];
+        gltfModel->SetUseTexture(true);
+        gltfModel->SetBaseColorTexture(sibenikBaseColor.get());
+        std::cout << "  - Using texture: " << sibenikTextureNames[sibenikTextureIndex] << std::endl;
+        
+        // 打印材质-纹理映射（用于信息显示）
+        if (materialCount > 1) {
+            for (size_t i = 0; i < materialCount && i < sibenikMaterialTextureMap.size(); i++) {
+                int texIdx = sibenikMaterialTextureMap[i];
+                if (texIdx >= 0 && texIdx < sibenikTextures.size()) {
+                    std::cout << "    Material " << i << " -> " << sibenikTextureNames[texIdx] << std::endl;
+                }
+            }
         }
     } else {
         gltfModel->SetUseTexture(false);
@@ -542,9 +587,11 @@ void VulkanExample::ApplySibenikMaterial()
         std::cout << "  - Using gray color (no texture)" << std::endl;
     }
     
-    // 应用缩放（Sibenik模型原始尺寸约40x30x17单位，缩小到更合适的尺寸）
-    glm::mat4 scaleMatrix = glm::scale(glm::mat4(1.0f), glm::vec3(sibenikScale));
-    gltfModel->SetTransform(scaleMatrix);
+    // 应用缩放和平移（组合变换）
+    glm::mat4 transformMatrix = glm::translate(glm::mat4(1.0f), sibenikPosition) * 
+                                glm::scale(glm::mat4(1.0f), glm::vec3(sibenikScale));
+    gltfModel->SetTransform(transformMatrix);
+    std::cout << "  - Position: (" << sibenikPosition.x << ", " << sibenikPosition.y << ", " << sibenikPosition.z << ")" << std::endl;
     std::cout << "  - Scale: " << sibenikScale << std::endl;
     
     gltfModel->UpdateMaterial();
@@ -770,12 +817,32 @@ void VulkanExample::prepareData()
     const float angle = timer * glm::two_pi<float>();
     const float radius = 180.0f;
     const float height = 120.0f;
-    const float intensity = 500000.0f;
 
-    mainPassData.light[0] = glm::vec4(radius * std::cos(angle + 0.0f), height, radius * std::sin(angle + 0.0f), intensity);
-    mainPassData.light[1] = glm::vec4(radius * std::cos(angle + glm::half_pi<float>()), height * 0.6f, radius * std::sin(angle + glm::half_pi<float>()), intensity);
-    mainPassData.light[2] = glm::vec4(radius * std::cos(angle + glm::pi<float>()), height, radius * std::sin(angle + glm::pi<float>()), intensity);
-    mainPassData.light[3] = glm::vec4(radius * std::cos(angle + glm::three_over_two_pi<float>()), height * 0.6f, radius * std::sin(angle + glm::three_over_two_pi<float>()), intensity);
+    // 根据光照开关设置光源（w分量为强度，0表示关闭）
+    mainPassData.light[0] = glm::vec4(
+        radius * std::cos(angle + 0.0f), 
+        height, 
+        radius * std::sin(angle + 0.0f), 
+        lightSwitches[0] ? lightIntensity[0] : 0.0f
+    );
+    mainPassData.light[1] = glm::vec4(
+        radius * std::cos(angle + glm::half_pi<float>()), 
+        height * 0.6f, 
+        radius * std::sin(angle + glm::half_pi<float>()), 
+        lightSwitches[1] ? lightIntensity[1] : 0.0f
+    );
+    mainPassData.light[2] = glm::vec4(
+        radius * std::cos(angle + glm::pi<float>()), 
+        height, 
+        radius * std::sin(angle + glm::pi<float>()), 
+        lightSwitches[2] ? lightIntensity[2] : 0.0f
+    );
+    mainPassData.light[3] = glm::vec4(
+        radius * std::cos(angle + glm::three_over_two_pi<float>()), 
+        height * 0.6f, 
+        radius * std::sin(angle + glm::three_over_two_pi<float>()), 
+        lightSwitches[3] ? lightIntensity[3] : 0.0f
+    );
 
     mainPassData.lightColor[0] = glm::vec4(1.0f, 0.35f, 0.25f, 1.0f);
     mainPassData.lightColor[1] = glm::vec4(0.25f, 1.0f, 0.35f, 1.0f);
@@ -1087,11 +1154,39 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
                     ApplySibenikMaterial();
                 }
                 
-                // 纹理选择下拉框（仅当有纹理且加载成功时显示）
-                if (useSibenikTexture && !sibenikTextureNames.empty()) {
-                    if (overlay->comboBox("Texture", &sibenikTextureIndex, sibenikTextureNames)) {
-                        std::cout << "[VulkanExample] Selected texture: " << sibenikTextureNames[sibenikTextureIndex] << std::endl;
-                        ApplySibenikMaterial();
+                // 获取模型材质数量
+                int materialCount = 0;
+                if (gltfModel && gltfModel->getModel()) {
+                    materialCount = static_cast<int>(gltfModel->getModel()->materials.size());
+                }
+                
+                // 为每个材质选择纹理
+                if (useSibenikTexture && !sibenikTextureNames.empty() && materialCount > 0) {
+                    overlay->text("Material Texture Assignment:");
+                    
+                    // 确保材质纹理映射数组大小匹配
+                    if (sibenikMaterialTextureMap.size() != materialCount) {
+                        sibenikMaterialTextureMap.resize(materialCount);
+                        for (int i = 0; i < materialCount; i++) {
+                            sibenikMaterialTextureMap[i] = i % sibenikTextures.size();
+                        }
+                    }
+                    
+                    // 为每个材质显示纹理选择下拉框（最多显示8个以避免UI过长）
+                    int displayCount = std::min(materialCount, 8);
+                    for (int i = 0; i < displayCount; i++) {
+                        std::string label = std::string("Mat ") + std::to_string(i);
+                        if (overlay->comboBox(label.c_str(), &sibenikMaterialTextureMap[i], sibenikTextureNames)) {
+                            std::cout << "[VulkanExample] Material " << i 
+                                      << " -> " << sibenikTextureNames[sibenikMaterialTextureMap[i]] << std::endl;
+                            ApplySibenikMaterial();
+                        }
+                    }
+                    
+                    if (materialCount > 8) {
+                        char buffer[128];
+                        sprintf(buffer, "... and %d more materials", materialCount - 8);
+                        overlay->text(buffer);
                     }
                 }
                 
@@ -1204,6 +1299,38 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
                 }
             } else {
                 std::cerr << "[VulkanExample] No probes available for probe ID visualization!" << std::endl;
+            }
+        }
+    }
+
+    // 光照控制UI
+    if (overlay->header("Lighting Control")) {
+        // 全局光照开关
+        static bool allLightsOn = true;
+        if (overlay->checkBox("All Lights", &allLightsOn)) {
+            for (int i = 0; i < 4; i++) {
+                lightSwitches[i] = allLightsOn;
+            }
+            globalDirty = true;
+        }
+        
+        overlay->text("Individual Lights:");
+        
+        // 每个光源的单独控制
+        const char* lightNames[] = { "Light 1 (Red)", "Light 2 (Green)", "Light 3 (Blue)", "Light 4 (Yellow)" };
+        for (int i = 0; i < 4; i++) {
+            if (overlay->checkBox(lightNames[i], &lightSwitches[i])) {
+                globalDirty = true;
+            }
+        }
+        
+        overlay->text("Light Intensity:");
+        
+        // 每个光源的强度滑块
+        for (int i = 0; i < 4; i++) {
+            std::string sliderLabel = std::string("Int ") + std::to_string(i + 1);
+            if (overlay->sliderFloat(sliderLabel.c_str(), &lightIntensity[i], 0.0f, 1000000.0f)) {
+                globalDirty = true;
             }
         }
     }
