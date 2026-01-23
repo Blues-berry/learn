@@ -306,7 +306,7 @@ private:
 
     // 是否显示sibenik / 是否显示当前gltfModel（非sibenik）
     bool showSibenik = true;
-    bool showSceneModel = false;
+    bool showSceneModel = true;
 
     // 启动时是否已经用 sibenik 场景生成过环境光( SH / IBL )
     bool sibenikEnvReady = false;
@@ -433,9 +433,9 @@ void VulkanExample::PrepareScene()
 
             gltfmodelIndex = savedIndex;
 
-            // 启动时默认只显示 sibenik
+            // 启动时默认显示 sibenik + 其他 glTF（你也可以在 UI 里关闭）
             showSibenik = true;
-            showSceneModel = false;
+            showSceneModel = true;
         }
 
         // --- 其他 glTF 模型：用于演示 IBL 受环境影响的效果 ---
