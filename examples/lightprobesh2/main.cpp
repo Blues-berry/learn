@@ -66,10 +66,10 @@ public:
         // 设置相机初始位置和朝向，正对模型。
         camera.setRotation({ 0.0f, 0.0f, 0.0f }); // 设置初始旋转（俯仰、偏航、滚转）。
         camera.setPosition({ 0.0f, 5.0f, 30.0f }); // 设置初始位置 (x, y, z)，距离模型30个单位，高度5个单位。
-        
+
         // 启用深度钳制特性，防止超出远裁剪面的几何体被裁剪
         enabledFeatures.depthClamp = VK_TRUE;
-        
+
         // 启用多视图扩展（VK_KHR_multiview），用于同时渲染多个视角（如立方体贴图的 6 个面）。
         enabledDeviceExtensions.push_back(VK_KHR_MULTIVIEW_EXTENSION_NAME);
 
@@ -111,7 +111,7 @@ public:
             vkDestroyDescriptorPool(device, descriptorPool, nullptr);
             descriptorPool = VK_NULL_HANDLE;
         }
-        
+
         // 清空渲染通道对象。
         mainPass = nullptr;
         shGenPass = nullptr;
@@ -124,7 +124,7 @@ public:
 
     void LoadSibenikTextures();
     // 声明加载Sibenik纹理函数
-    
+
     void ApplySibenikMaterial();
     // 应用Sibenik模型材质
 
@@ -152,7 +152,7 @@ public:
 
     void CaptureAllProbes();
     // 自动捕获所有探针的立方体贴图
-    
+
     void SetCompareMode(RenderCompareMode mode);
     // 设置对比渲染模式
 
@@ -180,7 +180,7 @@ public:
 
     void drawFrame(VkCommandBuffer cmd);
     // 声明绘制单帧函数，记录渲染命令。
-    
+
     void drawSplitView(VkCommandBuffer cmd);
     // 分屏对比渲染：同时显示原始、单探针、多探针效果
 
@@ -261,12 +261,12 @@ private:
     bool useSibenikTexture = true;     // 是否使用纹理
     float sibenikScale = 0.3f;         // Sibenik模型缩放因子（原始模型太大）
     glm::vec3 sibenikPosition = glm::vec3(0.0f, 30.0f, 0.0f);  // Sibenik模型位置（Y轴控制上下）
-    
+
     // Sibenik纹理列表（多种不同类型的纹理）
     std::vector<std::shared_ptr<vks::Texture2D>> sibenikTextures;
     std::vector<std::string> sibenikTextureNames;
     int32_t sibenikTextureIndex = 0;   // 当前选中的纹理索引
-    
+
     // Sibenik多材质纹理映射（为模型的不同部分分配不同纹理）
     std::vector<int32_t> sibenikMaterialTextureMap;  // 材质索引 -> 纹理索引映射
 
@@ -278,7 +278,7 @@ private:
         .gamma = 2.2f      // 设置默认伽马值
     };
     // 主渲染通道的统一缓冲区对象（UBO）。
-    
+
     // 光照开关（4个动态光源）
     bool lightSwitches[4] = {true, true, true, true};  // 默认全部开启
     float lightIntensity[4] = {500000.0f, 500000.0f, 500000.0f, 500000.0f};  // 各光源强度
@@ -297,10 +297,22 @@ private:
 
     // 预览模型对象。
     std::unique_ptr<LightProbe> probe;
-    
-    // glTF模型对象
+
+    // glTF模型对象（非 sibenik：用于切换展示的主模型）
     std::unique_ptr<GltfModel> gltfModel;
-    
+
+    // sibenik 独立模型：作为“环境场景/捕获源”，也可单独显示
+    std::unique_ptr<GltfModel> sibenikModel;
+
+    // 是否显示sibenik / 是否显示当前gltfModel（非sibenik）
+    bool showSibenik = true;
+    bool showSceneModel = false;
+
+    // 启动时是否已经用 sibenik 场景生成过环境光( SH / IBL )
+    bool sibenikEnvReady = false;
+
+    void EnsureSibenikEnvironment();
+
     // 描述符池
     VkDescriptorPool descriptorPool{ VK_NULL_HANDLE };
 
@@ -312,7 +324,7 @@ private:
     // 插值算法选择
     int32_t interpolationModeIndex = 0;  // 0=IDW, 1=Linear, 2=Cubic
     std::vector<std::string> interpolationModeNames = {"IDW", "Linear", "Cubic"};
-    
+
     // 对比渲染
     RenderCompareMode compareMode = RenderCompareMode::NORMAL;
     std::shared_ptr<vks::TextureCubeMap> originalCubemap;      // 原始环境贴图
@@ -343,16 +355,16 @@ void VulkanExample::LoadAssets()
     LoadPreviewModel("glowsphere", "models/glowsphere.gltf", glTFLoadingFlags); // 加载维纳斯模型。
     LoadPreviewModel("", "models/rock01.gltf", glTFLoadingFlags); // 加载模型。
 
-   
-    LoadgltfModel("vulkanscenemodels", "models/vulkanscenemodels.gltf", glTFLoadingFlags); // 
-    LoadgltfModel("CesiumMan", "models/CesiumMan/glTF/CesiumMan.gltf", glTFLoadingFlags); // 
-    //LoadgltfModel("Buggy", "models/Buggy.gltf", glTFLoadingFlags); // 
-    //LoadgltfModel("Buggy", "models/Buggy.gltf", glTFLoadingFlags); // 
-    LoadgltfModel("FlightHelmet", "models/FlightHelmet/glTF/FlightHelmet.gltf", glTFLoadingFlags); // 
-    LoadgltfModel("sibenik", "models/sibenik.gltf", glTFLoadingFlags); // 
+
+    LoadgltfModel("vulkanscenemodels", "models/vulkanscenemodels.gltf", glTFLoadingFlags); //
+    LoadgltfModel("CesiumMan", "models/CesiumMan/glTF/CesiumMan.gltf", glTFLoadingFlags); //
+    //LoadgltfModel("Buggy", "models/Buggy.gltf", glTFLoadingFlags); //
+    //LoadgltfModel("Buggy", "models/Buggy.gltf", glTFLoadingFlags); //
+    LoadgltfModel("FlightHelmet", "models/FlightHelmet/glTF/FlightHelmet.gltf", glTFLoadingFlags); //
+    LoadgltfModel("sibenik", "models/sibenik.gltf", glTFLoadingFlags); //
     skyboxModel = std::make_shared<vkglTF::Model>(); // 创建天空盒模型对象。
     skyboxModel->loadFromFile(getAssetPath() + "models/cube.gltf", vulkanDevice, queue, glTFLoadingFlags); // 加载立方体模型作为天空盒。
-    
+
     // 加载Sibenik专用纹理
     LoadSibenikTextures();
 }
@@ -369,16 +381,79 @@ void VulkanExample::PrepareScene()
     previewModel->PreparePSO(renderPass, mainPass->descriptorSetLayout, ETechnique::MAIN); // 准备预览模型的 PSO。
     previewModel->UpdateModel(previewModels[modelIndex]); // 设置初始预览模型。
 
-    // 准备gltfModel - 为MainPass和CapturePass都准备PSO
+    // --- sibenik 独立模型：作为场景/捕获源，同时可选择单独显示 ---
     if (!gltfModels.empty()) {
-        gltfModel = std::make_unique<GltfModel>(vulkanDevice, this, queue); // 主模型
-        gltfModel->PreparePSO(renderPass, mainPass->descriptorSetLayout, ETechnique::MAIN);
-        gltfModel->PreparePSO(capturePass->renderPass, capturePass->descriptorSetLayout, ETechnique::CAPTURE_SCENE);
-        gltfModel->UpdateModel(gltfModels[gltfmodelIndex]);
-        
-        // 如果是sibenik模型，应用自定义材质和缩放
-        if (gltfModelNames[gltfmodelIndex] == "sibenik") {
-            ApplySibenikMaterial();
+        int32_t sibenikIdx = -1;
+        for (int32_t i = 0; i < static_cast<int32_t>(gltfModelNames.size()); ++i) {
+            if (gltfModelNames[i] == "sibenik") {
+                sibenikIdx = i;
+                break;
+            }
+        }
+
+        if (sibenikIdx >= 0) {
+            sibenikModel = std::make_unique<GltfModel>(vulkanDevice, this, queue);
+            sibenikModel->PreparePSO(renderPass, mainPass->descriptorSetLayout, ETechnique::MAIN);
+            sibenikModel->PreparePSO(capturePass->renderPass, capturePass->descriptorSetLayout, ETechnique::CAPTURE_SCENE);
+            sibenikModel->UpdateModel(gltfModels[sibenikIdx]);
+
+            // 复用现有材质设置逻辑（它基于 gltfModelNames[gltfmodelIndex]），
+            // 所以这里临时切换 index，应用完再切回。
+            const int32_t savedIndex = gltfmodelIndex;
+            gltfmodelIndex = sibenikIdx;
+
+            // 临时让 ApplySibenikMaterial() 作用于 sibenikModel
+            // 直接在这里对 sibenikModel 做必要的设置，避免错误地操作 unique_ptr 所有权
+            {
+                const float savedMetallic = sibenikMetallic;
+                const float savedRoughness = sibenikRoughness;
+                const bool savedUseTex = useSibenikTexture;
+                const float savedScale = sibenikScale;
+                const glm::vec3 savedPos = sibenikPosition;
+
+                // 手动复用 ApplySibenikMaterial 的关键行为
+                sibenikModel->SetMetallic(savedMetallic);
+                sibenikModel->SetRoughness(savedRoughness);
+
+                auto model = sibenikModel->getModel();
+                if (savedUseTex && !sibenikTextures.empty() && model && !model->materials.empty()) {
+                    sibenikBaseColor = sibenikTextures[sibenikTextureIndex];
+                    sibenikModel->SetUseTexture(true);
+                    sibenikModel->SetBaseColorTexture(sibenikBaseColor.get());
+                } else {
+                    sibenikModel->SetUseTexture(false);
+                    sibenikModel->SetAlbedo(glm::vec4(0.7f, 0.7f, 0.7f, 1.0f));
+                }
+
+                glm::mat4 transformMatrix = glm::translate(glm::mat4(1.0f), savedPos) *
+                                            glm::scale(glm::mat4(1.0f), glm::vec3(savedScale));
+                sibenikModel->SetTransform(transformMatrix);
+                sibenikModel->UpdateMaterial();
+            }
+
+            gltfmodelIndex = savedIndex;
+
+            // 启动时默认只显示 sibenik
+            showSibenik = true;
+            showSceneModel = false;
+        }
+
+        // --- 其他 glTF 模型：用于演示 IBL 受环境影响的效果 ---
+        // 默认选一个非 sibenik 的模型
+        int32_t defaultSceneIdx = -1;
+        for (int32_t i = 0; i < static_cast<int32_t>(gltfModelNames.size()); ++i) {
+            if (gltfModelNames[i] != "sibenik") {
+                defaultSceneIdx = i;
+                break;
+            }
+        }
+
+        if (defaultSceneIdx >= 0) {
+            gltfmodelIndex = defaultSceneIdx;
+            gltfModel = std::make_unique<GltfModel>(vulkanDevice, this, queue);
+            gltfModel->PreparePSO(renderPass, mainPass->descriptorSetLayout, ETechnique::MAIN);
+            gltfModel->PreparePSO(capturePass->renderPass, capturePass->descriptorSetLayout, ETechnique::CAPTURE_SCENE);
+            gltfModel->UpdateModel(gltfModels[gltfmodelIndex]);
         }
     }
 }
@@ -395,7 +470,7 @@ void VulkanExample::UpdateSkyBox()
     shGenPass->Draw(cmdBuf); // 执行球谐计算。
     genIBL->Draw(cmdBuf); // 执行 IBL 渲染。
     vulkanDevice->flushCommandBuffer(cmdBuf, queue); // 提交并刷新命令缓冲区。
-    
+
     // 更新mainPass的描述符绑定，确保使用最新的立方体贴图
     mainPass->UpdateBindings();
 }
@@ -440,55 +515,55 @@ void VulkanExample::LoadSibenikTextures()
 {
     // 为Sibenik教堂模型加载多种不同类型的纹理
     std::cout << "[VulkanExample] Loading Sibenik textures..." << std::endl;
-    
+
     // 定义纹理列表（多种材质类型）
     struct TextureInfo {
         std::string path;
         std::string name;
     };
-    
+
     std::vector<TextureInfo> textureList = {
         // 石材类
         {"textures/stonefloor01_color_rgba.ktx", "Stone Floor 01"},
         {"textures/stonefloor02_color_rgba.ktx", "Stone Floor 02"},
         {"textures/stonefloor03_color_height_rgba.ktx", "Stone Floor 03"},
-        
+
         // 岩石类
         {"textures/rocks_color_rgba.ktx", "Rocks"},
-        
+
         // 金属类
         {"textures/metalplate01_rgba.ktx", "Metal Plate"},
         {"models/cerberus/albedo.ktx", "Cerberus Metal"},
-        
+
         // 木质/箱子类
         {"textures/crate01_color_height_rgba.ktx", "Wood Crate 01"},
         {"textures/crate02_color_height_rgba.ktx", "Wood Crate 02"},
-        
+
         // 地面类
         {"textures/ground_dry_rgba.ktx", "Dry Ground"},
         {"textures/gratefloor_rgba.ktx", "Grate Floor"},
-        
+
         // 特殊材质
         {"textures/colored_glass_rgba.ktx", "Colored Glass"},
         {"textures/vulkan_cloth_rgba.ktx", "Cloth"},
         {"textures/lavaplanet_rgba.ktx", "Lava"},
         {"textures/vulkan_11_rgba.ktx", "Vulkan Logo"},
-        
+
         // Sponza建筑纹理（适合教堂）
         {"models/sponza/16299174074766089871.ktx", "Sponza Wall"},
         {"models/sponza/10381718147657362067.ktx", "Sponza Brick"},
         {"models/sponza/10388182081421875623.ktx", "Sponza Arc"},
         {"models/sponza/11474523244911310074.ktx", "Sponza Ceiling"},
         {"models/sponza/11490520546946913238.ktx", "Sponza Floor"},
-        
+
         // 其他
         {"textures/skysphere_rgba.ktx", "Sky"},
         {"textures/gridlines.ktx", "Grid"}
     };
-    
+
     sibenikTextures.clear();
     sibenikTextureNames.clear();
-    
+
     for (const auto& texInfo : textureList) {
         try {
             auto texture = std::shared_ptr<vks::Texture2D>(new vks::Texture2D(), [](vks::Texture2D* tex) {
@@ -497,29 +572,29 @@ void VulkanExample::LoadSibenikTextures()
                     delete tex;
                 }
             });
-            
+
             texture->loadFromFile(
-                getAssetPath() + texInfo.path, 
-                VK_FORMAT_R8G8B8A8_UNORM, 
-                vulkanDevice, 
+                getAssetPath() + texInfo.path,
+                VK_FORMAT_R8G8B8A8_UNORM,
+                vulkanDevice,
                 queue
             );
-            
+
             sibenikTextures.push_back(texture);
             sibenikTextureNames.push_back(texInfo.name);
-            
+
             std::cout << "  - Loaded: " << texInfo.name << std::endl;
         }
         catch (const std::exception& e) {
             std::cerr << "  - Failed to load " << texInfo.name << ": " << e.what() << std::endl;
         }
     }
-    
+
     // 默认使用第一个纹理
     if (!sibenikTextures.empty()) {
         sibenikBaseColor = sibenikTextures[0];
     }
-    
+
     std::cout << "[VulkanExample] Loaded " << sibenikTextures.size() << " Sibenik textures!" << std::endl;
 }
 
@@ -528,23 +603,23 @@ void VulkanExample::ApplySibenikMaterial()
     if (!gltfModel || gltfModelNames[gltfmodelIndex] != "sibenik") {
         return;
     }
-    
+
     std::cout << "[VulkanExample] Applying Sibenik material settings..." << std::endl;
-    
+
     // 应用材质参数
     gltfModel->SetMetallic(sibenikMetallic);
     gltfModel->SetRoughness(sibenikRoughness);
-    
+
     // 获取模型材质数量
     auto model = gltfModel->getModel();
     if (!model) {
         std::cerr << "  ❌ Model is null!" << std::endl;
         return;
     }
-    
+
     size_t materialCount = model->materials.size();
     std::cout << "  - Model has " << materialCount << " materials" << std::endl;
-    
+
     // 检查Sibenik模型是否只有一个材质（根据之前的分析）
     if (materialCount == 1) {
         std::cout << "  ⚠️  Sibenik model has only 1 material!" << std::endl;
@@ -552,7 +627,7 @@ void VulkanExample::ApplySibenikMaterial()
         std::cout << "  → To use different textures for different parts," << std::endl;
         std::cout << "    the model needs to be split into multiple materials" << std::endl;
     }
-    
+
     if (useSibenikTexture && !sibenikTextures.empty() && materialCount > 0) {
         // 初始化材质-纹理映射（如果尚未初始化）
         if (sibenikMaterialTextureMap.size() != materialCount) {
@@ -563,14 +638,14 @@ void VulkanExample::ApplySibenikMaterial()
             }
             std::cout << "  - Initialized texture mapping for " << materialCount << " materials" << std::endl;
         }
-        
+
         // 当前限制：由于vkglTF::Model的draw实现，我们只能为整个模型设置一个纹理
         // 这里我们使用第一个材质的纹理设置
         sibenikBaseColor = sibenikTextures[sibenikTextureIndex];
         gltfModel->SetUseTexture(true);
         gltfModel->SetBaseColorTexture(sibenikBaseColor.get());
         std::cout << "  - Using texture: " << sibenikTextureNames[sibenikTextureIndex] << std::endl;
-        
+
         // 打印材质-纹理映射（用于信息显示）
         if (materialCount > 1) {
             for (size_t i = 0; i < materialCount && i < sibenikMaterialTextureMap.size(); i++) {
@@ -586,14 +661,14 @@ void VulkanExample::ApplySibenikMaterial()
         gltfModel->SetAlbedo(glm::vec4(0.7f, 0.7f, 0.7f, 1.0f));
         std::cout << "  - Using gray color (no texture)" << std::endl;
     }
-    
+
     // 应用缩放和平移（组合变换）
-    glm::mat4 transformMatrix = glm::translate(glm::mat4(1.0f), sibenikPosition) * 
+    glm::mat4 transformMatrix = glm::translate(glm::mat4(1.0f), sibenikPosition) *
                                 glm::scale(glm::mat4(1.0f), glm::vec3(sibenikScale));
     gltfModel->SetTransform(transformMatrix);
     std::cout << "  - Position: (" << sibenikPosition.x << ", " << sibenikPosition.y << ", " << sibenikPosition.z << ")" << std::endl;
     std::cout << "  - Scale: " << sibenikScale << std::endl;
-    
+
     gltfModel->UpdateMaterial();
     std::cout << "  - Metallic: " << sibenikMetallic << std::endl;
     std::cout << "  - Roughness: " << sibenikRoughness << std::endl;
@@ -612,7 +687,7 @@ void VulkanExample::PreparePasses()
     };
     VkDescriptorPoolCreateInfo descriptorPoolInfo = vks::initializers::descriptorPoolCreateInfo(poolSizes, 33);
     VK_CHECK_RESULT(vkCreateDescriptorPool(device, &descriptorPoolInfo, nullptr, &descriptorPool));
-    
+
     // 准备所有渲染通道。
     mainPass = std::make_unique<MainPass>(vulkanDevice); // 创建主渲染通道。
     mainPass->SetUp(renderPass); // 设置主渲染通道的渲染通道对象。
@@ -630,8 +705,10 @@ void VulkanExample::PreparePasses()
     genIBL = std::make_unique<GenIBLPass>(vulkanDevice, this, 256); // 创建 IBL 生成通道，贴图尺寸为 256。
     genIBL->SetCubeMap(cubeMaps[skyboxIndex]); // 设置初始立方体贴图。
     genIBL->SetModel(skyboxModel); // 设置天空盒模型。
-    if (gltfModel) {
-        genIBL->SetModel(gltfModel->getModel()); // 设置 glTF 模型。
+    if (sibenikModel) {
+        genIBL->SetModel(sibenikModel->getModel()); // 用 sibenik 场景作为 IBL 生成/捕获的模型源
+    } else if (gltfModel) {
+        genIBL->SetModel(gltfModel->getModel()); // 兜底：没有 sibenik 时用当前 glTF 模型
     }
     genIBL->FeedIrradianceMap(mainPass->environmemts.irradianceCube); // 设置主渲染通道的辐照度贴图描述符。
     genIBL->FeedPrefilteredMap(mainPass->environmemts.prefilteredCube); // 设置主渲染通道的预过滤贴图描述符。
@@ -645,7 +722,7 @@ void VulkanExample::PreparePasses()
         vulkanDevice->flushCommandBuffer(cmdBuf, queue); // 提交并刷新命令缓冲区。
     }
     mainPass->UpdateBindings(); // 更新主渲染通道的描述符绑定。
-    
+
     // 将SH和IBL资源传递给capturePass，确保捕获时使用正确的光照
     capturePass->FeedSH(mainPass->environmemts.shCoeffs);
     capturePass->FeedBRDF(mainPass->environmemts.brdfView);
@@ -678,6 +755,14 @@ void VulkanExample::PrepareProbes()
         cubemapInterpolation->ClearProbes();
     }
 
+    // 捕获源：默认用 sibenik 场景作为“环境来源”
+    GltfModel* captureSourceModel = nullptr;
+    if (sibenikModel) {
+        captureSourceModel = sibenikModel.get();
+    } else if (gltfModel) {
+        captureSourceModel = gltfModel.get();
+    }
+
     // 自动布置光照探针：在 probeGridConfig 定义的包围盒内使用指定的维度放置探针。
     // 如果 probeGridConfig 没有被设置（dimensions 为 0），则创建一个中心探针。
     glm::vec3 minB = probeGridConfig.minBounds;
@@ -693,7 +778,7 @@ void VulkanExample::PrepareProbes()
         p->SetPosition(center);
         p->setSkybox(skybox.get());
         p->setPreviewModel(previewModel.get());
-        if (gltfModel) p->SetGltfModel(gltfModel.get());
+        if (captureSourceModel) p->SetGltfModel(captureSourceModel);
         lightProbes.push_back(std::move(p));
         return;
     }
@@ -714,7 +799,9 @@ void VulkanExample::PrepareProbes()
                 p->SetPosition(pos);
                 p->setSkybox(skybox.get());
                 p->setPreviewModel(previewModel.get());
-                p->SetGltfModel(gltfModel.get());
+                if (captureSourceModel) {
+                    p->SetGltfModel(captureSourceModel);
+                }
                 lightProbes.push_back(std::move(p));
             }
         }
@@ -755,33 +842,33 @@ void VulkanExample::CaptureAllProbes()
     }
     // 等待所有操作完成
     vkDeviceWaitIdle(vulkanDevice->logicalDevice);
-    
+
     // 保存多探针捕获结果用于对比（使用最后一个探针或插值结果）
     // 此处直接用最后一个可能有bug
     // (TO FIX)
     if (!lightProbes.empty()) {
         multiProbeCubemap = lightProbes.back()->GetCubemap();
-        
+
         // 为最后一个探针生成SH和IBL，并启用球谐和反射
         auto lastCapturedCubemap = lightProbes.back()->GetCubemap();
         if (lastCapturedCubemap) {
             // --- 生成 SH ---
             shGenPass->SetCubeMap(lastCapturedCubemap);
             shGenPass->Generate(queue);
-            
+
             VkDescriptorBufferInfo shBufferInfo;
             shGenPass->FeedSH(shBufferInfo);
             mainPass->environmemts.shCoeffs = shBufferInfo;
-            
+
             // --- 生成 IBL ---
             genIBL->SetCubeMap(lastCapturedCubemap);
             genIBL->Generate(queue);
             genIBL->FeedIrradianceMap(mainPass->environmemts.irradianceCube);
             genIBL->FeedPrefilteredMap(mainPass->environmemts.prefilteredCube);
-            
+
             // 更新主通道绑定
             mainPass->UpdateBindings();
-            
+
             // 启用球谐和反射
             if (previewModel) {
                 previewModel->SetUseSHAndReflection(true, true);
@@ -789,11 +876,11 @@ void VulkanExample::CaptureAllProbes()
             if (gltfModel) {
                 gltfModel->SetUseSHAndReflection(true, true);
             }
-            
+
             std::cout << "[VulkanExample::CaptureAllProbes] Generated SH/IBL for the last probe and enabled SH/reflection on models" << std::endl;
         }
     }
-    
+
     // 更新天空盒为最后一个捕获的探针
     if (!cubeMaps.empty()) {
         skyboxIndex = static_cast<int>(cubeMaps.size() - 1);
@@ -820,27 +907,27 @@ void VulkanExample::prepareData()
 
     // 根据光照开关设置光源（w分量为强度，0表示关闭）
     mainPassData.light[0] = glm::vec4(
-        radius * std::cos(angle + 0.0f), 
-        height, 
-        radius * std::sin(angle + 0.0f), 
+        radius * std::cos(angle + 0.0f),
+        height,
+        radius * std::sin(angle + 0.0f),
         lightSwitches[0] ? lightIntensity[0] : 0.0f
     );
     mainPassData.light[1] = glm::vec4(
-        radius * std::cos(angle + glm::half_pi<float>()), 
-        height * 0.6f, 
-        radius * std::sin(angle + glm::half_pi<float>()), 
+        radius * std::cos(angle + glm::half_pi<float>()),
+        height * 0.6f,
+        radius * std::sin(angle + glm::half_pi<float>()),
         lightSwitches[1] ? lightIntensity[1] : 0.0f
     );
     mainPassData.light[2] = glm::vec4(
-        radius * std::cos(angle + glm::pi<float>()), 
-        height, 
-        radius * std::sin(angle + glm::pi<float>()), 
+        radius * std::cos(angle + glm::pi<float>()),
+        height,
+        radius * std::sin(angle + glm::pi<float>()),
         lightSwitches[2] ? lightIntensity[2] : 0.0f
     );
     mainPassData.light[3] = glm::vec4(
-        radius * std::cos(angle + glm::three_over_two_pi<float>()), 
-        height * 0.6f, 
-        radius * std::sin(angle + glm::three_over_two_pi<float>()), 
+        radius * std::cos(angle + glm::three_over_two_pi<float>()),
+        height * 0.6f,
+        radius * std::sin(angle + glm::three_over_two_pi<float>()),
         lightSwitches[3] ? lightIntensity[3] : 0.0f
     );
 
@@ -867,7 +954,8 @@ void VulkanExample::drawFrame(VkCommandBuffer cmd)
         // 匿名函数：记录绘制命令。
         skybox->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); // 绘制天空盒。
         previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); // 绘制预览模型。
-        if (gltfModel) { gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); } // 绘制glTF模型
+        if (showSibenik && sibenikModel) { sibenikModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
+        if (showSceneModel && gltfModel) { gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); } // 绘制glTF模型
 
         // 渲染探针为球体
         // TO FIX(探针可视化有问题)
@@ -886,7 +974,7 @@ void VulkanExample::drawSplitView(VkCommandBuffer cmd)
 {
     // 保存原始设置
     auto savedCubemap = cubeMaps[skyboxIndex];
-    
+
     // 计算每个视口的宽度（三分屏：原始 | 单探针 | 多探针）
     // TOFIX(分屏尺寸不对)
     uint32_t viewportWidth = width / 3;
@@ -901,21 +989,21 @@ void VulkanExample::drawSplitView(VkCommandBuffer cmd)
             viewport.height = static_cast<float>(height);
             viewport.minDepth = 0.0f;
             viewport.maxDepth = 1.0f;
-            
+
             VkRect2D scissor{};
             scissor.offset = {0, 0};
             scissor.extent = {viewportWidth, height};
-            
+
             vkCmdSetViewport(cmd, 0, 1, &viewport);
             vkCmdSetScissor(cmd, 0, 1, &scissor);
-            
+
             // 临时切换到原始cubemap
             skybox->UpdateCubemap(originalCubemap);
             skybox->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
             previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
             if (gltfModel) { gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
         }
-        
+
         // === 中间：单探针捕获 ===
         if (singleProbeCubemap) {
             VkViewport viewport{};
@@ -925,21 +1013,21 @@ void VulkanExample::drawSplitView(VkCommandBuffer cmd)
             viewport.height = static_cast<float>(height);
             viewport.minDepth = 0.0f;
             viewport.maxDepth = 1.0f;
-            
+
             VkRect2D scissor{};
             scissor.offset = {static_cast<int32_t>(viewportWidth), 0};
             scissor.extent = {viewportWidth, height};
-            
+
             vkCmdSetViewport(cmd, 0, 1, &viewport);
             vkCmdSetScissor(cmd, 0, 1, &scissor);
-            
+
             // 临时切换到单探针cubemap
             skybox->UpdateCubemap(singleProbeCubemap);
             skybox->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
             previewModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
             if (gltfModel) { gltfModel->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN); }
         }
-        
+
         // === 右侧：多探针捕获/插值 ===
         if (multiProbeCubemap) {
             VkViewport viewport{};
@@ -949,14 +1037,14 @@ void VulkanExample::drawSplitView(VkCommandBuffer cmd)
             viewport.height = static_cast<float>(height);
             viewport.minDepth = 0.0f;
             viewport.maxDepth = 1.0f;
-            
+
             VkRect2D scissor{};
             scissor.offset = {static_cast<int32_t>(viewportWidth * 2), 0};
             scissor.extent = {viewportWidth, height};
-            
+
             vkCmdSetViewport(cmd, 0, 1, &viewport);
             vkCmdSetScissor(cmd, 0, 1, &scissor);
-            
+
             // 临时切换到多探针cubemap
             skybox->UpdateCubemap(multiProbeCubemap);
             skybox->Draw(cmd, mainPass->descriptorSet, ETechnique::MAIN);
@@ -1005,7 +1093,12 @@ void VulkanExample::CaptureCubemap(const glm::vec3& position)
         );
     }
 
-    probe->SetGltfModel(gltfModel.get());
+    // 捕获源：优先用 sibenik 场景作为环境来源
+    if (sibenikModel) {
+        probe->SetGltfModel(sibenikModel.get());
+    } else if (gltfModel) {
+        probe->SetGltfModel(gltfModel.get());
+    }
     probe->CaptureCubeMap(queue);
     // 新增：保存六个方向图片，文件名前缀为 "Captured_"+编号
     std::string basePath = "Captured_" + std::to_string(cubeMaps.size()) + "_";
@@ -1041,23 +1134,41 @@ void VulkanExample::CaptureCubemap(const glm::vec3& position)
     if (gltfModel) {
         gltfModel->SetUseSHAndReflection(true, true);  // 启用 glTF 模型的 SH 和反射
     }
+    if (sibenikModel) {
+        sibenikModel->SetUseSHAndReflection(true, true);
+    }
 
     lightProbes.push_back(std::move(probe));
-    
+
     // 保存单探针捕获结果用于对比
     singleProbeCubemap = capturedCubemap;
-    
+
     // 保存第一个cubemap作为original如果还未设置
     if (!originalCubemap && !cubeMaps.empty()) {
         originalCubemap = cubeMaps[0];
     }
 }
 
+void VulkanExample::EnsureSibenikEnvironment()
+{
+    if (sibenikEnvReady) {
+        return;
+    }
+    if (!sibenikModel || !skybox || !shGenPass || !genIBL || !mainPass) {
+        return;
+    }
+
+    // 通过 CaptureCubemap() 走完整的：捕获 -> 生成 SH/IBL -> 更新 mainPass 绑定
+    // CaptureCubemap 内部已优先使用 sibenikModel 作为捕获源
+    CaptureCubemap(camera.position);
+    sibenikEnvReady = true;
+}
+
 // 对比渲染模式切换
 void VulkanExample::SetCompareMode(RenderCompareMode mode)
 {
     compareMode = mode;
-    
+
     // 根据模式切换环境贴图
     switch (mode) {
         case RenderCompareMode::ORIGINAL_ONLY:
@@ -1070,7 +1181,7 @@ void VulkanExample::SetCompareMode(RenderCompareMode mode)
                 genIBL->SetCubeMap(originalCubemap);
             }
             break;
-            
+
         case RenderCompareMode::SINGLE_PROBE:
             if (singleProbeCubemap) {
                 skybox->UpdateCubemap(singleProbeCubemap);
@@ -1078,7 +1189,7 @@ void VulkanExample::SetCompareMode(RenderCompareMode mode)
                 genIBL->SetCubeMap(singleProbeCubemap);
             }
             break;
-            
+
         case RenderCompareMode::MULTI_PROBE:
             if (multiProbeCubemap) {
                 skybox->UpdateCubemap(multiProbeCubemap);
@@ -1086,14 +1197,14 @@ void VulkanExample::SetCompareMode(RenderCompareMode mode)
                 genIBL->SetCubeMap(multiProbeCubemap);
             }
             break;
-            
+
         case RenderCompareMode::NORMAL:
         case RenderCompareMode::SPLIT_VIEW:
         default:
             // 保持当前
             break;
     }
-    
+
     // 重新生成SH和IBL
     if (mode != RenderCompareMode::NORMAL && mode != RenderCompareMode::SPLIT_VIEW) {
         VkCommandBuffer cmdBuf = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
@@ -1102,7 +1213,7 @@ void VulkanExample::SetCompareMode(RenderCompareMode mode)
         vulkanDevice->flushCommandBuffer(cmdBuf, queue);
         mainPass->UpdateBindings();
     }
-    
+
     std::cout << "[VulkanExample] Compare mode set to: " << static_cast<int>(mode) << std::endl;
 }
 
@@ -1127,17 +1238,62 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
         previewModel->UpdateModel(previewModels[modelIndex]);
     }
 
-    // GLTF 模型切换
+    // GLTF 模型切换（排除 sibenik，sibenik 作为独立环境场景模型）
     if (!gltfModelNames.empty() && gltfModel) {
-        if (overlay->comboBox("GLTF Model", &gltfmodelIndex, gltfModelNames)) {
-            gltfModel->UpdateModel(gltfModels[gltfmodelIndex]);
-            std::cout << "[VulkanExample] Switched to GLTF model: " << gltfModelNames[gltfmodelIndex] << std::endl;
-            
-            // 如果是sibenik模型，应用自定义材质
-            if (gltfModelNames[gltfmodelIndex] == "sibenik") {
-                ApplySibenikMaterial();
+        // 构建一个不包含 sibenik 的可选列表
+        static std::vector<std::string> sceneModelNames;
+        static std::vector<int32_t> sceneModelIndices;
+        if (sceneModelNames.empty()) {
+            sceneModelNames.clear();
+            sceneModelIndices.clear();
+            for (int32_t i = 0; i < static_cast<int32_t>(gltfModelNames.size()); ++i) {
+                if (gltfModelNames[i] != "sibenik") {
+                    sceneModelNames.push_back(gltfModelNames[i]);
+                    sceneModelIndices.push_back(i);
+                }
             }
         }
+
+        // 当前 scene 下拉框索引
+        static int32_t sceneComboIndex = 0;
+        // 尝试让 comboIndex 与当前 gltfmodelIndex 对齐
+        bool needUpdateCombo = false;
+        for (int32_t i = 0; i < static_cast<int32_t>(sceneModelIndices.size()); ++i) {
+            if (sceneModelIndices[i] == gltfmodelIndex) {
+                if (sceneComboIndex != i) {
+                    sceneComboIndex = i;
+                    needUpdateCombo = true;
+                }
+                break;
+            }
+        }
+
+        // 确保 gltfModel 已初始化
+        if (!gltfModel && !gltfModels.empty()) {
+            gltfModel = std::make_unique<GltfModel>(vulkanDevice, this, queue);
+            gltfModel->PreparePSO(renderPass, mainPass->descriptorSetLayout, ETechnique::MAIN);
+            gltfModel->PreparePSO(capturePass->renderPass, capturePass->descriptorSetLayout, ETechnique::CAPTURE_SCENE);
+            gltfModel->UpdateModel(gltfModels[gltfmodelIndex]);
+            gltfModel->SetUseSHAndReflection(true, true);
+            std::cout << "[VulkanExample] Initialized GLTF model: " << gltfModelNames[gltfmodelIndex] << std::endl;
+        }
+
+        if (overlay->comboBox("GLTF Model", &sceneComboIndex, sceneModelNames) || needUpdateCombo) {
+            if (sceneComboIndex >= 0 && sceneComboIndex < static_cast<int32_t>(sceneModelIndices.size())) {
+                int32_t newIndex = sceneModelIndices[sceneComboIndex];
+                if (newIndex != gltfmodelIndex) {
+                    gltfmodelIndex = newIndex;
+                    if (gltfModel) {
+                        gltfModel->UpdateModel(gltfModels[gltfmodelIndex]);
+                        std::cout << "[VulkanExample] Switched to GLTF model: " << gltfModelNames[gltfmodelIndex] << std::endl;
+                    }
+                }
+            }
+        }
+
+        // 显示开关：默认 sibenik 独立显示，其他模型可单独打开
+        overlay->checkBox("Show Sibenik", &showSibenik);
+        overlay->checkBox("Show GLTF Model", &showSceneModel);
     }
 
     // Sibenik 模型材质控制
@@ -1147,23 +1303,23 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
                 overlay->text("Model has no embedded textures");
                 overlay->text("Size: ~40x30x17 units");
                 overlay->text("Vertices: 225,849");
-                
+
                 // 使用纹理开关
                 if (overlay->checkBox("Use Texture", &useSibenikTexture)) {
                     std::cout << "[VulkanExample] Use texture: " << (useSibenikTexture ? "YES" : "NO") << std::endl;
                     ApplySibenikMaterial();
                 }
-                
+
                 // 获取模型材质数量
                 int materialCount = 0;
                 if (gltfModel && gltfModel->getModel()) {
                     materialCount = static_cast<int>(gltfModel->getModel()->materials.size());
                 }
-                
+
                 // 为每个材质选择纹理
                 if (useSibenikTexture && !sibenikTextureNames.empty() && materialCount > 0) {
                     overlay->text("Material Texture Assignment:");
-                    
+
                     // 确保材质纹理映射数组大小匹配
                     if (sibenikMaterialTextureMap.size() != materialCount) {
                         sibenikMaterialTextureMap.resize(materialCount);
@@ -1171,37 +1327,37 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
                             sibenikMaterialTextureMap[i] = i % sibenikTextures.size();
                         }
                     }
-                    
+
                     // 为每个材质显示纹理选择下拉框（最多显示8个以避免UI过长）
                     int displayCount = std::min(materialCount, 8);
                     for (int i = 0; i < displayCount; i++) {
                         std::string label = std::string("Mat ") + std::to_string(i);
                         if (overlay->comboBox(label.c_str(), &sibenikMaterialTextureMap[i], sibenikTextureNames)) {
-                            std::cout << "[VulkanExample] Material " << i 
+                            std::cout << "[VulkanExample] Material " << i
                                       << " -> " << sibenikTextureNames[sibenikMaterialTextureMap[i]] << std::endl;
                             ApplySibenikMaterial();
                         }
                     }
-                    
+
                     if (materialCount > 8) {
                         char buffer[128];
                         sprintf(buffer, "... and %d more materials", materialCount - 8);
                         overlay->text(buffer);
                     }
                 }
-                
+
                 // 金属度调整
                 if (overlay->sliderFloat("Metallic", &sibenikMetallic, 0.0f, 1.0f)) {
                     std::cout << "[VulkanExample] Sibenik metallic: " << sibenikMetallic << std::endl;
                     ApplySibenikMaterial();
                 }
-                
+
                 // 粗糙度调整
                 if (overlay->sliderFloat("Roughness", &sibenikRoughness, 0.0f, 1.0f)) {
                     std::cout << "[VulkanExample] Sibenik roughness: " << sibenikRoughness << std::endl;
                     ApplySibenikMaterial();
                 }
-                
+
                 // 模型缩放调整
                 if (overlay->sliderFloat("Scale", &sibenikScale, 0.1f, 2.0f)) {
                     std::cout << "[VulkanExample] Sibenik scale: " << sibenikScale << std::endl;
@@ -1313,9 +1469,9 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
             }
             globalDirty = true;
         }
-        
+
         overlay->text("Individual Lights:");
-        
+
         // 每个光源的单独控制
         const char* lightNames[] = { "Light 1 (Red)", "Light 2 (Green)", "Light 3 (Blue)", "Light 4 (Yellow)" };
         for (int i = 0; i < 4; i++) {
@@ -1323,9 +1479,9 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay)
                 globalDirty = true;
             }
         }
-        
+
         overlay->text("Light Intensity:");
-        
+
         // 每个光源的强度滑块
         for (int i = 0; i < 4; i++) {
             std::string sliderLabel = std::string("Int ") + std::to_string(i + 1);
